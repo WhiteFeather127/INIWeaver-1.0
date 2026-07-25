@@ -31,6 +31,7 @@ bool ImGui_TextDisabled_Helper(const char* Text);
 bool SmallButton_Disabled_Helper(bool cond, const char* Text);
 bool InputTextStdString(const char* label, std::string& str,
     ImGuiInputTextFlags flags);
+bool Acceptor_CheckSecType(StrPoolID SourceReg, StrPoolID SecType);
 
 int HintStayTimeMillis = 3000;
 
@@ -283,9 +284,12 @@ void IBR_IniLine::RenderUI(
     ImVec2 slix;
 
     if(!nlad)LinkNodeContext::AcceptEdge.push_back(ImGui::GetCursorPos());
-
     ImGui::PushID(Back.GetComponentID());
+
+    bool InWrongSection = !Acceptor_CheckSecType(LinkNodeContext::CurSub->Root->Register, Back.Default->SecType);
+    if (InWrongSection)ImGui::PushStyleColor(ImGuiCol_Text, IBR_Color::ErrorTextColor.Value);
     ImGui::TextEx(Line);
+    if (InWrongSection)ImGui::PopStyleColor();
 
     if (slid && !nlad && multiple)
     {
@@ -704,7 +708,7 @@ namespace IBR_EditFrame
 
                 if (NewLineValue.empty())
                 {
-                    auto pLine = IBF_Inst_DefaultTypeList.List.KeyBelongToLine(NewKeyID);
+                    auto pLine = IBF_Inst_DefaultTypeList.List.KeyBelongToLine(NewKeyID, pbk->Register);
                     if (pLine)
                     {
                         auto& Input = pLine->GetInputType();
@@ -724,7 +728,7 @@ namespace IBR_EditFrame
 
         if (NewLineValue.empty() && !NewLineKey.empty())
         {
-            auto pLine = IBF_Inst_DefaultTypeList.List.KeyBelongToLine(NewLineKey);
+            auto pLine = IBF_Inst_DefaultTypeList.List.KeyBelongToLine(NewLineKey, pbk->Register);
             if (pLine)
             {
                 auto& Input = pLine->GetInputType();
@@ -736,7 +740,7 @@ namespace IBR_EditFrame
             }
         }
 
-        EditStringWithOptions(Active, NewLineKey);
+        EditStringWithOptions(pbk->Register, Active, NewLineKey);
     }
 
     void RenderUI_SwitchToText()

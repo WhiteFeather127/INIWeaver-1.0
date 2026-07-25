@@ -35,7 +35,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
     <EnableASAN>false</EnableASAN>
@@ -49,7 +49,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -198,6 +198,7 @@
     <ClInclude Include="FromEngine\types.h" />
     <ClInclude Include="IBB_CustomBool.h" />
     <ClInclude Include="IBB_FileChecker.h" />
+    <ClInclude Include="IBB_IniImport.h" />
     <ClInclude Include="IBB_Index.h" />
     <ClInclude Include="IBB_Components.h" />
     <ClInclude Include="IBB_Ini.h" />
@@ -225,6 +226,7 @@
     <ClInclude Include="IBR_ListView.h" />
     <ClInclude Include="IBR_Localization.h" />
     <ClInclude Include="IBR_Components.h" />
+    <ClInclude Include="IBR_ImportIni.h" />
     <ClInclude Include="IBR_Misc.h" />
     <ClInclude Include="IBR_TopMost.h" />
     <ClInclude Include="IBSave.h" />
@@ -254,6 +256,7 @@
     <ClCompile Include="IBB_FileChecker.cpp" />
     <ClCompile Include="IBB_Ini.cpp" />
     <ClCompile Include="IBB_Components.cpp" />
+    <ClCompile Include="IBB_IniImport.cpp" />
     <ClCompile Include="IBB_Index.cpp" />
     <ClCompile Include="IBB_IniLine.cpp" />
     <ClCompile Include="IBB_ModuleAlt.cpp" />
@@ -279,6 +282,7 @@
     <ClCompile Include="IBR_Components.cpp" />
     <ClCompile Include="IBR_Debug.cpp" />
     <ClCompile Include="IBR_FullView.cpp" />
+    <ClCompile Include="IBR_ImportIni.cpp" />
     <ClCompile Include="IBR_Panel.cpp" />
     <ClCompile Include="IBR_Project.cpp" />
     <ClCompile Include="IBR_ProjManager.cpp" />
@@ -300,6 +304,7 @@
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\.gitignore" />
     <None Include="..\Release\Global\RegisterTypes.json" />
     <None Include="..\Release\Global\RegisterTypesCompound.json" />
     <None Include="..\Release\Global\RegisterTypesSpecial.json" />
@@ -314,6 +319,13 @@
     <None Include="..\Release\Global\TypeAltSpecial.csv" />
     <None Include="..\Release\Resources\config.json" />
     <None Include="..\Release\Resources\language.ini" />
+    <None Include="..\x64\Release\Global\RegisterTypes.json" />
+    <None Include="..\x64\Release\Global\RegisterTypesSpecial.json" />
+    <None Include="..\x64\Release\Global\TypeAlt2Unit.csv" />
+    <None Include="..\x64\Release\Global\TypeAlt2Weapon.csv" />
+    <None Include="..\x64\Release\Global\TypeAlt8Compound.csv" />
+    <None Include="..\x64\Release\Global\TypeAlt9Links.csv" />
+    <None Include="..\x64\Release\Global\TypeAltGlobalSetting.csv" />
     <None Include="..\x64\Release\Resources\config.json" />
     <None Include="..\x64\Release\Resources\language.ini" />
   </ItemGroup>

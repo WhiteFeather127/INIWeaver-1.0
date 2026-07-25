@@ -752,6 +752,7 @@ JsonFile JsonObject::DetachArrayItem(int Index) { return cJSON_DetachItemFromArr
 void JsonObject::Merge(JsonObject Obj)
 {
     if (!Obj.Available())return;
+    if (Obj.Object == Object)return;
     if (!Available())
     {
         CreateCopy(Obj, true);
@@ -800,14 +801,14 @@ std::string GetStringFromFile(ExtFileClass& File)
 std::string GetStringFromFile(const char* FileName)
 {
     ExtFileClass File;
-    if (!File.Open(FileName, "r"))return "";
+    if (!File.Open(FileName, "rb"))return "";
     return GetStringFromFile(File);
 }
 
 std::string GetStringFromFile(const wchar_t* FileName)
 {
     ExtFileClass File;
-    if (!File.Open(FileName, L"r"))return "";
+    if (!File.Open(FileName, L"rb"))return "";
     return GetStringFromFile(File);
 }
 

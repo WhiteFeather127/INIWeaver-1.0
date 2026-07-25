@@ -11,6 +11,7 @@
 
 struct IniToken;
 struct ModuleClipData;
+struct IBS_RegisterList;
 
 struct IBB_RegisterList
 {
@@ -19,11 +20,15 @@ struct IBB_RegisterList
     std::string Type;
     std::string IniType;
     std::vector<IBB_Section*> List;
+    std::vector<std::string> PresetOrder;
 
     bool ChangeRoot(IBB_Project* NewRoot) { Root = NewRoot; return true; }
     IBB_RegisterList& ChangeRootAndBack(IBB_Project* NewRoot) { Root = NewRoot; return *this; }
 
     bool Merge(const IBB_RegisterList& Another);
+    void AddPresetOrder(const std::vector<std::string>& order);
+    void Load(const IBS_RegisterList&);
+    void Save(IBS_RegisterList&) const;
 
     std::string GetText(bool PrintExtraData) const;
 };
@@ -75,7 +80,7 @@ struct IBB_Project
 
 struct IBB_DefaultTypeAlt
 {
-    StrPoolID Name, LinkType, Input;
+    StrPoolID Name, LinkType, Input, SecType;
     DescPoolOffset DescLong, DescShort;
     int LinkLimit{ 1 };
     ImU32 Color{ 0xFF000000 };
@@ -88,8 +93,10 @@ struct IBB_DefaultTypeAlt
 struct IBB_DefaultTypeList
 {
 public:
-    // std::unordered_map<Name, Object>
-    std::unordered_map<StrPoolID, IBB_IniLine_Default> IniLine_Default;
+    std::unordered_map<StrPoolID, IBB_IniLine_Default*> IniLine_FirstDefault;
+    // MixedDefault : Key is not direct ID but mixed ID of RegType and KeyName
+    std::unordered_map<StrPoolID, IBB_IniLine_Default> IniLine_MixedDefault;
+    std::unordered_map<StrPoolID, std::vector<StrPoolID>> IniLine_Variants;
     std::unordered_map<std::string, IBB_SubSec_Default> SubSec_Default;//一个IniLine只能属于一个SubSec
 
     bool LoadFromAlt();
@@ -101,13 +108,17 @@ public:
     bool LoadFromJsonFile(const wchar_t* Name);
     bool LoadFromCSVFile(const wchar_t* Name);
 
-    IBB_IniLine_Default* KeyBelongToLine(const std::string& KeyName);
-    IBB_SubSec_Default* KeyBelongToSubSec(const std::string& KeyName);
-    IBB_IniLine_Default* KeyBelongToLine(StrPoolID KeyName);
-    IBB_SubSec_Default* KeyBelongToSubSec(StrPoolID KeyName);
+    IBB_IniLine_Default* KeyBelongToLine(const std::string& KeyName, StrPoolID RegType);
+    IBB_SubSec_Default* KeyBelongToSubSec(const std::string& KeyName, StrPoolID RegType);
+    IBB_IniLine_Default* KeyBelongToLine(StrPoolID KeyName, StrPoolID RegType);
+    IBB_SubSec_Default* KeyBelongToSubSec(StrPoolID KeyName, StrPoolID RegType);
+
+private :
+    IBB_IniLine_Default* KeyBelongToLine_NoNew(StrPoolID KeyName, StrPoolID RegType);
+    IBB_IniLine_Default& CreateLineDefault(StrPoolID KeyName, StrPoolID RegType);
 };
 
-
+void MergePresetOrder(std::vector<std::string>& tg, const std::vector<std::string>& order);
 
 
 

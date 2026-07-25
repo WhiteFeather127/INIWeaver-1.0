@@ -296,9 +296,15 @@ WriteFileHeader IBS_SaveProject
                 return R;
             };
         File.WriteVector(IBS_Inst_Project.LastOutputIniName, F);
-        GlobalLogB.AddLog_CurTime(false);
-/*        GlobalLogB.AddLog((std::string("DBG[SaveFile] WRITE_Data: sz=") + std::to_string(IBS_Inst_Project.Data.size())
-            + " Path=" + UnicodetoUTF8(IBS_Inst_Project.Path)).c_str()); */
+        std::function<bool(const ExtFileClass&, const IBS_RegisterList&)> G = [](const auto& E, const auto& U)->auto
+            {
+                auto R = true;
+                R &= E.WriteData(U.Type);
+                R &= E.WriteData(U.IniType);
+                R &= (bool)E.WriteVector(U.PresetOrder);
+                return R;
+            };
+        File.WriteVector(IBS_Inst_Project.RegisterLists, G);
         File.WriteVector(IBS_Inst_Project.Data);
         return true;
      }
@@ -346,6 +352,15 @@ ReadFileHeader IBS_LoadProject
                     return R;
                 };
             File.ReadVector(IBS_Inst_Project.LastOutputIniName, F);
+            std::function<bool(const ExtFileClass&, IBS_RegisterList&)> G = [](const auto& E, auto& U)->auto
+                {
+                    auto R = true;
+                    R &= E.ReadData(U.Type);
+                    R &= E.ReadData(U.IniType);
+                    R &= (bool)E.ReadVector(U.PresetOrder);
+                    return R;
+                };
+            File.ReadVector(IBS_Inst_Project.RegisterLists, G);
             File.ReadVector(IBS_Inst_Project.Data);
         }
         else if (FVersion >= 204)
@@ -414,10 +429,9 @@ void IBS_Thr_SaveLoop()
     IBS_Complete();
     while (1)
     {
-        for (const auto& msg : SStack.Release())
-        {
-            msg();
-        }
+        while(!SStack.Empty())
+            for (const auto& msg : SStack.Release())
+                msg();
         IBS_Complete();
     }
 }

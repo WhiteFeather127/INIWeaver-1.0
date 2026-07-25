@@ -13,6 +13,8 @@
 #include "IBR_HotKey.h"
 #include "IBR_ListView.h"
 #include "IBR_Components.h"
+#include "IBR_ImportIni.h"
+#include "IBB_IniImport.h"
 #include "IBB_OutputOrder.h"
 #include "IBG_UndoTree.h"
 #include "IBB_ModProject.h"
@@ -269,9 +271,13 @@ namespace IBR_ProjectManager
             Idx.GetIni(Proj);
             //MessageBoxA(NULL, Idx.GetIni(Proj)->Name.c_str(), std::to_string(Idx.Ini.Index).c_str(), MB_OK);
             std::string V;
+            auto& RegList = Proj.GetRegisterList(N, RegType.IniType);
+            auto Order = RegList.PresetOrder;
+            MergePresetOrder(Order, R);
+            
             const auto& ExportName = RegType.ExportName.empty() ? N : RegType.ExportName;
             V += '[';V += ExportName;V += "]\n";
-            for (auto& v : R)
+            for (auto& v : Order)
             {
                 V += v; V += '='; V += v; V += '\n';
             }
@@ -832,6 +838,161 @@ namespace IBR_ProjectManager
         }
     }
 
+    void _IN_SAVE_THREAD ImportIni(const std::wstring& Path)
+    {
+        // 2. 解析 INI 文件
+        ImportedIniFile File = ParseIniFile(Path);
+
+        if (File.Sections.empty())
+        {
+            IBR_HintManager::SetHint(loc("GUI_ImportIni_Empty"), HintStayTimeMillis);
+            IBR_PopupManager::ClearPopupDelayed();
+            return;
+        }
+
+        MatchSectionToRegType(File);
+
+        std::atomic_bool wait = false;
+
+        // 3. 切回渲染线程，打开预览弹窗
+        auto pFile = std::make_shared<ImportedIniFile>(std::move(File));
+        IBRF_CoreBump.SendToR({ [&wait, pFile]()
+            {
+                IBR_ImportPreview::Open(std::move(*pFile),
+                    [&wait](const IBR_ImportResult& Result)
+                    {
+                        if (!Result.Confirmed)
+                        {
+                            wait.store(true);
+                            wait.notify_all();
+                            return;
+                        }
+
+                        // 用户确认后在渲染线程直接处理后续步骤
+                        // （IBR_ImportPreview::RenderUI 在渲染循环中调用回调）
+                        auto& CFile = Result.File;
+
+                        // 4. 检测链接关系
+                        auto Links = DetectLinkRelations(CFile);
+
+                        // 5. 计算布局
+                        ImportedIniFile LayoutFile = CFile;
+                        CalculateLayout(LayoutFile, Links);
+
+                        // 6. 转换为 ModuleClipData
+                        IniImportOptions Options;
+                        Options.TargetIniName = Result.INIType;
+                        auto Modules = ImportedSectionsToModuleClipData(LayoutFile, Options);
+
+                        if (Modules.empty())
+                        {
+                            IBR_HintManager::SetHint(loc("GUI_ImportIni_NoModules"), HintStayTimeMillis);
+                            wait.store(true);
+                            wait.notify_all();
+                            return;
+                        }
+
+                        InsertRegistryPresetOrder(Result.INIType, LayoutFile, IBF_Inst_Project.Project);
+
+                        // 7. 推到下一帧
+                        auto pModules = std::make_shared<std::vector<ModuleClipData>>(std::move(Modules));
+                        IBRF_CoreBump.SendToR({ [&wait, pModules]()
+                            {
+                                auto [Success, IDs] = IBR_Inst_Project.AddModule(*pModules, true);
+                                if (Success)
+                                {
+                                    // 选中导入的所有块
+                                    IBR_WorkSpace::MassSelect(IDs);
+
+                                    // 记录 Undo（删除刚导入的模块）
+                                    IBG_Undo.SomethingShouldBeHere();
+
+                                    auto Count = IDs.size();
+                                    IBR_HintManager::SetHint(
+                                        UnicodetoUTF8(std::vformat(locw("GUI_ImportIni_Success"),
+                                            std::make_wformat_args(Count))).c_str(),
+                                        HintStayTimeMillis);
+
+                                    IBRF_CoreBump.SendToR({ [&wait]() {
+                                        IBR_Inst_Project.UpdateAll();
+                                        wait.store(true);
+                                        wait.notify_all();
+                                    } });
+                                }
+                                else
+                                {
+                                    IBR_HintManager::SetHint(loc("GUI_ImportIni_Failed"), HintStayTimeMillis);
+                                    wait.store(true);
+                                    wait.notify_all();
+                                }
+                            } });
+                    });
+            } });
+        wait.wait(false);
+    }
+    void _IN_RENDER_THREAD ImportIniAction()
+    {
+
+        if (!IsOpen())
+        {
+            IBR_HintManager::SetHint(loc("GUI_WaitOpen"), HintStayTimeMillis);
+            return;
+        }
+
+        SetWaitingPopup();
+
+        // 构建文件过滤器: "INI Files (*.ini)\0*.ini\0All Files (*.*)\0*.*\0\0"
+        std::wstring IniFilter;
+        {
+            auto T1 = locw("GUI_ImportIni_FileFilter");
+            auto T2 = locw("GUI_ImportIni_FileFilterAll");
+            auto L1 = wcslen(L"*.ini");
+            IniFilter.resize(T1.size() + T2.size() + 64);
+            wcscpy(IniFilter.data(), T1.c_str());
+            wcscpy(IniFilter.data() + T1.size() + 1, L"*.ini");
+            wcscpy(IniFilter.data() + T1.size() + L1 + 2, T2.c_str());
+            wcscpy(IniFilter.data() + T1.size() + L1 + T2.size() + 3, L"*.*");
+        }
+
+        // 静态回调处理导入（放在前面，因为 IBS_Push lambda 会用到它）
+        struct _ImportFileDlg {
+            static void _IN_SAVE_THREAD Proc(const std::optional<std::wstring>& Path)
+            {
+                if (!Path)
+                {
+                    IBR_PopupManager::ClearPopupDelayed();
+                    return; // 用户取消
+                }
+
+                IBB_ModuleAlt M;
+                M.LoadFromFile((*Path).c_str());
+                if (M.Available)
+                {
+                    IBR_Inst_Project.AddModule(M, GenerateModuleTag());
+                    IBR_HintManager::SetHint(loc("GUI_CreateModuleSuccess"), HintStayTimeMillis);
+                    IBR_PopupManager::ClearPopupDelayed();
+                }
+                else
+                {
+                    ImportIni(*Path);
+                }
+                
+            }
+        }; // end struct _ImportFileDlg
+
+        // 1. 弹出文件选择对话框
+        auto pFilter = std::make_shared<std::wstring>(std::move(IniFilter));
+        IBS_Push([pFilter]()
+        {
+            auto Ret = InsertLoad::SelectFileName(MainWindowHandle,
+                InsertLoad::SelectFileType{ CurrentDirW ,locw("GUI_ImportIni"),
+                    L"", pFilter->c_str() },
+                ::GetOpenFileNameW, false);
+            if (Ret.Success) _ImportFileDlg::Proc(Ret.RetBuf);
+            else _ImportFileDlg::Proc(std::nullopt);
+        });
+    }
+
     void _IN_RENDER_THREAD ProjOpen_CreateAction()
     {
         IBRF_CoreBump.SendToR({ []() {CreateAction(); }, &ActionAfterClose });
@@ -944,7 +1105,10 @@ namespace IBR_ProjectManager
             else if (ext == "PCX")
             {
                 auto pPcx = IBB_ModuleAltDefault::DefaultPCX();
-                if (!pPcx) {}
+                if (!pPcx)
+                    IBR_PopupManager::SetCurrentPopup(std::move(IBR_PopupManager::MessageModal(
+                        loc("Error_CreateModuleFailed"), loc("Error_NoPCXModule"),
+                        { FontHeight * 10.0f, FontHeight * 7.0f }, false, true)));
                 else if(IBR_Inst_Project.HasSection({ pPcx->GetFirstINI(), s }))
                     IBR_PopupManager::SetCurrentPopup(std::move(IBR_PopupManager::MessageModal(
                     loc("Error_CreateModuleFailed"), loc("Error_UniqueImageModule"),
@@ -961,7 +1125,7 @@ namespace IBR_ProjectManager
             {
                 Shapes.push_back({ name,0,UTF8toUnicode(argv[i]) });
             }
-            else if (ext == "WAV" || ext == "WAVE")
+            else if (ext == "WAV")
             {
                 WavFiles.push_back({ name, UTF8toUnicode(argv[i]) });
             }
@@ -976,10 +1140,7 @@ namespace IBR_ProjectManager
                 }
                 else
                 {
-                    auto N = UTF8toUnicode(::FileName(argv[i]));
-                    IBR_PopupManager::SetCurrentPopup(std::move(IBR_PopupManager::MessageModal(
-                        loc("Error_CreateModuleFailed"), UnicodetoUTF8(std::vformat(locw("Error_NotAModule"), std::make_wformat_args(N))),
-                        { FontHeight * 10.0f, FontHeight * 7.0f }, false, true)));
+                    IBS_Push([S = UTF8toUnicode(argv[i])]() { ImportIni(S); });
                 }
             }
             else
@@ -994,7 +1155,16 @@ namespace IBR_ProjectManager
         if (!WavFiles.empty())
         {
             auto pSound = IBB_ModuleAltDefault::DefaultSound();
-            if (pSound)
+            auto s = GenerateModuleTag();
+            if (!pSound)
+                IBR_PopupManager::SetCurrentPopup(std::move(IBR_PopupManager::MessageModal(
+                    loc("Error_CreateModuleFailed"), loc("Error_NoWAVModule"),
+                    { FontHeight * 10.0f, FontHeight * 7.0f }, false, true)));
+            else if (IBR_Inst_Project.HasSection({ pSound->GetFirstINI(), s }))
+            IBR_PopupManager::SetCurrentPopup(std::move(IBR_PopupManager::MessageModal(
+                loc("Error_CreateModuleFailed"), loc("Error_UniqueImageModule"),
+                { FontHeight * 10.0f, FontHeight * 7.0f }, false, true)));
+            else
             {
                 std::string soundsList;
                 for (size_t i = 0; i < WavFiles.size(); i++)

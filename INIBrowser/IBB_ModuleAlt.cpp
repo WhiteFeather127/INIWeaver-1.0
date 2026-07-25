@@ -23,6 +23,8 @@
 
 #pragma comment(lib, "crypt32.lib")
 
+bool StrCmpZHCN(const std::string& l, const std::string& r);
+
 // 将二进制数据转换为 Base64 字符串
 std::string DataToBase64(const std::vector<BYTE>& Data) {
     DWORD dwLength = 0;
@@ -180,7 +182,8 @@ void IniToken::Tokenize(std::string_view Line, bool UseDesc)
     if (UseDesc)
     {
         p = Line.find_first_of("#");
-        if (p != std::string_view::npos)
+        auto p2 = Line.find_first_of("=");
+        if (p != std::string_view::npos && (p2 == std::string_view::npos || p2 > p))
         {
             HasDesc = true;
             Desc = Line.substr(0, p);
@@ -1561,7 +1564,6 @@ bool IBB_ClipBoardData::SetStream(const std::vector<BYTE>& Vec, int ClipFormatVe
 {
     if (Vec.empty())
     {
-        ProjectRID = 0;
         Modules.clear();
         return true;
     }
@@ -1665,6 +1667,7 @@ namespace IBB_ModuleAltDefault
         std::string _TEXT_UTF8 Name;
         std::vector<std::unique_ptr<ModuleTree>> Sub;
         std::unordered_map<std::string, IBB_ModuleAlt*> Modules;
+        std::vector<std::string> ModuleOrder;
         bool ChildMenuHovered{ false };
         bool LastHovered{ false };
 
@@ -1738,8 +1741,9 @@ namespace IBB_ModuleAltDefault
                 else DrawFolderIcon(Pos, (float)FontHeight);
                 S->LastHovered = Hovered;
             }
-            for (auto& [N, M] : Modules)
+            for (auto& name : ModuleOrder)
             {
+                auto M = Modules.at(name);
                 SearchModuleAlt::RenderModuleAltSelect(M);
             }
         }
@@ -1784,6 +1788,9 @@ namespace IBB_ModuleAltDefault
                     NewModule(std::move(Mod));
                 }
             }
+            ModuleOrder = Modules | std::views::keys | std::ranges::to<std::vector>();
+            std::ranges::sort(Sub, StrCmpZHCN, [](const auto& Tree) {return Tree->Name; });
+            std::ranges::sort(ModuleOrder, StrCmpZHCN, [this](const auto& str) { return Modules[str]->DescShort; });
         }
     };
     std::unordered_map<std::string, IBB_ModuleAlt> ArtModules;
@@ -1939,8 +1946,9 @@ namespace IBB_ModuleAltDefault
                     ImGui::TreePop();
                 }
             }
-            for (auto& [name, mod] : tree.Modules)
+            for (auto& name: tree.ModuleOrder)
             {
+                auto mod = tree.Modules.at(name);
                 if (!mod) continue;
                 auto label = mod->DescShort.empty() ? name : mod->DescShort;
                 ImGui::Selectable(label.c_str());
@@ -1957,15 +1965,9 @@ namespace IBB_ModuleAltDefault
         if (!SpecialModules.Sub.empty() || !SpecialModules.Modules.empty())
         {
             auto pos = ImGui::GetCursorScreenPos();
-            DrawFolderIcon(pos, (float)FontHeight);
-            ImGui::Dummy(ImVec2((float)FontHeight, (float)FontHeight));
-            ImGui::SameLine();
-            if (ImGui::TreeNodeEx(locc("GUI_SystemModules"), ImGuiTreeNodeFlags_OpenOnArrow))
-            {
-                Render(SpecialModules);
-                ImGui::TreePop();
-            }
+            Render(SpecialModules);
         }
+
         // 用户模块（AllModules）
         Render(AllModules);
     }

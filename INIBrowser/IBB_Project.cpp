@@ -18,10 +18,24 @@ namespace IBB_DefaultRegType
     extern std::unordered_map<StrPoolID, IBB_SubSec_Default::_Type> InSubSecKeys;
 }
 
+StrPoolID MixKeyAndReg(StrPoolID Key, StrPoolID Reg);
+
+IBB_IniLine_Default& IBB_DefaultTypeList::CreateLineDefault(StrPoolID KeyName, StrPoolID RegType)
+{
+    auto DefaultID = EmptyPoolStr;
+    if (RegType == AnyTypeID() || RegType == MyTypeID() || RegType == EmptyPoolStr)
+        RegType = DefaultID;
+    auto MixID = MixKeyAndReg(KeyName, RegType);
+    auto& Def = IniLine_MixedDefault[MixID];
+    IniLine_Variants[KeyName].push_back(MixID);
+    if (!IniLine_FirstDefault.contains(KeyName) || RegType == DefaultID)
+        IniLine_FirstDefault[KeyName] = &Def;
+    return Def;
+}
 
 void IBB_DefaultTypeList::EnsureType(const IBB_DefaultTypeAlt& D)
 {
-    auto& L = IniLine_Default[D.Name];
+    auto& L = CreateLineDefault(D.Name, D.SecType);
     L.Name = D.Name;
     L.DescShort = D.DescShort;
     L.DescLong = D.DescLong;
@@ -31,7 +45,9 @@ void IBB_DefaultTypeList::EnsureType(const IBB_DefaultTypeAlt& D)
     L.InputName = D.Input;
     L.LinkNode.LinkType = D.LinkType;
     L.LinkNode.LinkLimit = D.LinkLimit;
+    L.SecType = D.SecType;
     IBB_DefaultRegType::EnsureRegType(PoolStr(D.LinkType));
+    IBB_DefaultRegType::EnsureRegType(PoolStr(D.SecType));
 }
 
 bool IBB_DefaultTypeList::LoadFromAlt()
@@ -50,13 +66,17 @@ bool IBB_DefaultTypeList::LoadFromAlt()
     ImportSubSec.Type = IBB_SubSec_Default::Import;
 
     //默认都在DefaultSubSec里，然后再分出去
-    for (auto& [k, v] : IniLine_Default)v.InSubSec = &DefaultSubSec;
+    for (auto& [k, v] : IniLine_MixedDefault)v.InSubSec = &DefaultSubSec;
 
     for (auto& [k, v] : IBB_DefaultRegType::InSubSecKeys)
     {
-        if (v == IBB_SubSec_Default::Inherit)IniLine_Default[k].InSubSec = &InheritSubSec;
-        else if (v == IBB_SubSec_Default::Import)IniLine_Default[k].InSubSec = &ImportSubSec;
-        else IniLine_Default[k].InSubSec = &DefaultSubSec;
+        IBB_SubSec_Default* pDef;
+        if (v == IBB_SubSec_Default::Inherit)pDef = &InheritSubSec;
+        else if (v == IBB_SubSec_Default::Import)pDef = &ImportSubSec;
+        else pDef = &DefaultSubSec;
+
+        for (auto& MixID : IniLine_Variants[k])
+            IniLine_MixedDefault[MixID].InSubSec = pDef;
     }
 
     return true;
@@ -110,8 +130,9 @@ bool IBB_DefaultTypeAlt::Load(JsonObject FromJson)
     LinkType = NewPoolStr(FromJson.ItemStringOr("LinkType"));
     LinkLimit = FromJson.ItemIntOr("LinkLimit", 1);
     Color = StrToCol(FromJson.ItemStringOr("LineColor", "00000000").c_str());
-    auto InStr = FromJson.ItemStringOr("InputType", "");
+    auto InStr = FromJson.ItemStringOr("InputType");
     Input = InStr.empty() ? SelectDefaultInput(LinkType) : NewPoolStr(InStr);
+    SecType = NewPoolStr(FromJson.ItemStringOr("SecType"));
     return true;
 }
 
@@ -126,6 +147,7 @@ bool IBB_DefaultTypeAlt::Load(const std::vector<std::string>& FromCSV)
     DescLong = NewPoolDesc(IBR_L10n::ProcessEscape(FromCSV[4]));
     Color = StrToCol((FromCSV.size() > 5 && !FromCSV[5].empty()) ? FromCSV[5].c_str() : "00000000");
     Input = (FromCSV.size() > 6 && !FromCSV[6].empty()) ? NewPoolStr(FromCSV[6]) : SelectDefaultInput(LinkType);
+    SecType = (FromCSV.size() > 7 && !FromCSV[7].empty()) ? NewPoolStr(FromCSV[7]) : EmptyPoolStr;
     return true;
 }
 

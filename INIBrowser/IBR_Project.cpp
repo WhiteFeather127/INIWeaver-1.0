@@ -683,6 +683,8 @@ void IBR_Project::Load(const IBS_Project& Proj)
         // GlobalLogB.AddLog("DBG[Load] SetStream FAILED");
     }
     IBF_Inst_Project.Project.ChangeAfterSave = false;
+    for (auto& List : Proj.RegisterLists)
+        IBF_Inst_Project.Project.GetRegisterList(List.Type, List.IniType).Load(List);
     //MAGIC
     //DONT ASK ME WHY THERE IS SO MANY LAYERS OF SendToR
     //Actually 5 main loops are needed to fully initialize
@@ -975,11 +977,13 @@ void IBR_Project::Save(IBS_Project& Proj)
     if (!oldMeta.empty())
     {
         IBB_ModProject::WriteMetaTail(Proj.Data, oldMeta);
-        // GlobalLogB.AddLog((std::string("DBG[Save] MetaTail: keys=") + std::to_string(oldMeta.size())).c_str());
     }
 
-/*    GlobalLogB.AddLog((std::string("DBG[Save] FINAL: Proj_DataSz=") + std::to_string(Proj.Data.size())
-        + " ClipModules=" + std::to_string(ClipData.Modules.size())).c_str()); */
+    for (auto& List : IBF_Inst_Project.Project.RegisterLists)
+    {
+        Proj.RegisterLists.emplace_back();
+        List.Save(Proj.RegisterLists.back());
+    }
 }
 
 void IBR_Project::Clear()

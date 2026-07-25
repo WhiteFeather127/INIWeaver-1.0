@@ -78,6 +78,7 @@ namespace IBR_ProjectManager
     void OutputOnSaveAction();
     void CompileModAction();
     void ShowBuildLog(const std::string& log);
+    void ImportIniAction();
     void OnDropFile(GLFWwindow* window, int argc, const char** argv);
     void ProjActionByKey();
 };
