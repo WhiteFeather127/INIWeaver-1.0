@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "FromEngine/Include.h"
 #include "Global.h"
+#include "FromEngine/ImGuiDeps.h"
 
 namespace IBR_HotKey
 {

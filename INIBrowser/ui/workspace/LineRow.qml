@@ -1,0 +1,427 @@
+// LineRow.qml
+// 单行 delegate，对应 ImGui RenderUI_Line + RenderUI_Node
+// 左侧：OnShow 描述文本（ShowRegName ? key : OnShow/DescShort）
+// 右侧：LinkNode 圆点（RadioButton，条件显示）
+// Import SubSec：LinkNode 居中（ImportCenter）
+// 双击切换 IICStatus（Input 显示文本框 / Link 显示 LinkNode）
+import QtQuick
+import QtQuick.Controls
+
+Item {
+    id: root
+
+    // ===== 输入属性 =====
+    property var sectionData: ({})
+    property var lineModel: null
+    property int rowIndex: -1
+    property int fontBody: 11
+    property int fontSmall: 10
+
+    // model roles 绑定（由 SectionNode delegate 显式传入）
+    property string onShowText: ""
+    property string descLong: ""
+    property bool hasLinkNode: false
+    property color linkCol: "#cccccc"
+    property int linkLimit: 0
+    property bool isEmpty: true
+    property bool isInherit: false
+    property bool isImport: false
+    property string linkType: ""
+    property var sessionId: 0
+    property var links: []
+    property string exportValue: ""
+    property int lineIdx: 0
+    property int lineMult: 0
+    property int compIdx: 0
+    property string keyName: ""
+
+    // D14：IICStatus 持久化（绑定 model role，对应 ImGui Status_Workspace/ComponentStatus）
+    // false=Link 态（显示 RadioButton），true=Input 态（显示文本框）
+    // 由 SectionLineModel::rebuildEntries 从业务层 Data 读取，toggleInputMode 写回
+    property bool isInputMode: false
+
+    // 行级增行按钮 + 右键菜单临时态（对应 ImGui WorkSpaceLine 多个会话级标志）
+    // isMultiple：InputType.Multiple（"+" 增行按钮显示条件）
+    // specialAccept：SpecialAccept 临时态（行右键菜单切换，不持久化）
+    // inputOnShow：InputOnShow 编辑态（行右键菜单 EditDesc 切换，显示 OnShow 描述编辑框）
+    property bool isMultiple: false
+    property bool specialAccept: false
+    property bool inputOnShow: false
+
+    // 拖拽状态（由 SectionNode 传入）
+    // 拖拽中实时回写 LastCenter（减去 dragOffset），松手时回写新位置
+    property bool isDragging: false
+
+    // 行高随字体等比缩放（fontBody 已按 ratio 缩放）
+    height: root.fontBody * 2
+
+    // 布局完成后回写（解决 Component.onCompleted 时布局未完成导致 LastCenter=0）
+    onWidthChanged: updateLinkNodeCenter()
+    // 松手时 isDragging 变 false，立即回写新位置（不含 dragOffset）
+    onIsDraggingChanged: updateLinkNodeCenter()
+    // 注：画布平移/缩放/拖拽 dragOffset 变化由 SectionNode.updateAllCenters() 统一触发，
+    //     此处不再单独监听，避免重复回写
+
+    // 左侧 OnShow 描述文本（对应 ImGui wline.RenderUI(OnShow)）
+    Text {
+        id: onShowLabel
+        anchors.left: parent.left
+        anchors.leftMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        // Input 态：文本占自然宽度（随字体等比缩放），输入框占剩余宽度
+        //   对应 ImGui: TextEx(Hint.Short) 自然宽度 + SameLine + SetNextItemWidth(剩余)
+        //   用 implicitWidth（Text 全文本自然宽度，不依赖布局完成，避免 contentWidth 初始为 0 导致塌缩）
+        // Link 态：文本占满左侧，留出 LinkNode 空间
+        width: root.isInputMode ? Math.min(implicitWidth, parent.width * 0.7)
+                                : parent.width - linkNode.width - 24
+        text: root.onShowText
+        color: "#d4d4d4"
+        font.pixelSize: root.fontBody
+        elide: Text.ElideRight
+
+        // 双击切换 Input 态（对应 IBG_InputType.cpp:307 翻转 IICStatus）
+        // 用 TapHandler 而非 MouseArea，避免拦截单击（单击需穿透到 nodeMouseArea 选中模块）
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onTapped: {
+                if (tapCount === 2) {
+                    if (root.lineModel) {
+                        root.lineModel.toggleInputMode(root.rowIndex)
+                    }
+                }
+            }
+        }
+
+        ToolTip.visible: onShowLabelMouse.containsMouse && root.descLong.length > 0
+        ToolTip.text: root.descLong
+        ToolTip.delay: 500
+
+        MouseArea {
+            id: onShowLabelMouse
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            hoverEnabled: true
+        }
+    }
+
+    // 右侧 LinkNode 圆点（对应 IBR_LinkNode::RenderUI_Node 的 RadioButton）
+    LinkNodePoint {
+        id: linkNode
+        // D15：DefaultCenter 位置（对应 ImGui IBR_LinkNode.cpp:202-205）
+        // ImGui: Center.x = 行末 - 1.5*FontHeight，左上角 = Center - size/2
+        // Import SubSec 居中（ImportCenter），否则行末 1.5*fontSmall
+        x: root.isImport ? parent.width / 2 - width / 2
+                         : parent.width - 1.5 * root.fontSmall - width / 2
+        anchors.verticalCenter: parent.verticalCenter
+
+        sectionData: root.sectionData
+        lineModel: root.lineModel
+        rowIndex: root.rowIndex
+        sessionId: root.sessionId
+        links: root.links
+        linkLimit: root.linkLimit
+        linkCol: root.linkCol
+        hasLinkNode: root.hasLinkNode
+        isEmpty: root.isEmpty
+        isInherit: root.isInherit
+        isImport: root.isImport
+        fontSmall: root.fontSmall
+        // D9 修复：传入 linkType 字符串（StrPoolID name）
+        linkType: root.linkType
+        // 行级 DropTarget 定位源行所需信息
+        keyName: root.keyName
+        lineMult: root.lineMult
+
+        // Input 态不显示 LinkNode（对应 ImGui Input 分支不调 RenderUI_Node）
+        visible: root.hasLinkNode && !root.isInputMode
+        // D14：双击 LinkNode 切回 Link 态（对应 IBG_InputType.cpp 双击 Hint 切换）
+        // 通过 toggleInputMode 写回业务层 Data
+        onDoubleClicked: {
+            if (root.lineModel) {
+                root.lineModel.toggleInputMode(root.rowIndex)
+            }
+        }
+
+        // layout 后回写坐标到 lineModel（供 LinkRenderer 查表）
+        onXChanged: root.updateLinkNodeCenter()
+        onYChanged: root.updateLinkNodeCenter()
+        Component.onCompleted: root.updateLinkNodeCenter()
+    }
+
+    // 无 LinkNode 的行显示灰色 Disabled 点（对应 RenderUI_Node_Disabled）
+    Rectangle {
+        id: disabledNode
+        // D15：与 LinkNodePoint 保持一致的位置公式
+        x: root.isImport ? parent.width / 2 - width / 2
+                         : parent.width - 1.5 * root.fontSmall - width / 2
+        anchors.verticalCenter: parent.verticalCenter
+        width: 10
+        height: 10
+        radius: root.isInherit ? 1 : 5
+        color: "#5a5a5a"
+        visible: !root.hasLinkNode && !root.isInputMode
+
+        // 修复：无 LinkNode 的行也需回写位置，否则 Data_String 类型行
+        // （键值为块名）的连线源端点 LastCenter 始终为 (0,0) 导致连线不可见
+        // 对应 ImGui IBB_IniLine_Data_String::RenderUI 无条件调 UpdateLink
+        onXChanged: root.updateLinkNodeCenter()
+        onYChanged: root.updateLinkNodeCenter()
+        Component.onCompleted: root.updateLinkNodeCenter()
+    }
+
+    // Input 态文本框（双击行文本切换显示）
+    // 对应 ImGui RenderIICInputText Input 分支（IBG_InputType.cpp:1377-1401）：
+    //   TextEx(Hint.Short) + SameLine + InputText(剩余宽度)
+    //   InputText 始终可编辑，单击直接输入，双击切回 Link 态
+    //   不监听失焦切换状态（ImGui 没有 focusOut 切态逻辑）
+    // container.z:1 让 TextField 在 nodeMouseArea 之上，单击直接编辑，无需额外 MouseArea
+    TextField {
+        id: inputField
+        anchors.left: onShowLabel.right
+        anchors.leftMargin: 4
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.isInputMode
+        height: root.fontBody * 2
+        // 绑定 exportValue：ImGui 每帧用 CurrentValue 重新渲染 InputText
+        text: root.exportValue
+        font.pixelSize: root.fontBody
+        color: "#ce9178"
+        selectByMouse: true
+        horizontalAlignment: Text.AlignRight
+        verticalAlignment: Text.AlignVCenter
+        background: Rectangle {
+            color: "#1e1e1e"
+            border.color: "#007acc"
+            border.width: 1
+            radius: 2
+        }
+
+        // 双击切回 Link 态（对应 ImGui IsMouseDoubleClicked → Status.InputMethod = Link）
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onTapped: {
+                if (tapCount === 2) {
+                    if (root.lineModel) {
+                        root.lineModel.toggleInputMode(root.rowIndex)
+                    }
+                }
+            }
+        }
+
+        // 实时提交（对应 ImGui Changed → ModifyFunc，每帧检测变化即提交）
+        onTextEdited: {
+            if (text !== root.exportValue) {
+                root.lineModel.modifyValue(root.rowIndex, text)
+            }
+        }
+
+        // Escape 取消编辑，切回 Link 态
+        Keys.onEscapePressed: {
+            text = root.exportValue
+            if (root.lineModel) {
+                root.lineModel.toggleInputMode(root.rowIndex)
+            }
+        }
+    }
+
+    // ===== 行级 "+" 增行按钮（对应 IBR_Misc.cpp:358-368, 372-385） =====
+    // 仅 isMultiple 行显示，位于 LinkNode 左侧
+    // 调 lineModel.addLine → bsec->MergeLine(Key, Index_AlwaysNew, Form, Replace)
+    Rectangle {
+        id: addLineButton
+        visible: root.isMultiple && !root.isInputMode
+        // Import 行 LinkNode 居中，"+" 放在居中点左侧；其他行放在 LinkNode 左侧
+        x: root.isImport ? (parent.width / 2 - width - 4)
+                         : (linkNode.x - width - 4)
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.fontSmall * 1.4
+        height: root.fontSmall * 1.4
+        radius: 2
+        color: addLineMA.containsMouse ? "#3a3a3a" : "#2a2a2a"
+        border.color: "#5a5a5a"
+        border.width: 1
+
+        Text {
+            anchors.centerIn: parent
+            text: "+"
+            color: "#d4d4d4"
+            font.pixelSize: root.fontSmall
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        MouseArea {
+            id: addLineMA
+            anchors.fill: parent
+            hoverEnabled: true
+            // 阻止点击穿透到 nodeMouseArea（避免误选中模块）
+            preventStealing: true
+            onClicked: {
+                if (root.lineModel) {
+                    root.lineModel.addLine(root.rowIndex)
+                }
+            }
+        }
+    }
+
+    // ===== OnShow 描述编辑框（对应 IBR_Misc.cpp:64-82 InputOnShow 分支） =====
+    // inputOnShow=true 时显示，覆盖在 onShowLabel 位置
+    // Enter 提交（对应 ImGui EnterReturnsTrue）→ editDesc 写入 + toggleInputOnShow 关闭
+    // Escape 取消 → toggleInputOnShow 关闭（不写入）
+    TextField {
+        id: descEditField
+        anchors.left: parent.left
+        anchors.leftMargin: 8
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.inputOnShow
+        height: root.fontBody * 2
+        // 初始文本：onShowLabel 当前显示文本（空描述时为空串）
+        // 对应 ImGui: if(OnShow == EmptyOnShowDesc) EditOnShow = ""
+        text: root.onShowText
+        font.pixelSize: root.fontBody
+        color: "#d4d4d4"
+        selectByMouse: true
+        horizontalAlignment: Text.AlignLeft
+        verticalAlignment: Text.AlignVCenter
+        background: Rectangle {
+            color: "#1e1e1e"
+            border.color: "#007acc"
+            border.width: 1
+            radius: 2
+        }
+
+        onVisibleChanged: {
+            if (visible) {
+                // 显示时聚焦并全选（对应 ImGui InputText 自动聚焦）
+                forceActiveFocus()
+                selectAll()
+            }
+        }
+
+        // Enter 提交（对应 ImGui EnterReturnsTrue）
+        onAccepted: {
+            if (root.lineModel) {
+                root.lineModel.editDesc(root.rowIndex, text)
+                root.lineModel.toggleInputOnShow(root.rowIndex)
+            }
+        }
+
+        // Escape 取消（对应 ImGui Esc 关闭 InputText）
+        Keys.onEscapePressed: {
+            if (root.lineModel) {
+                root.lineModel.toggleInputOnShow(root.rowIndex)
+            }
+        }
+    }
+
+    // ===== 行级右键菜单触发 MouseArea（对应 IBR_Misc.cpp:201-252 RightClick） =====
+    // 仅捕获右键，不拦截左键（让 onShowLabel TapHandler 和 nodeMouseArea 正常工作）
+    MouseArea {
+        id: lineRightClickMA
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        // 不阻止悬浮事件穿透（让 onShowLabelMouse 仍能显示 ToolTip）
+        hoverEnabled: false
+        onClicked: {
+            if (mouse.button === Qt.RightButton) {
+                var globalPos = lineRightClickMA.mapToGlobal(mouse.x, mouse.y)
+                lineMenu.popup(globalPos.x, globalPos.y)
+            }
+        }
+    }
+
+    // ===== 行级右键菜单（对应 IBR_Misc.cpp:201-252 WorkSpaceLine 右键菜单 4 项） =====
+    Menu {
+        id: lineMenu
+
+        // 1. 切换输入态（对应 GUI_SwitchIICStatus → CC->SwitchInput = true）
+        // ImGui 中 SwitchInput 由后续帧处理翻转 IICStatus，Qt 版直接调 toggleInputMode
+        MenuItem {
+            text: qsTr("切换输入态")
+            onTriggered: {
+                if (root.lineModel) {
+                    root.lineModel.toggleInputMode(root.rowIndex)
+                }
+            }
+        }
+
+        // 2. SpecialAccept 开关（对应 GUI_SpecialAcceptOff/On → CC->SpecialAccept = !CC->SpecialAccept）
+        // 文本根据当前态切换：已开启显示"关闭特殊接受"，未开启显示"开启特殊接受"
+        MenuItem {
+            text: root.specialAccept ? qsTr("关闭特殊接受") : qsTr("开启特殊接受")
+            onTriggered: {
+                if (root.lineModel) {
+                    root.lineModel.toggleSpecialAccept(root.rowIndex)
+                }
+            }
+        }
+
+        // 3. 删除行（对应 GUI_RemoveLine → pbk->RemoveLine(Key)）
+        MenuItem {
+            text: qsTr("删除行")
+            onTriggered: {
+                if (root.lineModel) {
+                    root.lineModel.removeLine(root.rowIndex)
+                }
+            }
+        }
+
+        // 4. 编辑描述（对应 GUI_EditDesc → CC->InputOnShow = !CC->InputOnShow）
+        // 切换 OnShow 描述编辑框显示/隐藏
+        MenuItem {
+            text: qsTr("编辑描述")
+            onTriggered: {
+                if (root.lineModel) {
+                    root.lineModel.toggleInputOnShow(root.rowIndex)
+                }
+            }
+        }
+    }
+
+    // 回写 LinkNode 屏幕坐标到 lineModel（供 WorkspaceController::rebuildLinkEndpoints 同步）
+    function updateLinkNodeCenter() {
+        if (!root.lineModel || root.rowIndex < 0) return
+        // 对应 ImGui IBR_LinkNode::UpdateLink：对所有 Data_String 行无条件设置 LastCenter
+        // ImGui: Center = IsImport ? ImportCenter() : DefaultCenter()
+        //   DefaultCenter = GetLineEndPos() - {FontHeight*1.5, HalfLine}（行末位置）
+        //   ImportCenter  = {WindowPos.x + WindowWidth*0.5, HalfLine}（窗口水平居中）
+        // Qt 版三种状态：
+        //   1. Link 态 + hasLinkNode：用 linkNode 中心（= DefaultCenter 位置）
+        //   2. Link 态 + !hasLinkNode：用 disabledNode 中心（同 DefaultCenter 位置）
+        //   3. Input 态：用 onShowLabel 行末位置（对应 ImGui Input 态仍调 UpdateLink 用 DefaultCenter）
+        var node = linkNode.visible ? linkNode : disabledNode
+        var cx, cy
+        if (node.visible) {
+            var nodePos = node.mapToItem(workspaceView, node.width / 2, node.height / 2)
+            cx = nodePos.x
+            cy = nodePos.y
+        } else if (root.isInputMode) {
+            // Input 态：用 onShowLabel 行末位置（对应 ImGui DefaultCenter = 行末 - 1.5*FontHeight）
+            // onShowLabel 右边缘 = parent.width - linkNode.width - 24（Link 态宽度公式）
+            // 行末 = onShowLabel 右边缘，垂直居中
+            var labelEndX = root.width - root.fontSmall * 1.5
+            var pos = root.mapToItem(workspaceView, labelEndX, root.height / 2)
+            cx = pos.x
+            cy = pos.y
+        } else {
+            return
+        }
+        // 拖拽中：减去 dragOffset，存储原位置（不含拖拽位移）
+        // 原因：mapToItem 返回的坐标含 dragOffset（SectionNode.x 已含 dragOffset），
+        //       若直接回写，端点表 pa 含 dragOffset，LinkRenderer 又叠加 → 重复叠加
+        //       减去后 LastCenter=原位置，LinkRenderer 叠加 dragOffset 实时修正 → 速度匹配
+        // 松手后：dragOffset=0，不减，LastCenter=新位置 → 无回弹
+        var dx = root.isDragging ? workspaceController.dragOffset.x : 0
+        var dy = root.isDragging ? workspaceController.dragOffset.y : 0
+        root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
+        // 阶段 3：同一 RadioButton 位置也作为行级接受点回写（对应 ImGui AcceptCenter）
+        // 该坐标作为连线终点 pb 的行精确值
+        root.lineModel.setAcceptCenter(root.rowIndex, cx - dx, cy - dy)
+    }
+}

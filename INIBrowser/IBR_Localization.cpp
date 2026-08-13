@@ -45,6 +45,25 @@ namespace IBR_L10n
         return ImGui::IsItemHovered();
     }
 
+    // 阶段 13.1：Qt 侧语言切换支持
+    const std::string& GetCurrentLanguage()
+    {
+        return CurrentLanguage;
+    }
+
+    std::vector<std::pair<std::string, std::string>> GetAvailableLanguages()
+    {
+        std::vector<std::pair<std::string, std::string>> result;
+        for (auto& [k, v] : LocalizationMap)
+        {
+            if (k == "Basic") continue;
+            auto i2 = v.find("LangName");
+            std::string displayName = (i2 == v.end() ? k : i2->second);
+            result.emplace_back(k, displayName);
+        }
+        return result;
+    }
+
     std::string ProcessEscape(const std::string& v)
     {
         if (v.empty()) return "";

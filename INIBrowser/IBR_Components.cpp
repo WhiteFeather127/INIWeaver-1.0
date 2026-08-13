@@ -1,4 +1,5 @@
 ﻿#include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBFront.h"
 #include "Global.h"
 #include "IBR_HotKey.h"
@@ -271,6 +272,11 @@ namespace IBR_RecentManager
             RecentFile.Close();
         }
     }
+
+    const std::vector<std::string>& GetRecentList()
+    {
+        return RecentName;
+    }
 }
 
 std::vector<std::string_view> GetLines(std::string&& Text);
@@ -284,6 +290,13 @@ namespace IBR_PopupManager
     bool FirstRightClick = false;
     ImVec2 RightClickMenuPos{ 0,0 };
     bool IsMouseOnPopupCond{ false };
+
+    // Qt UI Hook 全局回调
+    PopupHookFn g_popupHook;
+    PopupHookFn g_rightClickMenuHook;
+
+    void SetPopupHook(PopupHookFn fn) { g_popupHook = std::move(fn); }
+    void SetRightClickMenuHook(PopupHookFn fn) { g_rightClickMenuHook = std::move(fn); }
 
     ImVec2 CurrentPopupSize;
     ImVec2 CurrentPopupPos;
@@ -363,96 +376,24 @@ namespace IBR_PopupManager
         */
     }
 
-    struct JsonParseErrorPopup
-    {
-        std::string Title;
-        std::string ErrorStr;
-        std::string Info;
-        bool ForJson;
-    };
-    std::vector<JsonParseErrorPopup> JsonParseErrorList;
-    size_t JsonParseErrorListShown = 0;
-    void ShowJsonParseErrorImpl()
-    {
-        if (JsonParseErrorListShown < JsonParseErrorList.size())
-        {
-            auto& _W = JsonParseErrorList[JsonParseErrorListShown];
-            SetCurrentPopup(
-                std::move(Popup{}
-                    .CreateModal(_W.Title, true, []() { {
-                            JsonParseErrorListShown++;
-                            IBRF_CoreBump.SendToR({ [] {ShowJsonParseErrorImpl(); } });
-                        }})
-                .SetFlag(ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)
-                .PushMsgBack([]()
-                    {
-                        auto& W = JsonParseErrorList[JsonParseErrorListShown];
-                        ImGui::Text(W.Info.c_str());
-                        if (!W.ForJson)
-                        {
-                            ImGui::Text(W.ErrorStr.c_str());
-                            return;
-                        }
-                        auto V = W.ErrorStr | std::views::split('\n');
-                        int TgIdx = 0;
-                        int Idx = 1;
-                        for (auto L : V)
-                        {
-                            auto R = std::string_view{ L.data(), L.size() };
-                            if (R.find(loc("Error_JsonParseErrorPos")) != R.npos)
-                            {
-                                TgIdx = Idx;
-                                ImGui::Text(locc("Error_JsonParseErrorLine"), Idx);
-                                break;
-                            }
-                            Idx++;
-                        }
-                        Idx = 1;
-                        for (auto L : V)
-                        {
-                            if (Idx >= TgIdx - 4 && Idx <= TgIdx + 4)
-                                ImGui::Text(std::string(L.data(), L.size()).c_str());
-                            Idx++;
-                        }
-                        ImGui::Text(locc("GUI_SeeLogForDetails"));
-                    }))
-                );
-
-        }
-        else ClearPopupDelayed();
-    }
-    void AddErrorPopup(std::string&& ErrorStr, const std::string& Title, const std::string& Info, const std::wstring& LogFormat, bool ForJson)
-    {
-        if (ErrorStr.empty())return;
-        if (JsonParseErrorListShown != 0)
-        {
-            JsonParseErrorList.erase(JsonParseErrorList.begin(), JsonParseErrorList.begin() + JsonParseErrorListShown);
-            JsonParseErrorListShown = 0;
-        }
-        if (JsonParseErrorListShown == JsonParseErrorList.size())IBRF_CoreBump.SendToR({ [] {ShowJsonParseErrorImpl(); } });
-        if (EnableLog)
-        {
-            GlobalLog.AddLog_CurTime(false);
-            auto V = UTF8toUnicode(ErrorStr);
-            GlobalLog.AddLog(std::vformat(LogFormat, std::make_wformat_args(V)));
-        }
-        JsonParseErrorList.push_back({ Title, std::move(ErrorStr), Info, ForJson });
-    }
+    // 错误收集与弹窗渲染已迁移至 IBR_ErrorCollector.cpp
+    // 此处保留 4 个 Add*ErrorPopup 作为转发包装，供渲染层旧调用点（IBR_*）继续使用
+    // 业务层（IBB_*）应直接调用 IBB_ErrorReport::Add*ErrorPopup
     void AddJsonParseErrorPopup(std::string&& ErrorStr, const std::string& Info)
     {
-        AddErrorPopup(std::move(ErrorStr), loc("GUI_JsonParseError"), Info, locw("Log_JsonParseErrorInfo"), true);
+        IBB_ErrorReport::AddJsonParseErrorPopup(std::move(ErrorStr), Info);
     }
     void AddModuleParseErrorPopup(std::string&& ErrorStr, const std::string& Info)
     {
-        AddErrorPopup(std::move(ErrorStr), loc("GUI_ModuleParseError"), Info, locw("Log_ModuleParseErrorInfo"), false);
+        IBB_ErrorReport::AddModuleParseErrorPopup(std::move(ErrorStr), Info);
     }
     void AddLoadConfigErrorPopup(std::string&& ErrorStr, const std::string& Info)
     {
-        AddErrorPopup(std::move(ErrorStr), loc("GUI_LoadConfigError"), Info, locw("Log_LoadConfigErrorInfo"), false);
+        IBB_ErrorReport::AddLoadConfigErrorPopup(std::move(ErrorStr), Info);
     }
     void AddOutputErrorPopup(std::string&& ErrorStr, const std::string& Info)
     {
-        AddErrorPopup(std::move(ErrorStr), loc("GUI_ExportIniError"), Info, locw("Log_ExportIniErrorInfo"), false);
+        IBB_ErrorReport::AddOutputErrorPopup(std::move(ErrorStr), Info);
     }
 
     bool IsMouseOnPopup()
@@ -464,9 +405,8 @@ namespace IBR_PopupManager
     };
     void ClearPopupDelayed()
     {
-        JsonParseErrorList.clear();
-        JsonParseErrorListShown = 0;
-        IBRF_CoreBump.SendToR({ [] {IBR_PopupManager::ClearCurrentPopup(); } });
+        // 错误队列状态已迁移至 IBR_ErrorCollector，此处转发
+        IBR_ErrorCollector::ClearDelayed();
     }
     Popup& Popup::Create(const _TEXT_UTF8 std::string& title)
     {
@@ -515,12 +455,14 @@ namespace IBR_PopupManager
     {
         StdMessage ShowPrev{ std::move(Show) };
         Show = [=]() {ImGui::TextWrapped(Text.c_str()); ShowPrev(); };
+        Texts.insert(Texts.begin(), Text);  // Qt Hook: 同步到文本列表
         return *this;
     }
     Popup& Popup::PushTextBack(const _TEXT_UTF8 std::string& Text)
     {
         StdMessage ShowPrev{ std::move(Show) };
         Show = [=]() {ShowPrev(); ImGui::TextWrapped(Text.c_str()); };
+        Texts.push_back(Text);  // Qt Hook: 同步到文本列表
         return *this;
     }
     Popup& Popup::PushMsgPrev(StdMessage Msg)
@@ -568,18 +510,47 @@ namespace IBR_PopupManager
         HasPopup = true;
         CurrentPopup = std::move(sc);
         CurrentPopupExtraMove = false;
+        // Qt UI Hook：转发弹窗请求到 QML
+        if (g_popupHook) {
+            g_popupHook(CurrentPopup);
+        }
+    }
+
+    // 阶段 11.5：Qt 侧需要感知 ClearCurrentPopup 以同步 hasPopup=false
+    // 通过 g_popupHook 传空 Popup 通知 Qt 侧清除弹窗状态
+    void ClearCurrentPopup() {
+        bool Prev = HasPopup;
+        HasPopup = false;
+        // Qt UI Hook：仅在确实从有到无时通知
+        if (Prev && g_popupHook) {
+            IBR_PopupManager::Popup empty;
+            empty.Title.clear();
+            g_popupHook(empty);
+        }
     }
 
     void ClearRightClickMenu()
     {
+        bool Prev = HasRightClickMenu;
         HasRightClickMenu = false;
         RightClickMenu = Popup{};
+        // 阶段 11.4：通知 Qt 侧右键菜单已关闭（传空 Popup）
+        if (Prev && g_rightClickMenuHook) {
+            IBR_PopupManager::Popup empty;
+            empty.Title.clear();
+            g_rightClickMenuHook(empty);
+        }
     }
     void SetRightClickMenu(Popup&& sc, ImVec2 Pos)
     {
         RightClickMenuPos = Pos;
         FirstRightClick = HasRightClickMenu = true;
         RightClickMenu = std::move(sc);
+        // 阶段 11.4：Qt UI Hook 转发右键菜单请求到 QML
+        // 注意：右键菜单的菜单项通过 PushTextBack 注入 Texts 字段
+        if (g_rightClickMenuHook) {
+            g_rightClickMenuHook(RightClickMenu);
+        }
     }
 
     void RenderUI()

@@ -8,7 +8,7 @@
 #include "Global.h"
 #include "IBR_Components.h"
 #include <ShlObj.h>
-#include <imgui_internal.h>
+#include "FromEngine/ImGuiDeps.h"
 #include "IBR_Debug.h"
 #include "IBR_Misc.h"
 #include "IBR_TopMost.h"

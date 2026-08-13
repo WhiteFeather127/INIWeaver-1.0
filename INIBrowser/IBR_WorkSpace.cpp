@@ -12,6 +12,7 @@
 #include "IBR_Components.h"
 #include "IBR_Misc.h"
 #include "IBR_TopMost.h"
+#include "IBR_ModuleTree.h"
 
 extern bool LastInputStdStringActive;
 
@@ -221,7 +222,7 @@ namespace IBR_WorkSpace
         else
         {
             ImGui::BeginChild("##RightClick_Module", { FontHeight * 10.0F,FontHeight * 16.0F }, false);
-            IBB_ModuleAltDefault::Tree_RenderUI();
+            IBR_ModuleTree::Tree_RenderUI();
             ImGui::EndChild();
         }
     }
@@ -632,7 +633,7 @@ namespace IBR_WorkSpace
             .SetFlag(ImGuiWindowFlags_NoFocusOnAppearing)
             .EnableInstantClose()
             .PushMsgBack([]() {
-                IBB_ModuleAltDefault::SpecialTree_RenderUI();
+                IBR_ModuleTree::SpecialTree_RenderUI();
                 if (IBR_Inst_Project.IBR_SectionMap.empty())
                 {
                     ImGui::TextDisabled(locc("GUI_SelectAll"));

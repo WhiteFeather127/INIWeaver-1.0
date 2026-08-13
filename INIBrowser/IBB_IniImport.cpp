@@ -5,6 +5,7 @@
 #include "IBFront.h"
 #include "FromEngine/RFBump.h"
 #include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBG_InputType_Derived.h"
 
 #include <algorithm>
@@ -295,7 +296,7 @@ void MatchSectionToRegType(ImportedIniFile& File)
             {
                 auto Type = static_cast<int>(FormType);
                 auto wss = UnicodetoUTF8(std::vformat(locw("Error_UnknownInputTypeSubclass"), std::make_wformat_args(Type)));
-                IBR_PopupManager::AddLoadConfigErrorPopup(std::move(wss), "");
+                IBB_ErrorReport::AddLoadConfigErrorPopup(std::move(wss), "");
                 break;
             }
             }
@@ -881,8 +882,8 @@ std::vector<ModuleClipData> ImportedSectionsToModuleClipData(
         }
 
         // 位置
-        Clip.EqDelta = Sec.EqPos;
-        Clip.EqSize = Sec.EqSize;
+        Clip.EqDelta = toIWVec2(Sec.EqPos);
+        Clip.EqSize = toIWVec2(Sec.EqSize);
         
         // 转换为 IniToken 列表（TypeAlt 中有定义的键默认展开，否则默认收起）
         Clip.Lines = Sec.KeyValues;

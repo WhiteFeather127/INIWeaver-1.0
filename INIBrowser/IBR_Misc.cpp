@@ -116,7 +116,7 @@ void WorkSpaceLine::RenderUI(const char* Line, const char* Hint, IBB_IniLine& Ba
             auto KeyName = Back.Default->Name;
             auto tgback = LinkNodeContext::CurSub->Root;
             auto tgreg = acc ? acc->AcceptRegType : tgback->Register;
-            ImU32 Col = acc && acc->NodeColor ? *acc->NodeColor : IBB_DefaultRegType::GetRegType(tgreg).FrameColor;
+            ImU32 Col = acc && acc->NodeColor ? *acc->NodeColor : toImColor(IBB_DefaultRegType::GetRegType(tgreg).FrameColor);
             AcceptCenter[i] = {Cursor.x - LH * 0.7f, Cursor.y - Y1 + FromY + LH * 0.5f};
             ImGui::SetCursorPos({ 0.0f, FromY });
             ImGui::Dummy({ ImGui::GetWindowWidth(), ToY - FromY }, true);
@@ -634,8 +634,16 @@ namespace IBR_EditFrame
         {
             auto rsc = CurSection.GetBack();
             IBD_RInterruptF(x);
-            ResetEdit(rsc);
-            rsc->Dynamic.Selected = true;
+            if (rsc)
+            {
+                ResetEdit(rsc);
+                rsc->Dynamic.Selected = true;
+            }
+            else
+            {
+                EditLines.clear();
+                TextEditError = true;
+            }
         }
     }
 

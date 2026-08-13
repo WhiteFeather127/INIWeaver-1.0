@@ -24,4 +24,13 @@ namespace IBR_ImportPreview
 
     // 渲染弹窗（在渲染循环中调用）
     void RenderUI();
+
+    // 阶段 11.1：Qt 导入预览 Hook
+    // 当 Qt 侧注册此 Hook 后，Open() 不再设置 ImGui 弹窗，
+    // 而是将 ImportedIniFile 和 Callback 转发给 Qt 侧由 QML 渲染预览 UI。
+    // Hook 在渲染线程被调用，Qt 侧需自行处理线程切换。
+    using ImportPreviewHookFn = std::function<void(
+        ImportedIniFile&&,
+        const std::function<void(const IBR_ImportResult&)>&)>;
+    void SetHook(ImportPreviewHookFn fn);
 }

@@ -1,6 +1,7 @@
 ﻿
 #include "IBB_CustomBool.h"
 #include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include <map>
 
 struct BoolStrings
@@ -103,7 +104,7 @@ StrBoolType CustomStrBoolTypeFromString(const std::string& T, const std::string&
             reported.insert(Name);
             auto TT = UTF8toUnicode(T), FF = UTF8toUnicode(F);
             auto ErrorStr = UnicodetoUTF8(std::vformat(locw("Error_InvalidBool"), std::make_wformat_args(TT, FF)));
-            IBR_PopupManager::AddLoadConfigErrorPopup(std::move(ErrorStr), loc("Error_InvalidBoolInfo"));
+            IBB_ErrorReport::AddLoadConfigErrorPopup(std::move(ErrorStr), loc("Error_InvalidBoolInfo"));
         }
     }
     return opt ? *opt : Default;

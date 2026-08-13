@@ -1,6 +1,7 @@
 ﻿#include "IBB_FileChecker.h"
 #include "FromEngine/Include.h"
 #include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBR_Localization.h"
 #include "Global.h"
 #include <filesystem>
@@ -74,7 +75,7 @@ void IBB_FileCheck(const std::wstring& FileName, bool AllowNotExist, bool PopupO
     const auto ReportError = [&](const std::wstring& Info) {
         if (PopupOnError)
         {
-            IBR_PopupManager::AddLoadConfigErrorPopup(UnicodetoUTF8(Info), loc("Log_FailedToLoadConfig"));
+            IBB_ErrorReport::AddLoadConfigErrorPopup(UnicodetoUTF8(Info), loc("Log_FailedToLoadConfig"));
         }
         auto Str = std::vformat(locw("Log_LoadConfigErrorInfo"), std::make_wformat_args(Info));
         if (EnableLog)

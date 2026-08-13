@@ -125,8 +125,8 @@ bool _PROJ_CMD_READ IBR_Section::GetClipData(ModuleClipData& Clip, bool UsePosAs
         bk->CreateAsCommentBlock = true;
     }
     Clip.DisplayName = dt->DisplayName;
-    Clip.EqSize = dt->EqSize;
-    Clip.EqDelta = UsePosAsDelta ? dt->EqPos : dt->EqDelta;
+    Clip.EqSize = toIWVec2(dt->EqSize);
+    Clip.EqDelta = toIWVec2(UsePosAsDelta ? dt->EqPos : dt->EqDelta);
     Clip.Ignore = dt->Ignore;
     Clip.CollapsedInComposed = dt->CollapsedInComposed;
     Clip.Frozen = dt->Frozen;
@@ -156,8 +156,8 @@ ImColor _PROJ_CMD_READ IBR_Section::GetRegTypeColor() _PROJ_CMD_BACK_CONST const
 {
     IBD_RInterruptF(x);
     auto bk = GetBack_Inl();
-    if (!bk)return IBB_DefaultRegType::DefaultColor;
-    else return IBB_DefaultRegType::GetRegType(bk->Register).FrameColor;
+    if (!bk)return toImColor(IBB_DefaultRegType::DefaultColor);
+    else return toImColor(IBB_DefaultRegType::GetRegType(bk->Register).FrameColor);
 }
 const std::string& _PROJ_CMD_READ IBR_Section::GetRegTypeName() _PROJ_CMD_BACK_CONST const
 {

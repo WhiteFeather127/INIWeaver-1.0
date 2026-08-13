@@ -2,6 +2,7 @@
 #include "IBG_InputType.h"
 #include "IBR_LinkNode.h"
 #include "IBB_PropStringPool.h"
+#include "FromEngine/ImGuiDeps.h"
 
 
 struct IBR_IniLine

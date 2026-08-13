@@ -8,6 +8,7 @@
 #include "IBR_Misc.h"
 #include "IBG_UndoTree.h"
 #include "IBB_ModuleAlt.h"
+#include "IBR_ModuleTree.h"
 
 extern bool EnableDebugList;
 
@@ -180,7 +181,7 @@ void ControlPanel_Modules()
     ImGui::BeginChild("ModuleTreeScroll",
         { 0, ImGui::GetWindowHeight() - FontHeight * 5.5F },//4.0 base + 1.0 line + 0.5 padding 
         false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    IBB_ModuleAltDefault::Tree_RenderUISidebar();
+    IBR_ModuleTree::Tree_RenderUISidebar();
     ImGui::EndChild();
     ImGui::PopID();
 }

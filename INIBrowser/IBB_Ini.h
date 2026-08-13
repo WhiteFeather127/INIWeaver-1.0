@@ -5,6 +5,7 @@
 #include "IBB_Index.h"
 #include "IBB_PropStringPool.h"
 #include "IBG_InputType_Defines.h"
+#include "FromEngine/ImGuiDeps.h"
 #include <variant>
 
 #ifndef _TEXT_UTF8
@@ -209,7 +210,7 @@ struct IBB_NewLink
 {
     IBB_LineLocation FromLoc;
     IBB_LineLocation ToLoc;
-    ImU32 DefaultColor;
+    IW::u32 DefaultColor;
     uint64_t SessionID;
 
     std::string GetText() const;

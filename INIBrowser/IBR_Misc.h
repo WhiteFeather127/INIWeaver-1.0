@@ -5,6 +5,7 @@
 #include "IBG_InputType_Defines.h"
 #include "IBR_IniLine.h"
 #include "IBR_Project.h"
+#include "FromEngine/ImGuiDeps.h"
 #include <any>
 #include "IBG_UndoTree.h"
 
@@ -77,6 +78,9 @@ namespace IBR_ProjectManager
     void AutoOutputAction();
     void OutputOnSaveAction();
     void ImportIniAction();
+    // 直接使用指定路径导入 INI（跳过文件选择对话框）
+    // 由 Qt UI 调用：用户已在 QML FileDialog 中选择路径
+    void ImportIni(const std::wstring& Path);
     void OnDropFile(GLFWwindow* window, int argc, const char** argv);
     void ProjActionByKey();
 };
@@ -137,8 +141,14 @@ namespace IBR_WorkSpace
     void Close();
 
     bool SelectedAllIgnored();
+    bool SelectedAllFrozen();
+    bool SelectedAllHidden();
     void IgnoreSelected();
     void NoIgnoreSelected();
+    void FreezeSelected();
+    void UnfreezeSelected();
+    void HideSelected();
+    void ShowSelected();
     void DeleteSelected();
     void CopySelected();
     void DuplicateSelected();

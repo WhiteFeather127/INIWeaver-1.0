@@ -1,4 +1,4 @@
-﻿
+
 #include "FromEngine/Include.h"
 #include "IBFront.h"
 #include "FromEngine/RFBump.h"
@@ -29,7 +29,7 @@ void IBF_Thr_FrontLoop()
             if (Uax > 3000 && abs((int64_t)GetSysTimeMicros() - (int64_t)ShellLoopLastTime) < 1000ull)Sleep(Uax / 2000);
             TimeWait += Uax;
         }
-        
+
         IBRF_CoreBump.IBF_AutoProc();
     }
 }

@@ -5,6 +5,10 @@
 #include "FromEngine/RFBump.h"
 #include <atomic>
 
+// 前向声明 ImGui/GLFW 类型，避免业务层包含 imgui.h
+struct GLFWwindow;
+struct ImFont;
+
 #define IBD_ShutDownDestructor(x) x##_ShutDownDestructor
 #define IBD_Inst_ShutDownDestructor(x) x##_Inst_ShutDownDestructor
 #define IBD_ShutDownDtorClass(x,fn) \
@@ -96,4 +100,4 @@ namespace PreLink
 #define ExtensionNameA ".iproj"
 #define ExtensionNameC "IPROJ"
 
-extern typename ImGuiRadioButtonFlags GlobalNodeStyle;
+extern int GlobalNodeStyle;

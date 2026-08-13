@@ -47,9 +47,9 @@ bool LinkNodeSetting::Load(JsonObject Obj, bool* HasCustom)
         auto V = oDNC.GetArrayInt();
         if (V.size() == 3)LinkCol = ImColor(V[0], V[1], V[2]);
         else if (V.size() >= 4)LinkCol = ImColor(V[0], V[1], V[2], V[3]);
-        else LinkCol = IBB_DefaultRegType::GetDefaultNodeColor();
+        else LinkCol = IW::ToU32(IBB_DefaultRegType::GetDefaultNodeColor());
     }
-    else LinkCol = IBB_DefaultRegType::GetDefaultNodeColor();
+    else LinkCol = IW::ToU32(IBB_DefaultRegType::GetDefaultNodeColor());
 
     if (HasCustom)
     {

@@ -4,6 +4,7 @@
 #include "IBB_Index.h"
 #include "IBG_InputType.h"
 #include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBB_CustomBool.h"
 #include "IBR_LinkNode.h"
 #include "IBB_FileChecker.h"
@@ -43,28 +44,28 @@ StrPoolID MyTypeID()
     return ID;
 }
 
-ImColor LoadColorFromJson(JsonObject Obj, bool& Colored)
+IW::Color LoadColorFromJson(JsonObject Obj, bool& Colored)
 {
-    ImColor Col;
+    IW::Color Col;
     Colored = false;
     if (!Obj)return Col;
     auto V = Obj.GetArrayInt();
     if (V.size() == 3)
     {
-        Col = ImColor(V[0], V[1], V[2]);
+        Col = IW::Color(V[0] / 255.0f, V[1] / 255.0f, V[2] / 255.0f);
         Colored = true;
     }
     else if (V.size() >= 4)
     {
-        Col = ImColor(V[0], V[1], V[2], V[3]);
+        Col = IW::Color(V[0] / 255.0f, V[1] / 255.0f, V[2] / 255.0f, V[3] / 255.0f);
         Colored = true;
     }
     return Col;
 }
-ImColor LoadColorFromJson(JsonObject Obj, const ImColor& Default)
+IW::Color LoadColorFromJson(JsonObject Obj, const IW::Color& Default)
 {
     bool Colored;
-    ImColor Col = LoadColorFromJson(Obj, Colored);
+    IW::Color Col = LoadColorFromJson(Obj, Colored);
     if (!Colored)Col = Default;
     return Col;
 }
@@ -74,8 +75,8 @@ namespace IBB_DefaultRegType
     std::unordered_map<StrPoolID, std::set<StrPoolID>>CompoundTypeIndex;
     std::unordered_map<_TEXT_UTF8 std::string, IBB_CompoundRegType>CompoundTypes;
     std::unordered_map<_TEXT_UTF8 std::string, IBB_RegType>RegisterTypes;
-    const ImColor DefaultColor{ ImColor(255, 255, 255, 0) };
-    const ImColor DefaultColorD{ ImColor(153, 153, 153, 0) };
+    const IW::Color DefaultColor{ IW::Color(1.0f, 1.0f, 1.0f, 0.0f) };
+    const IW::Color DefaultColorD{ IW::Color(153.0f / 255.0f, 153.0f / 255.0f, 153.0f / 255.0f, 0.0f) };
     IBB_RegType __Default{
         DefaultIniName,
         DefaultColor, DefaultColor, DefaultColor, DefaultColor,
@@ -83,7 +84,7 @@ namespace IBB_DefaultRegType
         DefaultColorD, DefaultColorD, DefaultColorD, DefaultColorD,
         false, false, false, false, u8"模块", "", 0};
     StrBoolType DefaultStrBoolType;
-    ImColor DefaultNodeColor;
+    IW::Color DefaultNodeColor;
     std::unordered_set<StrPoolID> RingCheckKeys;
     std::unordered_map<StrPoolID, IBB_SubSec_Default::_Type> InSubSecKeys;
     std::unordered_map<std::string, std::string> TypeOfSection;
@@ -94,7 +95,7 @@ namespace IBB_DefaultRegType
         {
             auto ws = std::vformat(locw("Error_CannotLoadPresetType"), std::make_wformat_args(wcs));
             auto wss = UnicodetoUTF8(std::vformat(locw("Log_LoadConfigErrorInfo"), std::make_wformat_args(ws)));
-            IBR_PopupManager::AddLoadConfigErrorPopup(wss + "\n" + loc("Log_PresetTypeInfo") + "\n" + Info, "");
+            IBB_ErrorReport::AddLoadConfigErrorPopup(wss + "\n" + loc("Log_PresetTypeInfo") + "\n" + Info, "");
         };
 
     void RTTPT(const std::wstring& wcs, const std::string& Info)
@@ -280,25 +281,25 @@ R"({
 
         ImVec4 X;
         ImGui::ColorConvertRGBtoHSV(
-            Reg.FrameColorL.Value.x, Reg.FrameColorL.Value.y, Reg.FrameColorL.Value.z, X.x, X.y, X.z);
+            Reg.FrameColorL.Value[0], Reg.FrameColorL.Value[1], Reg.FrameColorL.Value[2], X.x, X.y, X.z);
         ImVec4 LightBaseHSV = X;
         X.z *= 0.7f; X.y *= 0.7f;
         ImVec4 DarkBaseHSV = X;
-        ImGui::ColorConvertHSVtoRGB(X.x, X.y, X.z, Reg.FrameColorD.Value.x, Reg.FrameColorD.Value.y, Reg.FrameColorD.Value.z);
+        ImGui::ColorConvertHSVtoRGB(X.x, X.y, X.z, Reg.FrameColorD.Value[0], Reg.FrameColorD.Value[1], Reg.FrameColorD.Value[2]);
 
         LightBaseHSV.z *= 1.2f;
-        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLPlus1.Value.x, Reg.FrameColorLPlus1.Value.y, Reg.FrameColorLPlus1.Value.z);
+        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLPlus1.Value[0], Reg.FrameColorLPlus1.Value[1], Reg.FrameColorLPlus1.Value[2]);
         LightBaseHSV.z *= 1.2f;
-        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLPlus2.Value.x, Reg.FrameColorLPlus2.Value.y, Reg.FrameColorLPlus2.Value.z);
+        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLPlus2.Value[0], Reg.FrameColorLPlus2.Value[1], Reg.FrameColorLPlus2.Value[2]);
         LightBaseHSV.y *= 0.5f;
-        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLH.Value.x, Reg.FrameColorLH.Value.y, Reg.FrameColorLH.Value.z);
+        ImGui::ColorConvertHSVtoRGB(LightBaseHSV.x, LightBaseHSV.y, LightBaseHSV.z, Reg.FrameColorLH.Value[0], Reg.FrameColorLH.Value[1], Reg.FrameColorLH.Value[2]);
 
         DarkBaseHSV.z *= 1.2f;
-        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDPlus1.Value.x, Reg.FrameColorDPlus1.Value.y, Reg.FrameColorDPlus1.Value.z);
+        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDPlus1.Value[0], Reg.FrameColorDPlus1.Value[1], Reg.FrameColorDPlus1.Value[2]);
         DarkBaseHSV.z *= 1.2f;
-        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDPlus2.Value.x, Reg.FrameColorDPlus2.Value.y, Reg.FrameColorDPlus2.Value.z);
+        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDPlus2.Value[0], Reg.FrameColorDPlus2.Value[1], Reg.FrameColorDPlus2.Value[2]);
         DarkBaseHSV.y *= 0.5f;
-        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDH.Value.x, Reg.FrameColorDH.Value.y, Reg.FrameColorDH.Value.z);
+        ImGui::ColorConvertHSVtoRGB(DarkBaseHSV.x, DarkBaseHSV.y, DarkBaseHSV.z, Reg.FrameColorDH.Value[0], Reg.FrameColorDH.Value[1], Reg.FrameColorDH.Value[2]);
 
 
         if (IBF_Inst_Setting.IsDarkMode())
@@ -355,9 +356,9 @@ R"({
             if (oDNC.Available())
             {
                 auto V = oDNC.GetArrayInt();
-                if (V.size() == 3)DefaultNodeColor = ImColor(V[0], V[1], V[2]);
-                else if (V.size() >= 4)DefaultNodeColor = ImColor(V[0], V[1], V[2], V[3]);
-                else DefaultNodeColor = 0;
+                if (V.size() == 3)DefaultNodeColor = IW::Color(V[0] / 255.0f, V[1] / 255.0f, V[2] / 255.0f);
+                else if (V.size() >= 4)DefaultNodeColor = IW::Color(V[0] / 255.0f, V[1] / 255.0f, V[2] / 255.0f, V[3] / 255.0f);
+                else DefaultNodeColor = IW::Color{};
             }
         }
 
@@ -466,7 +467,7 @@ R"({
             IBB_FileCheck(File, false, true, false);
             JsonFile F;
             auto WFN = ::FileName(File);
-            IBR_PopupManager::AddJsonParseErrorPopup(F.ParseFromFileChecked(UnicodetoUTF8(File).c_str(), loc("Error_JsonParseErrorPos"), nullptr),
+            IBB_ErrorReport::AddJsonParseErrorPopup(F.ParseFromFileChecked(UnicodetoUTF8(File).c_str(), loc("Error_JsonParseErrorPos"), nullptr),
                 UnicodetoUTF8(std::vformat(locw("Error_JsonSyntaxError"), std::make_wformat_args(WFN))));
             if (!F.Available())Available = false;
             else Available &= Load(F);
@@ -533,14 +534,14 @@ R"({
     {
         return InputTypes[u8"String"];
     }
-    ImColor GetDefaultNodeColor()
+    IW::Color GetDefaultNodeColor()
     {
         return DefaultNodeColor;
     }
     LinkNodeSetting GetDefaultLinkNodeSetting()
     {
         return LinkNodeSetting{
-            AnyTypeID(), -1, DefaultNodeColor
+            AnyTypeID(), -1, IW::ToU32(DefaultNodeColor)
         };
     }
     StrBoolType GetDefaultStrBoolType()

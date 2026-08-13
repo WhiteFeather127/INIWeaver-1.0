@@ -2,7 +2,6 @@
 #include <wincrypt.h>
 #include "Global.h"
 #include "Shlwapi.h"
-#include <imgui_internal.h>
 #include <minwindef.h>
 #include <fileapi.h>
 #include <handleapi.h>
@@ -17,6 +16,7 @@
 #include "IBB_Components.h"
 #include "IBG_Ini.h"
 #include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBR_Localization.h"
 #include "IBB_FileChecker.h"
 #include "IBR_Misc.h"
@@ -79,46 +79,6 @@ std::vector<BYTE> Base64ToData(const std::string_view Str) {
     return data;
 }
 
-void DrawFolderIcon(ImVec2 Pos, float Size)
-{
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-    // 文件夹主体（黄色部分）
-    ImVec2 folder_body_top_left(Pos.x, Pos.y + Size * 0.05f);
-    ImVec2 folder_body_bottom_right(Pos.x + Size, Pos.y + Size * 0.8f);
-    draw_list->AddRectFilled(folder_body_top_left, folder_body_bottom_right, IM_COL32(255, 215, 0, 255), Size * 0.05f);
-
-    // 文件夹顶部曲线
-    ImVec2 c1(Pos.x, Pos.y + Size * 0.15f);
-    ImVec2 c2(Pos.x + Size * 0.3f, Pos.y + Size * 0.15f);
-    ImVec2 c3(Pos.x + Size * 0.5f, Pos.y);
-    ImVec2 c4(Pos.x + Size, Pos.y);
-    draw_list->AddLine(c1, c2, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c2, c3, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c3, c4, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-}
-void DrawOpenFolderIcon(ImVec2 Pos, float Size)
-{
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-    // 文件夹主体（黄色部分）
-    ImVec2 folder_body_top_left(Pos.x, Pos.y + Size * 0.05f);
-    ImVec2 folder_body_bottom_right(Pos.x + Size, Pos.y + Size * 0.8f);
-    draw_list->AddRectFilled(folder_body_top_left, folder_body_bottom_right, IM_COL32(255, 215, 0, 255), Size * 0.05f);
-
-    // 文件夹顶部曲线
-    ImVec2 c0(Pos.x, Pos.y + Size * 0.65f);
-    ImVec2 c1(Pos.x + Size * 0.05f, Pos.y + Size * 0.15f);
-    ImVec2 c2(Pos.x + Size * 0.35f, Pos.y + Size * 0.15f);
-    ImVec2 c3(Pos.x + Size * 0.55f, Pos.y);
-    ImVec2 c4(Pos.x + Size * 1.05f, Pos.y);
-    ImVec2 c5(Pos.x + Size, Pos.y + Size * 0.65f);
-    draw_list->AddLine(c0, c1, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c1, c2, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c2, c3, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c3, c4, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-    draw_list->AddLine(c4, c5, IM_COL32(227, 161, 50, 255), Size * 0.1f);
-}
 std::wstring GetAbsolutePath(LPCWSTR relativePath) {
     if (!relativePath) return L"";
 
@@ -467,7 +427,7 @@ ClipWriteStream& operator<<(ClipWriteStream& stm, const IniToken& v)
     stm << v.Empty << v.IsSection << v.Desc << v.Key << v.Value;
     return stm;
 }
-ClipWriteStream& operator<<(ClipWriteStream& stm, const ImVec2& v)
+ClipWriteStream& operator<<(ClipWriteStream& stm, const IW::Vec2& v)
 {
     stm << v.x << v.y;
     return stm;
@@ -532,7 +492,7 @@ ClipReadStream& operator>>(ClipReadStream& stm, IniToken& v)
     stm >> v.Empty >> v.IsSection >> v.Desc >> v.Key >> v.Value;
     return stm;
 }
-ClipReadStream& operator>>(ClipReadStream& stm, ImVec2& v)
+ClipReadStream& operator>>(ClipReadStream& stm, IW::Vec2& v)
 {
     stm >> v.x >> v.y;
     return stm;
@@ -1554,7 +1514,7 @@ bool CheckClipVersion(int ClipFormatVersion, const std::string& Ver_Prefix)
                 VersionStr,
                 ClipFormatVersion
         )));
-        IBR_PopupManager::AddModuleParseErrorPopup(std::move(ErrorStr), loc("Error_ModuleParseError"));
+        IBB_ErrorReport::AddModuleParseErrorPopup(std::move(ErrorStr), loc("Error_ModuleParseError"));
         return false;
     }
     return true;
@@ -1646,156 +1606,83 @@ bool IBB_ClipBoardData::SetString(const std::string_view Str, int ClipFormatVers
 
 extern wchar_t CurrentDirW[5000];
 
-namespace SearchModuleAlt
-{
-    void RenderModuleAltSelect(IBB_ModuleAlt* pModule);
-}
-namespace ImGui
-{
-    ImVec2 GetLineEndPos();
-    ImVec2 GetLineBeginPos();
-    bool IsWindowClicked(ImGuiMouseButton Button);
-}
-
 namespace IBB_ModuleAltDefault
 {
     std::unordered_map<std::string, std::unique_ptr<IBB_ModuleAlt>> FlattenedModules;
     std::vector<std::string> FlattenedModuleName;
 
-    struct ModuleTree
+    // ModuleTree 成员函数实现（结构体声明位于 IBB_ModuleAlt.h）
+    // 注意：RenderUI 渲染逻辑已迁移至 IBR_ModuleTree.cpp
+    bool ModuleTree::ChildHovered() const
     {
-        std::string _TEXT_UTF8 Name;
-        std::vector<std::unique_ptr<ModuleTree>> Sub;
-        std::unordered_map<std::string, IBB_ModuleAlt*> Modules;
-        std::vector<std::string> ModuleOrder;
-        bool ChildMenuHovered{ false };
-        bool LastHovered{ false };
-
-        bool ChildHovered() const
+        bool V = ChildMenuHovered;
+        for (auto& S : Sub)
         {
-            bool V = ChildMenuHovered;
-            for (auto& S : Sub)
-            {
-                V |= S->ChildHovered();
-            }
-            return V;
+            V |= S->ChildHovered();
         }
+        return V;
+    }
 
-        void ResetHover()
+    void ModuleTree::ResetHover()
+    {
+        ChildMenuHovered = false;
+        for (auto& S : Sub)
         {
-            ChildMenuHovered = false;
-            for (auto& S : Sub)
-            {
-                S->ResetHover();
-            }
+            S->ResetHover();
         }
-        void RenderUI()
+    }
+
+    void ModuleTree::NewModule(IBB_ModuleAlt&& Mod)
+    {
+        if (!Mod.Available)return;
+        auto it = FlattenedModules.find(Mod.Name);
+        int I = 0;
+        while (it != FlattenedModules.end())
+            it = FlattenedModules.find(Mod.Name + "_" + std::to_string(++I));
+        if (I) Mod.Name += "_" + std::to_string(I);
+        FlattenedModuleName.push_back(Mod.Name);
+        auto& M = FlattenedModules[Mod.Name];
+        auto& N = Modules[Mod.Name];
+        M.reset(new IBB_ModuleAlt(std::move(Mod)));
+        N = M.get();
+    }
+
+    void ModuleTree::LoadFromDir(const std::wstring& Dir)
+    {
+        //MessageBoxW(NULL, Dir.c_str(), L"Load", MB_OK);
+        for (auto& File : FindFileRange(Dir))
         {
-            for (auto& S : Sub)
+            if (PathIsDirectoryW(File.FullPath.c_str()))
             {
-                auto Pos = ImGui::GetCursorScreenPos();
-                bool Hovered = false;
-                ImRect R{ ImGui::GetCursorScreenPos(), ImGui::GetCursorScreenPos() + ImVec2{ ImGui::GetWindowWidth() + 0.5F * FontHeight, ImGui::GetTextLineHeightWithSpacing() } };
-                if (R.Contains(ImGui::GetMousePos()))Hovered = true;
-                //if (Hovered)ImGui::GetForegroundDrawList()->AddRect(R.Min, R.Max, IBR_Color::FocusLineColor);
-                ImGui::Dummy(ImVec2((float)FontHeight, (float)FontHeight));
-                ImGui::SameLine();
-                ImGui::Text(S->Name.c_str());
-                Hovered |= ImGui::IsItemHovered();
-                bool V = S->ChildHovered();
-                if (S->LastHovered || V)
+                //if it is not . or ..
+                if (File.Name != L"." && File.Name != L"..")
                 {
-                    DrawOpenFolderIcon(Pos, (float)FontHeight);
-                    if (!S->Sub.empty() || !S->Modules.empty())
-                    {
-                        ImGui::SameLine();
-                        auto w = ImGui::GetCurrentWindow();
-                        auto mx = w->DC.CursorMaxPos;
-                        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 1.0F * FontHeight);
-                        ImGui::Text(u8">");
-                        w->DC.CursorMaxPos = mx;
-
-                        ImVec2 ppos = ImGui::GetLineEndPos();
-                        ppos.y -= ImGui::GetTextLineHeightWithSpacing();
-
-                        auto PredictedHeight = S->Sub.size() * (ImGui::GetTextLineHeightWithSpacing());
-                        PredictedHeight += S->Modules.size() * (ImGui::GetTextLineHeightWithSpacing());
-                        auto WorkspaceMaxHeight = IBR_UICondition::CurrentScreenHeight - IBR_HintManager::GetHeight();
-                        if (ppos.y + PredictedHeight > WorkspaceMaxHeight)
-                        {
-                            ppos.y = WorkspaceMaxHeight - PredictedHeight - ImGui::GetTextLineHeightWithSpacing();
-                            if (ppos.y < 0)ppos.y = 0;
-                        }
-
-
-                        IBR_PopupManager::DelayedPopupAction.push_back(
-                            [ppos, P = S.get()] {
-                                ImRect R = ImGui::GetCurrentWindow()->Rect();
-                                P->ChildMenuHovered = R.Contains(ImGui::GetMousePos());// ImGui::IsWindowHovered(ImGuiHoveredFlags_RectOnly);
-                                ImGui::SetWindowPos(ppos);
-                                P->RenderUI();
-                            }
-                        );
-                    }
-                }
-                else DrawFolderIcon(Pos, (float)FontHeight);
-                S->LastHovered = Hovered;
-            }
-            for (auto& name : ModuleOrder)
-            {
-                auto M = Modules.at(name);
-                SearchModuleAlt::RenderModuleAltSelect(M);
-            }
-        }
-
-        void NewModule(IBB_ModuleAlt&& Mod)
-        {
-            if (!Mod.Available)return;
-            auto it = FlattenedModules.find(Mod.Name);
-            int I = 0;
-            while (it != FlattenedModules.end())
-                it = FlattenedModules.find(Mod.Name + "_" + std::to_string(++I));
-            if (I) Mod.Name += "_" + std::to_string(I);
-            FlattenedModuleName.push_back(Mod.Name);
-            auto& M = FlattenedModules[Mod.Name];
-            auto& N = Modules[Mod.Name];
-            M.reset(new IBB_ModuleAlt(std::move(Mod)));
-            N = M.get();
-        }
-
-        void LoadFromDir(const std::wstring& Dir)
-        {
-            //MessageBoxW(NULL, Dir.c_str(), L"Load", MB_OK);
-            for (auto& File : FindFileRange(Dir))
-            {
-                if (PathIsDirectoryW(File.FullPath.c_str()))
-                {
-                    //if it is not . or ..
-                    if (File.Name != L"." && File.Name != L"..")
-                    {
-                        //MessageBoxW(NULL, File.FullPath.c_str(), L"Directory", MB_OK);
-                        Sub.emplace_back(new ModuleTree);
-                        Sub.back()->Name = UnicodetoUTF8(File.Name);
-                        Sub.back()->LoadFromDir(File.FullPath + L"\\*.*");
-                    }
-                }
-                else
-                {
-                    IBB_FileCheck(File.FullPath, false, true, false);
-                    //MessageBoxW(NULL, File.FullPath.c_str(), L"File", MB_OK);
-                    IBB_ModuleAlt Mod;
-                    Mod.PreLoadFromFile(File.FullPath.c_str());
-                    NewModule(std::move(Mod));
+                    //MessageBoxW(NULL, File.FullPath.c_str(), L"Directory", MB_OK);
+                    Sub.emplace_back(new ModuleTree);
+                    Sub.back()->Name = UnicodetoUTF8(File.Name);
+                    Sub.back()->LoadFromDir(File.FullPath + L"\\*.*");
                 }
             }
-            ModuleOrder = Modules | std::views::keys | std::ranges::to<std::vector>();
-            std::ranges::sort(Sub, StrCmpZHCN, [](const auto& Tree) {return Tree->Name; });
-            std::ranges::sort(ModuleOrder, StrCmpZHCN, [this](const auto& str) { return Modules[str]->DescShort; });
+            else
+            {
+                IBB_FileCheck(File.FullPath, false, true, false);
+                //MessageBoxW(NULL, File.FullPath.c_str(), L"File", MB_OK);
+                IBB_ModuleAlt Mod;
+                Mod.PreLoadFromFile(File.FullPath.c_str());
+                NewModule(std::move(Mod));
+            }
         }
-    };
+        ModuleOrder = Modules | std::views::keys | std::ranges::to<std::vector>();
+        std::ranges::sort(Sub, StrCmpZHCN, [](const auto& Tree) {return Tree->Name; });
+        std::ranges::sort(ModuleOrder, StrCmpZHCN, [this](const auto& str) { return Modules[str]->DescShort; });
+    }
+
     std::unordered_map<std::string, IBB_ModuleAlt> ArtModules;
     ModuleTree AllModules;
     ModuleTree SpecialModules;
+
+    ModuleTree& GetAllModulesTree() { return AllModules; }
+    ModuleTree& GetSpecialModulesTree() { return SpecialModules; }
     std::wstring Range1;
     std::wstring Range2;
     std::wstring Range3;
@@ -1912,58 +1799,6 @@ namespace IBB_ModuleAltDefault
         return result;
     }
 
-    void SpecialTree_RenderUI()
-    {
-        SpecialModules.RenderUI();
-    }
-    void Tree_RenderUI()
-    {
-        AllModules.RenderUI();
-    }
-    void Tree_RenderUISidebar()
-    {
-        std::function<void(const ModuleTree&)> Render;
-        Render = [&](const ModuleTree& tree) {
-            for (auto& sub : tree.Sub)
-            {
-                if (sub->Sub.empty() && sub->Modules.empty()) continue;
-                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
-                auto pos = ImGui::GetCursorScreenPos();
-                DrawFolderIcon(pos, (float)FontHeight);
-                ImGui::Dummy(ImVec2((float)FontHeight, (float)FontHeight));
-                ImGui::SameLine();
-                bool open = ImGui::TreeNodeEx(sub->Name.c_str(), flags);
-                if (open)
-                {
-                    Render(*sub);
-                    ImGui::TreePop();
-                }
-            }
-            for (auto& name: tree.ModuleOrder)
-            {
-                auto mod = tree.Modules.at(name);
-                if (!mod) continue;
-                auto label = mod->DescShort.empty() ? name : mod->DescShort;
-                ImGui::Selectable(label.c_str());
-                if (ImGui::IsItemHovered() && !mod->DescLong.empty())
-                    ImGui::SetTooltip("%s", mod->DescLong.c_str());
-                if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
-                {
-                    mod->FullyLoad();
-                    IBR_Inst_Project.AddModule(*mod, GenerateModuleTag());
-                }
-            }
-        };
-        // 系统模块（SpecialModules）—— 作为同级别文件夹
-        if (!SpecialModules.Sub.empty() || !SpecialModules.Modules.empty())
-        {
-            auto pos = ImGui::GetCursorScreenPos();
-            Render(SpecialModules);
-        }
-
-        // 用户模块（AllModules）
-        Render(AllModules);
-    }
     void Tree_ResetHover()
     {
         AllModules.ResetHover();

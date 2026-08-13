@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "IBG_InputType.h"
+#include "FromEngine/ImGuiDeps.h"
 
 struct IBB_IniLine;
 

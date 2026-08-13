@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "FromEngine/Include.h"
+#include "FromEngine/ImGuiDeps.h"
 
 void PushComboRect();
 bool IBR_Combo_Stage_I(const char* label, const char* preview_value, ImGuiComboFlags flags);

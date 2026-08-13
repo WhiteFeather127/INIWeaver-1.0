@@ -5,6 +5,7 @@
 #include "IBB_RegType.h"
 #include "IBB_Ini.h"
 #include "IBB_ModuleAlt.h"
+#include "FromEngine/ImGuiDeps.h"
 
 #ifndef _TEXT_UTF8
 #define _TEXT_UTF8

@@ -4,6 +4,7 @@
 #include "IBB_Components.h"
 #include "IBB_Ini.h"
 #include "IBR_Combo.h"
+#include "FromEngine/ImGuiDeps.h"
 
 #ifndef _TEXT_UTF8
 #define _TEXT_UTF8
@@ -83,7 +84,7 @@ struct IBB_DefaultTypeAlt
     StrPoolID Name, LinkType, Input, SecType;
     DescPoolOffset DescLong, DescShort;
     int LinkLimit{ 1 };
-    ImU32 Color{ 0xFF000000 };
+    IW::u32 Color{ 0xFF000000 };
 
     void Clear();
     bool Load(JsonObject FromJson);

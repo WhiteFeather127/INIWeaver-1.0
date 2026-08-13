@@ -2,6 +2,7 @@
 
 #include "FromEngine/Include.h"
 #include "cjson/cJSON.h"
+#include "FromEngine/ImGuiDeps.h"
 
 #ifndef _TEXT_UTF8
 #define _TEXT_UTF8
@@ -484,7 +485,7 @@ struct LinkNodeSetting
 {
     StrPoolID LinkType;
     int LinkLimit;//1 for single;0 for no links;-1 for unlimited;others for limited
-    ImU32 LinkCol;
+    IW::u32 LinkCol;
 
     bool Load(JsonObject Obj, bool* HasCustom = nullptr);
 };

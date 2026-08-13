@@ -194,6 +194,8 @@
     <ClInclude Include="FromEngine\global_tool_func.h" />
     <ClInclude Include="FromEngine\Include.h" />
     <ClInclude Include="FromEngine\InfoStack.h" />
+    <ClInclude Include="FromEngine\IWTypes.h" />
+    <ClInclude Include="FromEngine\ImGuiDeps.h" />
     <ClInclude Include="FromEngine\RFBump.h" />
     <ClInclude Include="FromEngine\types.h" />
     <ClInclude Include="IBB_CustomBool.h" />
@@ -226,6 +228,7 @@
     <ClInclude Include="IBR_ListView.h" />
     <ClInclude Include="IBR_Localization.h" />
     <ClInclude Include="IBR_Components.h" />
+    <ClInclude Include="IBR_ModuleTree.h" />
     <ClInclude Include="IBR_ImportIni.h" />
     <ClInclude Include="IBR_Misc.h" />
     <ClInclude Include="IBR_TopMost.h" />
@@ -280,6 +283,8 @@
     <ClCompile Include="IBR_Localization.cpp" />
     <ClCompile Include="IBR_Misc.cpp" />
     <ClCompile Include="IBR_Components.cpp" />
+    <ClCompile Include="IBR_ErrorCollector.cpp" />
+    <ClCompile Include="IBR_ModuleTree.cpp" />
     <ClCompile Include="IBR_Debug.cpp" />
     <ClCompile Include="IBR_FullView.cpp" />
     <ClCompile Include="IBR_ImportIni.cpp" />

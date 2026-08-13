@@ -2,8 +2,8 @@
 #include "IBB_CustomBool.h"
 #include <ranges>
 
-ImColor LoadColorFromJson(JsonObject Obj, bool& Colored);
-ImColor LoadColorFromJson(JsonObject Obj, const ImColor& Default);
+IW::Color LoadColorFromJson(JsonObject Obj, bool& Colored);
+IW::Color LoadColorFromJson(JsonObject Obj, const IW::Color& Default);
 
 
 // ======== InputTypeFactory ==========
@@ -131,7 +131,7 @@ IICPtr InputTypeFactory::CreateInputComponent_Special(IBB_ValueContainer& Cont, 
             auto oText = Obj.GetObjectItem("Text");
 
             //【, "Color": <Color>】【, "Colored": <bool>】
-            ImColor Col;
+            IW::Color Col;
             bool Colored = false;
             auto oColor = Obj.GetObjectItem("Color");
             Col = LoadColorFromJson(oColor, Colored);
@@ -142,11 +142,11 @@ IICPtr InputTypeFactory::CreateInputComponent_Special(IBB_ValueContainer& Cont, 
 
             if (oText && oText.IsTypeString())
             {
-                return std::make_unique<IIC_PureText>(oText.GetString(), Col, Colored, Disabled, Wrapped);
+                return std::make_unique<IIC_PureText>(oText.GetString(), toImColor(Col), Colored, Disabled, Wrapped);
             }
             else if (oKey && oFallback && oKey.IsTypeString() && oFallback.IsTypeString())
             {
-                return std::make_unique<IIC_LocalizedText>(oKey.GetString(), oFallback.GetString(), Col, Colored, Disabled, Wrapped);
+                return std::make_unique<IIC_LocalizedText>(oKey.GetString(), oFallback.GetString(), toImColor(Col), Colored, Disabled, Wrapped);
             }
             else
                 return nullptr;
@@ -637,7 +637,7 @@ IASOpt InputTypeFactory::CreateAcceptorSetting(IBB_ValueContainer& Cont, const J
     ImColor Col;
     bool Colored;
     auto oColor = Obj.GetObjectItem("NodeColor");
-    Col = LoadColorFromJson(oColor, Colored);
+    Col = toImColor(LoadColorFromJson(oColor, Colored));
     Setting.NodeColor = Colored ? std::make_optional(Col) : std::nullopt;
 
     return Setting;

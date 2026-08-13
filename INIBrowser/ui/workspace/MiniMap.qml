@@ -1,0 +1,147 @@
+// MiniMap.qml
+// 迷你地图组件，对应 IBR_FullView::DrawView() (line 71-162)
+// 绘制所有 Section 矩形（归一化坐标）+ 视口框 + 点击定位
+import QtQuick
+
+Canvas {
+    id: root
+    property var sections: []
+    property var viewRect: ({ x: 0, y: 0, w: 0, h: 0 })  // 视口在 Eq 坐标
+    property var eqCenter: ({ x: 0, y: 0 })
+    property real viewScale: 20.0  // 固定缩放因子
+    // 阶段 13.4：背景拖拽状态（对应 IBR_WorkSpace::IsBgDragging）
+    // true 时视口框用 CenterCrossColor，false 时用 ClipFrameLineColor
+    property bool isBgDragging: false
+
+    // 点击定位信号
+    signal clicked(variant eqPos)
+
+    onSectionsChanged: requestPaint()
+    onViewRectChanged: requestPaint()
+    onEqCenterChanged: requestPaint()
+    onIsBgDraggingChanged: requestPaint()
+
+    onPaint: {
+        var ctx = getContext("2d");
+        ctx.reset();
+
+        if (sections.length === 0) return;
+
+        // 计算所有 Section 的边界
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            minX = Math.min(minX, s.eqX);
+            minY = Math.min(minY, s.eqY);
+            maxX = Math.max(maxX, s.eqX + s.eqW);
+            maxY = Math.max(maxY, s.eqY + s.eqH);
+        }
+
+        // 包含视口
+        minX = Math.min(minX, viewRect.x);
+        minY = Math.min(minY, viewRect.y);
+        maxX = Math.max(maxX, viewRect.x + viewRect.w);
+        maxY = Math.max(maxY, viewRect.y + viewRect.h);
+
+        var worldW = maxX - minX;
+        var worldH = maxY - minY;
+        if (worldW < 1 || worldH < 1) return;
+
+        // 缩放到迷你地图尺寸
+        var scaleX = width / worldW;
+        var scaleY = height / worldH;
+        var scale = Math.min(scaleX, scaleY) * 0.9;  // 留边距
+
+        var offsetX = (width - worldW * scale) / 2;
+        var offsetY = (height - worldH * scale) / 2;
+
+        function eqToMini(x, y) {
+            return {
+                x: (x - minX) * scale + offsetX,
+                y: (y - minY) * scale + offsetY
+            };
+        }
+
+        // 绘制 Section 矩形
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            var ul = eqToMini(s.eqX, s.eqY);
+            var dr = eqToMini(s.eqX + s.eqW, s.eqY + s.eqH);
+
+            ctx.fillStyle = s.ignored ? "#5a5a5a" : (s.registerColor || "#808080");
+            ctx.globalAlpha = s.hidden ? 0.3 : 0.8;
+            ctx.fillRect(ul.x, ul.y, dr.x - ul.x, Math.max(2, dr.y - ul.y));
+        }
+        ctx.globalAlpha = 1.0;
+
+        // 绘制视口框
+        // 阶段 13.4：拖拽背景时切色（对应 IBR_FullView.cpp:160）
+        // IsBgDragging ? CenterCrossColor : ClipFrameLineColor
+        var vpUL = eqToMini(viewRect.x, viewRect.y);
+        var vpDR = eqToMini(viewRect.x + viewRect.w, viewRect.y + viewRect.h);
+        ctx.strokeStyle = isBgDragging ? "#858585" : "#007acc";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(vpUL.x, vpUL.y, vpDR.x - vpUL.x, vpDR.y - vpUL.y);
+
+        // 中心十字
+        var center = eqToMini(eqCenter.x, eqCenter.y);
+        ctx.strokeStyle = "#858585";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(center.x - 4, center.y);
+        ctx.lineTo(center.x + 4, center.y);
+        ctx.moveTo(center.x, center.y - 4);
+        ctx.lineTo(center.x, center.y + 4);
+        ctx.stroke();
+    }
+
+    // 阶段 13.4：鼠标按下时持续定位（对应 IBR_FullView.cpp:185-189）
+    // ImGui: if (IsItemHovered() && IsMouseDown(Left)) ChangeOffsetPos(MP - CRect)
+    // Qt: 用 onPositionChanged 替代 onClicked，按下时持续跟随鼠标
+    MouseArea {
+        anchors.fill: parent
+        // 按下时立即定位一次
+        onPressed: (mouse) => {
+            root.locateTo(mouseX, mouseY)
+        }
+        // 按住拖动时持续定位
+        onPositionChanged: (mouse) => {
+            if (pressed) {
+                root.locateTo(mouseX, mouseY)
+            }
+        }
+
+        // 复用：逆变换迷你地图坐标 -> Eq 坐标并发信号
+        // 提取为函数避免重复（onClicked 旧逻辑已合并到此处）
+    }
+
+    // 逆变换：迷你地图坐标 -> Eq 坐标，发出 clicked 信号
+    function locateTo(mx, my) {
+        if (sections.length === 0) return;
+
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            minX = Math.min(minX, s.eqX);
+            minY = Math.min(minY, s.eqY);
+            maxX = Math.max(maxX, s.eqX + s.eqW);
+            maxY = Math.max(maxY, s.eqY + s.eqH);
+        }
+        minX = Math.min(minX, viewRect.x);
+        minY = Math.min(minY, viewRect.y);
+        maxX = Math.max(maxX, viewRect.x + viewRect.w);
+        maxY = Math.max(maxY, viewRect.y + viewRect.h);
+
+        var worldW = maxX - minX;
+        var worldH = maxY - minY;
+        var scaleX = width / worldW;
+        var scaleY = height / worldH;
+        var scale = Math.min(scaleX, scaleY) * 0.9;
+        var offsetX = (width - worldW * scale) / 2;
+        var offsetY = (height - worldH * scale) / 2;
+
+        var eqX = (mx - offsetX) / scale + minX;
+        var eqY = (my - offsetY) / scale + minY;
+        root.clicked({ x: eqX, y: eqY });
+    }
+}

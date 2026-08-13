@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "FromEngine/Include.h"
 #include "FromEngine/RFBump.h"
+#include "FromEngine/ImGuiDeps.h"
 
 struct IBR_Section;
 struct IBR_Project;
@@ -32,6 +33,8 @@ namespace IBR_RecentManager
     void Push(const std::wstring& Path);
     void Save();
     void WanDuZiLe();
+    // Qt 迁移：暴露最近文件列表（UTF-8），供 ProjectController 读取
+    const std::vector<std::string>& GetRecentList();
 }
 
 
@@ -49,6 +52,9 @@ namespace IBR_PopupManager
         StdMessage Close;//run when it can be closed and it is closed
 
         ImVec2 Size{ 0,0 };
+
+        // Qt UI Hook：存储文本内容供 QML 弹窗读取
+        std::vector<std::string> Texts;
 
         Popup& Create(const _TEXT_UTF8 std::string& title);
         Popup& CreateModal(const _TEXT_UTF8 std::string& title, bool canclose, StdMessage close = []() {});
@@ -71,9 +77,17 @@ namespace IBR_PopupManager
     extern bool FirstRightClick;
     extern ImVec2 RightClickMenuPos;
     extern std::vector<StdMessage> DelayedPopupAction;
+
+    // Qt UI Hook：允许 Qt 注册回调接收 ImGui 弹窗请求
+    // 当 SetCurrentPopup 被调用时，钩子被触发，Qt 侧转发到 QML 弹窗
+    using PopupHookFn = std::function<void(const Popup&)>;
+    void SetPopupHook(PopupHookFn fn);
+    void SetRightClickMenuHook(PopupHookFn fn);
+
     void SetCurrentPopup(Popup&& sc);
     void UpdatePopupPosForResize();
-    inline void ClearCurrentPopup() { HasPopup = false; }
+    // 阶段 11.5：ClearCurrentPopup 不再 inline，实现中会通知 Qt Hook 同步 hasPopup=false
+    void ClearCurrentPopup();
     void ClearRightClickMenu();
     void SetRightClickMenu(Popup&& sc, ImVec2 Pos);
     Popup SingleText(const _TEXT_UTF8 std::string& StrId, const _TEXT_UTF8 std::string& Text, bool Modal);

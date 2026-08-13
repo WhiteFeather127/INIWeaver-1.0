@@ -4,7 +4,6 @@
 #include "FromEngine/RFBump.h"
 #include "FromEngine/global_timer.h"
 #include "IBB_RegType.h"
-#include <imgui_internal.h>
 #include <ranges>
 #include "IBB_IniLine.h"
 
@@ -348,7 +347,7 @@ bool IBB_SubSec::UpdateAll()
                             ClaimLink(LineIdx, LineMult, cidx, NewLT.size());
 
                             ImU32 Col = piic->UseCustomSetting ? piic->NodeSetting.LinkCol :
-                                (_Line.Default ? _Line.Default->LinkNode.LinkCol : (ImU32)IBB_DefaultRegType::GetDefaultNodeColor());
+                                (_Line.Default ? _Line.Default->LinkNode.LinkCol : IW::ToU32(IBB_DefaultRegType::GetDefaultNodeColor()));
                             auto RootID = Root->GetThisID();
                             auto seid = IBR_NodeSession::GetSessionIdx(
                                 RootID,
@@ -387,7 +386,7 @@ bool IBB_SubSec::UpdateAll()
                     auto&& [toidx, ToKey, TargetLineMult] = IBF_Inst_Project.Project.GetSecAndLineID(str, IniType);
                     if (toidx.Empty())continue;//目标不存在，跳过
                     ClaimLink(LineIdx, LineMult, 0, NewLT.size());
-                    ImU32 Col = (_Line.Default ? _Line.Default->LinkNode.LinkCol : (ImU32)IBB_DefaultRegType::GetDefaultNodeColor());
+                    IW::u32 Col = (_Line.Default ? _Line.Default->LinkNode.LinkCol : IW::ToU32(IBB_DefaultRegType::GetDefaultNodeColor()));
                     auto RootID = Root->GetThisID();
                     auto seid = IBR_NodeSession::GetSessionIdx(
                         RootID,

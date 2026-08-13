@@ -1,4 +1,4 @@
-﻿
+
 #include "IBR_Project.h"
 #include "IBFront.h"
 #include "Global.h"
@@ -83,17 +83,17 @@ std::optional<ModuleID_t> _PROJ_CMD_WRITE _PROJ_CMD_UPDATE IBR_Project::AddModul
             Mouse.y = std::min((float)IBR_RealCenter::WorkSpaceDR.y, Mouse.y);
         }
         else Mouse = IBR_RealCenter::Center;
-        InitEqPos = IBR_WorkSpace::RePosToEqPos(Mouse) + Module.EqDelta;
+        InitEqPos = IBR_WorkSpace::RePosToEqPos(Mouse) + toImVec2(Module.EqDelta);
     }
     else
     {
-        InitEqPos = Module.EqDelta;
+        InitEqPos = toImVec2(Module.EqDelta);
     }
 
 
     if (Module.IsComment)
     {
-        auto Ret = CreateCommentBlock(InitEqPos, Module.Comment, Module.EqSize);
+        auto Ret = CreateCommentBlock(InitEqPos, Module.Comment, toImVec2(Module.EqSize));
         if (Ret.HasBack())return Ret.ID;
         else return std::nullopt;
     }
@@ -109,9 +109,9 @@ std::optional<ModuleID_t> _PROJ_CMD_WRITE _PROJ_CMD_UPDATE IBR_Project::AddModul
         auto sd = Sec.GetSectionData();
         if (!sd)return std::nullopt;
         //sd->Dragging = true;
-        sd->EqDelta = Module.EqDelta;
+        sd->EqDelta = toImVec2(Module.EqDelta);
         //MessageBoxA(NULL, ("(" + std::to_string(sd->EqDelta.x) + " , " + std::to_string(sd->EqDelta.y) + ")").c_str(), "Load1!", MB_OK);
-        sd->EqSize = Module.EqSize;
+        sd->EqSize = toImVec2(Module.EqSize);
         sd->Ignore = Module.Ignore;
         sd->EqPos = InitEqPos;
         sd->CollapsedInComposed = Module.CollapsedInComposed;
@@ -619,7 +619,7 @@ READ:
 
 void IBR_Project::Load(const IBS_Project& Proj)
 {
-    IBR_WorkSpace::EqCenterPrev = IBR_FullView::EqCenter = Proj.FullView_EqCenter;
+    IBR_WorkSpace::EqCenterPrev = IBR_FullView::EqCenter = toImVec2(Proj.FullView_EqCenter);
     IBR_WorkSpace::RatioPrev = IBR_FullView::Ratio = Proj.FullView_Ratio;
     IBR_EditFrame::Empty = true;
     IBB_ClipBoardData ClipData;
@@ -658,7 +658,7 @@ void IBR_Project::Load(const IBS_Project& Proj)
 
 void IBR_Project::Save(IBS_Project& Proj)
 {
-    Proj.FullView_EqCenter = IBR_FullView::EqCenter;
+    Proj.FullView_EqCenter = toIWVec2(IBR_FullView::EqCenter);
     Proj.FullView_Ratio = IBR_FullView::Ratio;
     IBB_ClipBoardData ClipData;
     ClipData.GenerateAll(true, true);

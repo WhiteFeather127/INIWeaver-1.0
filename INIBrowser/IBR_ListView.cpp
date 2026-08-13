@@ -282,10 +282,10 @@ namespace IBR_ListView
             auto& Reg = IBB_DefaultRegType::GetRegType(sec.Register);
             if (HasCol)
             {
-                ImGui::PushStyleColor(ImGuiCol_FrameBg, Reg.FrameColor.Value);
-                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Reg.FrameColorPlus1.Value);
-                ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Reg.FrameColorPlus2.Value);
-                ImGui::PushStyleColor(ImGuiCol_CheckMark, Reg.FrameColorH.Value);
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, toImVec4(Reg.FrameColor));
+                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, toImVec4(Reg.FrameColorPlus1));
+                ImGui::PushStyleColor(ImGuiCol_FrameBgActive, toImVec4(Reg.FrameColorPlus2));
+                ImGui::PushStyleColor(ImGuiCol_CheckMark, toImVec4(Reg.FrameColorH));
             }
             bool Styled = dat->Ignore || dat->Frozen || dat->Hidden;
             if (dat->Hidden) ImGui::PushStyleColor(ImGuiCol_Text, IBR_Color::HiddenSecColor.Value);

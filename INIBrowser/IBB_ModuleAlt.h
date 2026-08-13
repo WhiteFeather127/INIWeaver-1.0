@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "IBG_Ini.h"
 #include "IBG_InputType_Defines.h"
+#include "FromEngine/ImGuiDeps.h"
 
 class ClipWriteStream
 {
@@ -131,8 +132,8 @@ struct ModuleClipData
     bool CollapsedInComposed;
     bool Frozen;
     bool Hidden;
-    ImVec2 EqSize;
-    ImVec2 EqDelta;
+    IW::Vec2 EqSize;
+    IW::Vec2 EqDelta;
     PairClipString Desc;
     std::string Comment;
     std::string Inherit;
@@ -167,7 +168,7 @@ ClipWriteStream& operator<<(ClipWriteStream& stm, float v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, uint32_t v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, const std::string& v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, const IniToken& v);
-ClipWriteStream& operator<<(ClipWriteStream& stm, const ImVec2& v);
+ClipWriteStream& operator<<(ClipWriteStream& stm, const IW::Vec2& v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, const PairClipString& v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, const PairClipOnShow& v);
 ClipWriteStream& operator<<(ClipWriteStream& stm, const ClipIICStatus& v);
@@ -187,7 +188,7 @@ ClipReadStream& operator>>(ClipReadStream& stm, float& v);
 ClipReadStream& operator>>(ClipReadStream& stm, uint32_t& v);
 ClipReadStream& operator>>(ClipReadStream& stm, std::string& v);
 ClipReadStream& operator>>(ClipReadStream& stm, IniToken& v);
-ClipReadStream& operator>>(ClipReadStream& stm, ImVec2& v);
+ClipReadStream& operator>>(ClipReadStream& stm, IW::Vec2& v);
 ClipReadStream& operator>>(ClipReadStream& stm, PairClipString& v);
 ClipReadStream& operator>>(ClipReadStream& stm, PairClipOnShow& v);
 ClipReadStream& operator>>(ClipReadStream& stm, ClipIICStatus& v);
@@ -266,15 +267,34 @@ struct IBB_ModuleAlt
 namespace IBB_ModuleAltDefault
 {
     extern std::vector<std::string> FlattenedModuleName;
+
+    // 模块树数据结构（业务层维护：名称、子节点、模块映射、悬停状态）
+    // 渲染逻辑（RenderUI/Tree_RenderUI*）已迁移至 IBR_ModuleTree 命名空间
+    struct ModuleTree
+    {
+        std::string _TEXT_UTF8 Name;
+        std::vector<std::unique_ptr<ModuleTree>> Sub;
+        std::unordered_map<std::string, IBB_ModuleAlt*> Modules;
+        std::vector<std::string> ModuleOrder;
+        bool ChildMenuHovered{ false };
+        bool LastHovered{ false };
+
+        bool ChildHovered() const;
+        void ResetHover();
+        void NewModule(IBB_ModuleAlt&& Mod);
+        void LoadFromDir(const std::wstring& Dir);
+    };
+
+    // 访问器：供 IBR_ModuleTree 渲染层使用（返回内部全局树实例引用）
+    ModuleTree& GetAllModulesTree();
+    ModuleTree& GetSpecialModulesTree();
+
     void Load(const wchar_t* FileRange, const wchar_t* FileRange2, const wchar_t* FileRange3, const wchar_t* FileRange4);
     std::wstring GenerateModulePath();
     std::wstring GenerateModulePath_NoName();
     IBB_ModuleAlt* GetModule(const std::string& Name);
     std::vector<IBB_ModuleAlt*> Search(const std::string& Str, bool ConsiderRegName, bool ConsiderDescName, bool ConsiderDesc);
 	void NewModule(IBB_ModuleAlt&& M);
-	void Tree_RenderUI();
-	void SpecialTree_RenderUI();
-	void Tree_RenderUISidebar();
 	void Tree_ResetHover();
 	bool IsModuleTreeEmpty();
 

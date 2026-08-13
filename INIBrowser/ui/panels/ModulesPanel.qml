@@ -1,0 +1,270 @@
+// ModulesPanel.qml
+// 模块菜单面板，对应 IBR_Panel.cpp ControlPanel_Modules() (line 165-187)
+// 布局：标题 + 搜索框 + 包含特殊模块开关 + 折叠全部按钮 + 分隔线 + 模块树
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "../components"
+
+Item {
+    id: root
+
+    // 顶部标题栏 + 折叠全部按钮
+    Rectangle {
+        id: header
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 32
+        color: "#2d2d2d"
+
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("模块")
+            color: "#cccccc"
+            font.pixelSize: 13
+            font.bold: true
+        }
+
+        StyledButton {
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("折叠全部")
+            width: 64
+            height: 22
+            enabled: !moduleTreeModel.isEmpty
+            font.pixelSize: 11
+            onClicked: moduleTreeModel.collapseAll()
+        }
+
+        // 底部分隔线
+        Rectangle {
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 1
+            color: "#1e1e1e"
+        }
+    }
+
+    // 阶段 6.1：搜索框 + 包含特殊模块开关（对应 SearchModuleAlt::RenderUI）
+    Rectangle {
+        id: searchBox
+        anchors.top: header.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 56
+        color: "#252525"
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 4
+
+            // 搜索框（对应 ImGui InputText with SearchIconBg）
+            // 单向同步策略：用户输入时 QML -> C++ 同步 filter
+            // C++ 端 filter 被外部改变时（如清空按钮），只在文本不一致且非聚焦时回写
+            // 避免 IME 组合期间 C++ setFilter 后回写 text 打断中文输入
+            TextField {
+                id: searchField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 24
+                placeholderText: qsTr("搜索模块...")
+                color: "#d4d4d4"
+                font.pixelSize: 12
+                selectByMouse: true
+                onTextChanged: moduleTreeModel.filter = text
+
+                background: Rectangle {
+                    color: "#1e1e1e"
+                    border.color: searchField.activeFocus ? "#007acc" : "#3c3c3c"
+                    border.width: 1
+                    radius: 3
+                }
+
+                // 仅在非聚焦（用户未在输入）且文本不一致时回写，避免打断 IME
+                Connections {
+                    target: moduleTreeModel
+                    function onFilterChanged() {
+                        if (!searchField.activeFocus
+                            && searchField.text !== moduleTreeModel.filter) {
+                            searchField.text = moduleTreeModel.filter
+                        }
+                    }
+                }
+            }
+
+            // 包含特殊模块开关（对应 ModuleTreeModel.includeSpecial）
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                StyledCheckBox {
+                    checked: moduleTreeModel.includeSpecial
+                    onToggled: moduleTreeModel.includeSpecial = checked
+                    text: qsTr("包含特殊模块")
+                    font.pixelSize: 11
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+        }
+
+        // 底部分隔线
+        Rectangle {
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 1
+            color: "#1e1e1e"
+        }
+    }
+
+    // 空状态提示（对应 ImGui 行 174-178）
+    Text {
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -16
+        visible: moduleTreeModel.isEmpty
+        color: "#5a5a5a"
+        font.pixelSize: 13
+        text: qsTr("无可用模块")
+    }
+
+    // 模块树列表
+    ListView {
+        id: treeView
+        anchors.top: searchBox.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        visible: !moduleTreeModel.isEmpty
+        clip: true
+        model: moduleTreeModel
+
+        delegate: Item {
+            width: treeView.width
+            height: 28
+
+            // 缩进（对应 ImGui TreeNodeEx 的深度）
+            property real indent: depth * 16
+
+            Rectangle {
+                anchors.fill: parent
+                color: mouseArea.containsMouse ? "#3c3c3c" : "transparent"
+
+                // 文件夹/模块图标
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8 + indent
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: isFolder ? (expanded ? "📂" : "📁") : "📄"
+                    font.pixelSize: 14
+                }
+
+                // 名称
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 28 + indent
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: name
+                    color: isFolder ? "#cccccc" : "#d4d4d4"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+
+                // 子节点数（仅目录显示）
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: isFolder && hasChildren
+                    text: childCount
+                    color: "#858585"
+                    font.pixelSize: 11
+                }
+
+                MouseArea {
+                    id: mouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (isFolder) {
+                            moduleTreeModel.toggleExpanded(index)
+                        } else {
+                            // 对应 Tree_RenderUISidebar: IsItemClicked -> AddModule
+                            moduleTreeModel.addModule(index)
+                        }
+                    }
+
+                    onContainsMouseChanged: {
+                        // Tooltip 对应 ImGui SetTooltip（仅模块节点有 DescLong）
+                        if (containsMouse && !isFolder && descLong.length > 0) {
+                            ToolTip.show(descLong, 5000)
+                        } else {
+                            ToolTip.hide()
+                        }
+                    }
+
+                    // 拖拽支持：左键按住模块节点拖动到工作区
+                    drag.target: !isFolder ? dragHelper : null
+                    drag.threshold: 8
+
+                    onPressed: {
+                        if (!isFolder) {
+                            dragHelper.dragModuleKey = moduleKey
+                            dragHelper.dragModuleName = name
+                        }
+                    }
+                    onReleased: {
+                        dragHelper.Drag.drop()
+                    }
+                }
+
+                // 拖拽视觉辅助（跟随鼠标的小预览）
+                Item {
+                    id: dragHelper
+                    visible: mouseArea.drag.active && !isFolder
+                    width: 120
+                    height: 24
+                    x: mouseArea.mouseX - width / 2
+                    y: mouseArea.mouseY - height / 2
+                    Drag.active: mouseArea.drag.active
+                    Drag.dragType: Drag.Automatic
+                    Drag.mimeData: {
+                        "text/plain": moduleKey
+                    }
+                    Drag.supportedActions: Qt.CopyAction
+                    Drag.proposedAction: Qt.CopyAction
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "#007acc"
+                        border.color: "#1e1e1e"
+                        border.width: 1
+                        radius: 3
+                        opacity: 0.9
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: name
+                            color: "#ffffff"
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            width: parent.width - 8
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+
+                    property string dragModuleKey: ""
+                    property string dragModuleName: ""
+                }
+            }
+        }
+    }
+}

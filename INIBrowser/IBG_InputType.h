@@ -3,6 +3,7 @@
 #include "FromEngine/Include.h"
 #include "IBB_OutputFormat.h"
 #include "IBR_LinkNode.h"
+#include "FromEngine/ImGuiDeps.h"
 #include <variant>
 #include "IBB_PropStringPool.h"
 

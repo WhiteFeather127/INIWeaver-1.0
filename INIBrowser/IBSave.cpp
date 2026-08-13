@@ -1,4 +1,4 @@
-﻿
+
 #include "IBSave.h"
 #include "IBR_Misc.h"
 #include "Global.h"
@@ -380,7 +380,9 @@ void IBS_Thr_SaveLoop()
     {
         while(!SStack.Empty())
             for (const auto& msg : SStack.Release())
+            {
                 msg();
+            }
         IBS_Complete();
     }
 }

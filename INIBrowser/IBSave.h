@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "FromEngine/Include.h"
 #include "FromEngine/RFBump.h"
+#include "FromEngine/ImGuiDeps.h"
 
 
 namespace InsertLoad
@@ -69,7 +70,7 @@ struct IBS_Project
     uint64_t CreateTime;
     int CreateVersionMajor, CreateVersionMinor, CreateVersionRelease;
     float FullView_Ratio;
-    ImVec2 FullView_EqCenter;
+    IW::Vec2 FullView_EqCenter;
     uint64_t PersistentID;
     std::vector<BYTE> Data;
 

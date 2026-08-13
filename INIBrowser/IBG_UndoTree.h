@@ -3,6 +3,7 @@
 #include "IBSave.h"
 #include "IBB_Index.h"
 #include "IBB_Components.h"
+#include "FromEngine/ImGuiDeps.h"
 
 struct IBG_UndoStack
 {

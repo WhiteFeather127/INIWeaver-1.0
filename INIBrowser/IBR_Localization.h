@@ -15,6 +15,13 @@ namespace IBR_L10n
     void SetLanguage(const std::string& Language);
     bool RenderUI(std::string_view Title);
     std::string ProcessEscape(const std::string& v);
+
+    // 阶段 13.1：Qt 侧语言切换支持（对应 RenderUI 内 Combo 的数据源）
+    // 返回当前语言 key（对应 CurrentLanguage）
+    const std::string& GetCurrentLanguage();
+    // 返回可用语言列表（key, LangName 显示名），跳过 "Basic"
+    // 对应 RenderUI 中 for(auto&[k,v]:LocalizationMap) if(k=="Basic")continue; 分支
+    std::vector<std::pair<std::string, std::string>> GetAvailableLanguages();
 }
 
 #define loc(x) IBR_L10n::GetString((x))

@@ -4,6 +4,7 @@
 #include "IBSave.h"
 #include "IBG_InputType_Defines.h"
 #include "IBR_IniLine.h"
+#include "FromEngine/ImGuiDeps.h"
 #include <any>
 
 extern int HintStayTimeMillis;
@@ -74,6 +75,7 @@ struct IBR_SectionData
     bool Frozen{ false };
     bool Hidden{ false };
     bool UpdatePosByEq{ false };
+    bool UICollapsed{ false };  // Qt UI 折叠状态持久化（不污染原 ImGui 业务字段）
     float FinalY{ 0.0f };
     float WidthFix{ 0.0f };
     std::shared_ptr<BufString> CommentEdit;

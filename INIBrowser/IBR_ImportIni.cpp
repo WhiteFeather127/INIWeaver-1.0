@@ -33,8 +33,18 @@ namespace IBR_ImportPreview
     // 可用注册表类型列表（弹出下拉菜单用）
     static std::vector<std::string> g_AvailableRegTypes;
 
+    // 阶段 11.1：Qt 导入预览 Hook（可选，由 QtMain.cpp 注册）
+    static ImportPreviewHookFn g_qtHook;
+
     void Open(ImportedIniFile&& File, const std::function<void(const IBR_ImportResult&)>& Callback)
     {
+        // 阶段 11.1：若 Qt Hook 已注册，转发给 Qt 侧处理
+        if (g_qtHook)
+        {
+            g_qtHook(std::move(File), Callback);
+            return;
+        }
+
         g_File = std::move(File);
         g_Callback = Callback;
         g_OpenPending = true;
@@ -49,6 +59,12 @@ namespace IBR_ImportPreview
             g_AvailableRegTypes.push_back(Name);
         // 排序以便显示
         std::sort(g_AvailableRegTypes.begin(), g_AvailableRegTypes.end());
+    }
+
+    // 阶段 11.1：注册 Qt 导入预览 Hook
+    void SetHook(ImportPreviewHookFn fn)
+    {
+        g_qtHook = std::move(fn);
     }
 
     void RegenMatch(const std::string& Search)

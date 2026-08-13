@@ -1,4 +1,5 @@
 ﻿#include "IBR_Components.h"
+#include "IBR_ErrorCollector.h"
 #include "IBFront.h"
 #include "Global.h"
 #include "FromEngine/RFBump.h"
@@ -6,7 +7,6 @@
 #include "IBB_ModuleAlt.h"
 #include "IBB_RegType.h"
 #include "IBB_Index.h"
-#include <imgui_internal.h>
 
 const char* InheritSubSecName = "A__INHERIT_SUBSEC";
 const char* DefaultSubSecName = "B__DEFAULT_SUBSEC";
@@ -82,9 +82,9 @@ bool IBB_DefaultTypeList::LoadFromAlt()
     return true;
 }
 
-ImU32 StrToCol(const std::string& Str)
+IW::u32 StrToCol(const std::string& Str)
 {
-    ImU32 V = strtol(Str.c_str(), nullptr, 16);
+    IW::u32 V = strtol(Str.c_str(), nullptr, 16);
     if (V > 0x1000000 || Str.length() > 6)
     {
         //ABGR
@@ -171,7 +171,7 @@ bool IBB_DefaultTypeList::LoadFromJsonFile(const wchar_t* Name)
     std::wstring FileName(const std::wstring & ss);
     JsonFile F;
     auto V = FileName(Name);
-    IBR_PopupManager::AddJsonParseErrorPopup(F.ParseFromFileChecked(UnicodetoUTF8(Name).c_str(), loc("Error_JsonParseErrorPos"), nullptr),
+    IBB_ErrorReport::AddJsonParseErrorPopup(F.ParseFromFileChecked(UnicodetoUTF8(Name).c_str(), loc("Error_JsonParseErrorPos"), nullptr),
         UnicodetoUTF8(std::vformat(locw("Error_JsonSyntaxError"), std::make_wformat_args(V))));
     if (!F.Available())return false;
     LoadFromJsonObject(F);
