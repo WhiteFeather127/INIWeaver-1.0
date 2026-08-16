@@ -19,7 +19,7 @@
 
 project = 'INIWeaver'
 copyright = '2025, The INIWeaver Authors'
-author = 'Ironhammer Std, Kenosis, WhiteFeather127, 九千天华'
+author = 'ProsperousBeyond'
 
 
 
