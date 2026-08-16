@@ -191,6 +191,50 @@ ApplicationWindow {
         color: "transparent"  // 透明背景，由下方圆角容器绘制（避免系统矩形阴影）
         visible: false
 
+        // ---- 8 方向 resize 状态与算法（无边框窗口无系统边框，需手动实现）----
+        // 8 个热区 MouseArea 共用：_rsBegin 记录起点，_rsUpdate 按 edge 更新 宽/高/x/y
+        property real _rsStartW: 0
+        property real _rsStartH: 0
+        property real _rsStartX: 0
+        property real _rsStartY: 0
+        property real _rsStartGX: 0
+        property real _rsStartGY: 0
+        property string _rsEdge: ""  // "l"/"r"/"t"/"b"/"lt"/"rt"/"lb"/"rb"
+
+        function _rsBegin(gx, gy, edge) {
+            _rsStartW = miniMapWindow.width
+            _rsStartH = miniMapWindow.height
+            _rsStartX = miniMapWindow.x
+            _rsStartY = miniMapWindow.y
+            _rsStartGX = gx
+            _rsStartGY = gy
+            _rsEdge = edge
+        }
+        function _rsUpdate(gx, gy) {
+            var dx = gx - _rsStartGX
+            var dy = gy - _rsStartGY
+            var w = _rsStartW, h = _rsStartH, x = _rsStartX, y = _rsStartY
+            var e = _rsEdge
+            if (e.indexOf("r") >= 0) w = _rsStartW + dx
+            if (e.indexOf("b") >= 0) h = _rsStartH + dy
+            if (e.indexOf("l") >= 0) { w = _rsStartW - dx; x = _rsStartX + dx }
+            if (e.indexOf("t") >= 0) { h = _rsStartH - dy; y = _rsStartY + dy }
+            // 最小尺寸钳制：从左/上拉伸时保持右/下边缘不动
+            if (w < miniMapWindow.minimumWidth) {
+                if (e.indexOf("l") >= 0) x = _rsStartX + (_rsStartW - miniMapWindow.minimumWidth)
+                w = miniMapWindow.minimumWidth
+            }
+            if (h < miniMapWindow.minimumHeight) {
+                if (e.indexOf("t") >= 0) y = _rsStartY + (_rsStartH - miniMapWindow.minimumHeight)
+                h = miniMapWindow.minimumHeight
+            }
+            miniMapWindow.x = x
+            miniMapWindow.y = y
+            miniMapWindow.width = w
+            miniMapWindow.height = h
+        }
+        // ---- resize 状态与算法结束 ----
+
         // 圆角 + 边框容器（与模块相近：圆角 3 + #3c3c3c 1px 边框）
         Rectangle {
             anchors.fill: parent
@@ -279,36 +323,85 @@ ApplicationWindow {
             }
         }
 
-        // 右下角调整大小手柄（无边框窗口无系统 resize 边框，需手动实现）
+        // ---- 全方向 resize 热区（边 5px，角 12x12，角优先于边）----
+        // 四边：左右改宽、上下改高（中间段，避开四角）
         MouseArea {
-            id: resizeHandle
-            width: 16
-            height: 16
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 12
+            height: 5
+            cursorShape: Qt.SizeVerCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "t") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            height: 5
+            cursorShape: Qt.SizeVerCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "b") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            width: 5
+            cursorShape: Qt.SizeHorCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "l") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            width: 5
+            cursorShape: Qt.SizeHorCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "r") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+
+        // 四角：同时改宽高（右上与关闭按钮重叠，关闭优先）
+        MouseArea {
+            width: 12
+            height: 12
+            anchors.left: parent.left
+            anchors.top: parent.top
+            cursorShape: Qt.SizeFDiagCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "lt") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            width: 12
+            height: 12
+            anchors.right: parent.right
+            anchors.top: parent.top
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "rt") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            width: 12
+            height: 12
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "lb") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
+        }
+        MouseArea {
+            width: 12
+            height: 12
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             cursorShape: Qt.SizeFDiagCursor
-
-            property real startW: 0
-            property real startH: 0
-            property real startGX: 0
-            property real startGY: 0
-
-            onPressed: (mouse) => {
-                // 注意：不能直接用 mouse.globalX（Qt 6.8 实测 undefined），用 mapToGlobal 换算
-                var gp = resizeHandle.mapToGlobal(mouse.x, mouse.y)
-                startW = miniMapWindow.width
-                startH = miniMapWindow.height
-                startGX = gp.x
-                startGY = gp.y
-            }
-            onPositionChanged: (mouse) => {
-                if (!pressed) return
-                var gp = resizeHandle.mapToGlobal(mouse.x, mouse.y)
-                miniMapWindow.width = Math.max(
-                    miniMapWindow.minimumWidth, startW + (gp.x - startGX))
-                miniMapWindow.height = Math.max(
-                    miniMapWindow.minimumHeight, startH + (gp.y - startGY))
-            }
+            onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "rb") }
+            onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
     }
 
