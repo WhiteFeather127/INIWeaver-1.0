@@ -246,9 +246,6 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                // 四周留 4px 边框区：窗口边框线（0-1px）+ 深色边框带（1-4px）与画布分离，
-                // resize 热区（0-3px）只在边框区触发，画布（迷你地图）边缘不再误触 resize
-                anchors.margins: 4
                 spacing: 0
 
                 // 无边框窗口的自定义标题条：拖动移动窗口 + 关闭按钮
@@ -326,15 +323,15 @@ ApplicationWindow {
             }
         }
 
-        // ---- 全方向 resize 热区（紧贴窗口边框外沿，不侵占画布交互区）----
-        // 四边 3px、四角 8x8：只覆盖边框附近的极小区域，迷你地图主体仍可点击定位
+        // ---- 全方向 resize 热区（判定在窗口最外沿边框线上）----
+        // 四边 2px：仅覆盖边框线附近（边框 1px + 画布边缘 1px），画布主体不受影响
         // 四边：左右改宽、上下改高（中间段，避开四角）
         MouseArea {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: 8
-            height: 3
+            anchors.topMargin: 6
+            height: 2
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "t") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -343,8 +340,8 @@ ApplicationWindow {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 8
-            height: 3
+            anchors.bottomMargin: 6
+            height: 2
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "b") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -353,8 +350,8 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.left: parent.left
-            anchors.leftMargin: 8
-            width: 3
+            anchors.leftMargin: 6
+            width: 2
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "l") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -363,15 +360,15 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.right: parent.right
-            anchors.rightMargin: 8
-            width: 3
+            anchors.rightMargin: 6
+            width: 2
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "r") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
 
         // 四角：同时改宽高（右上与关闭按钮重叠，关闭优先）
-        // 6x6 基本落在边框区（0-4px），仅延伸画布角 2px，误触最小化
+        // 6x6 落在窗口角（边框线交点），保持可操作大小
         MouseArea {
             width: 6
             height: 6
