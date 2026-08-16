@@ -173,6 +173,26 @@ Canvas {
 
         var eqX = (mx - offsetX) / scale + minX;
         var eqY = (my - offsetY) / scale + minY;
+
+        // 视图框限制在画布内（参考 GitHub nodify Minimap.MaxViewportOffset 思路）：
+        // includeViewportInWorld=false（视图窗口）时画布固定为模块范围，不随视口扩展；
+        // 视口中心 clamp 到 [min+半视口, max-半视口]，视图框拖到画布边缘即停、不出框。
+        // includeViewportInWorld=true（侧边栏）时画布已含视口，clamp 恒成立，跳过。
+        if (!root.includeViewportInWorld) {
+            var halfW = viewRect.w / 2;
+            var halfH = viewRect.h / 2;
+            if (worldW <= viewRect.w) {
+                eqX = (minX + maxX) / 2;  // 视口比画布宽：居中
+            } else {
+                eqX = Math.max(minX + halfW, Math.min(maxX - halfW, eqX));
+            }
+            if (worldH <= viewRect.h) {
+                eqY = (minY + maxY) / 2;  // 视口比画布高：居中
+            } else {
+                eqY = Math.max(minY + halfH, Math.min(maxY - halfH, eqY));
+            }
+        }
+
         root.clicked({ x: eqX, y: eqY });
     }
 }
