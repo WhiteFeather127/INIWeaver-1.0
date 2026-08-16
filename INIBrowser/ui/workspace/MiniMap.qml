@@ -25,6 +25,11 @@ Canvas {
     // 视图窗口（Main.qml）保持 false：画布大小固定，不随拖动位置改变
     property bool includeViewportInWorld: false
 
+    // 画布边缘与组件（窗口）边缘的固定像素边距：
+    // 等比 fit 缩放后，贴边方向距离 = canvasPadding（固定），非贴边方向因居中 ≥ canvasPadding
+    // 取代原 `* 0.9` 的相对边距（5% × 窗口尺寸，随窗口大小变化）
+    property int canvasPadding: 10
+
     // 点击定位信号
     signal clicked(variant eqPos)
 
@@ -63,13 +68,15 @@ Canvas {
         var worldH = maxY - minY;
         if (worldW < 1 || worldH < 1) return;
 
-        // 缩放到迷你地图尺寸（fit 自适应，随组件尺寸变化自动重算）
-        var scaleX = width / worldW;
-        var scaleY = height / worldH;
-        var scale = Math.min(scaleX, scaleY) * 0.9;  // 留边距
-
-        var offsetX = (width - worldW * scale) / 2;
-        var offsetY = (height - worldH * scale) / 2;
+        // 缩放到迷你地图尺寸（fit 自适应），画布与组件边缘留固定像素边距 canvasPadding
+        // 贴边方向距离 = canvasPadding（固定），非贴边方向因等比居中 ≥ canvasPadding
+        var pad = root.canvasPadding;
+        var availW = width - 2 * pad;
+        var availH = height - 2 * pad;
+        if (availW < 1 || availH < 1) return;
+        var scale = Math.min(availW / worldW, availH / worldH);
+        var offsetX = pad + (availW - worldW * scale) / 2;
+        var offsetY = pad + (availH - worldH * scale) / 2;
 
         function eqToMini(x, y) {
             return {
@@ -165,11 +172,13 @@ Canvas {
 
         var worldW = maxX - minX;
         var worldH = maxY - minY;
-        var scaleX = width / worldW;
-        var scaleY = height / worldH;
-        var scale = Math.min(scaleX, scaleY) * 0.9;
-        var offsetX = (width - worldW * scale) / 2;
-        var offsetY = (height - worldH * scale) / 2;
+        var pad = root.canvasPadding;
+        var availW = width - 2 * pad;
+        var availH = height - 2 * pad;
+        if (availW < 1 || availH < 1) return;
+        var scale = Math.min(availW / worldW, availH / worldH);
+        var offsetX = pad + (availW - worldW * scale) / 2;
+        var offsetY = pad + (availH - worldH * scale) / 2;
 
         var eqX = (mx - offsetX) / scale + minX;
         var eqY = (my - offsetY) / scale + minY;
