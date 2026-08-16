@@ -367,3 +367,6 @@ FodyWeavers.xsd
 \_build
 *.mo
 /x64/
+
+# CMake-derived solution at source root（由 sync-sln.ps1 从 build\INIWeaver.sln 派生，不进 git）
+/INIWeaver.sln

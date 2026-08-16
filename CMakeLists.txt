@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+﻿cmake_minimum_required(VERSION 3.21)
 project(INIWeaver VERSION 1.0.9 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -59,6 +59,12 @@ set(IB_RESOURCES
 # --------------------------------------------------------------------------
 # 可执行目标
 # --------------------------------------------------------------------------
+# VS 多配置生成器会在 RUNTIME_OUTPUT_DIRECTORY 后自动追加 <CONFIG> 子目录，
+# 故把源根设为运行时输出目录，最终 EXE 自然落点：
+#   Release 配置 -> <root>\Release\INIWeaver.exe（与原 ImGui 旧版本部署结构对齐）
+#   Debug 配置   -> <root>\Debug\INIWeaver.exe
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
 qt_add_executable(INIWeaver WIN32
     INIBrowser/QtMain.cpp
     ${IB_SOURCES}
