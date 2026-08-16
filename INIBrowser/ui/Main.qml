@@ -323,15 +323,14 @@ ApplicationWindow {
             }
         }
 
-        // ---- 全方向 resize 热区（判定在窗口最外沿边框线上）----
-        // 四边 2px：仅覆盖边框线附近（边框 1px + 画布边缘 1px），画布主体不受影响
+        // ---- 全方向 resize 热区（判定严格在窗口最外沿边框线 1px 上，不进入画布）----
         // 四边：左右改宽、上下改高（中间段，避开四角）
         MouseArea {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.topMargin: 6
-            height: 2
+            height: 1
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "t") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -341,7 +340,7 @@ ApplicationWindow {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 6
-            height: 2
+            height: 1
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "b") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -351,7 +350,7 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.leftMargin: 6
-            width: 2
+            width: 1
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "l") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -361,7 +360,7 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.right: parent.right
             anchors.rightMargin: 6
-            width: 2
+            width: 1
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "r") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
