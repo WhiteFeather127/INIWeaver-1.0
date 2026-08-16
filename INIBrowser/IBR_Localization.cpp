@@ -1,4 +1,4 @@
-﻿#include "IBR_Localization.h"
+#include "IBR_Localization.h"
 #include "IBR_Project.h"
 #include "FromEngine/Include.h"
 #include "Global.h"

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #define IDI_ICON1 101
 #define DllLoadFunc(Fn) (Fn=(decltype(Fn))GetProcAddress(TElib,#Fn))

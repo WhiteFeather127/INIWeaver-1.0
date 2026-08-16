@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "IBFront.h"
 #include "FromEngine/RFBump.h"
 #include "IBSave.h"
@@ -70,9 +70,19 @@ namespace IBR_ProjectManager
     void SaveAction();
     void SaveAsAction();
     void SaveOptAction();
+    // Qt 专用：路径由 QFileDialog 选定后直接另存为（跳过 SetWaitingPopup + AskSavePath）
+    // 另存为无条件写盘，不受 ChangeAfterSave 影响（SaveAction 无修改时会跳过写盘改走输出）
+    void SaveAs_WithQtPath(std::wstring Path);
     void ProjOpen_CreateAction();
+    // Qt 专用：跳过 CloseAction 的 AskIfSave，直接关闭当前项目（丢弃未保存修改）并新建
+    void ProjOpen_CreateAction_NoAsk();
+    // Qt 专用：跳过 AskIfSave 询问，直接关闭当前项目（丢弃未保存修改）
+    void CloseAction_NoAsk();
     void ProjOpen_OpenAction();
     void ProjOpen_OpenRecentAction(const std::wstring& Path);
+    // Qt 专用：跳过 CloseAction 的 AskIfSave，直接关闭当前项目并打开新项目（丢弃未保存修改）
+    // 调用前提：Qt 层已通过 ConfirmDialog3 完成未保存修改的三态确认
+    void ProjOpen_OpenRecentAction_NoAsk(const std::wstring& Path);
     void OpenRecentOptAction(const std::wstring& Path);
     void OutputAction();
     void AutoOutputAction();

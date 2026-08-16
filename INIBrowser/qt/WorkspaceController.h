@@ -14,6 +14,7 @@
 #include <QPointer>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include "IBR_Project.h"  // ModuleID_t, ImVec2
+#include "WorkspaceSectionModel.h"  // sectionsModel 完整类型（getter 返回 QObject* 需已知继承关系）
 
 class SectionLineModel;
 
@@ -30,6 +31,10 @@ class WorkspaceController : public QObject
     Q_PROPERTY(bool isProjectOpen READ isProjectOpen NOTIFY projectOpenChanged)
     Q_PROPERTY(int inputState READ inputState NOTIFY inputStateChanged)
     Q_PROPERTY(QVariantList sections READ sections NOTIFY sectionsChanged)
+    // 增量 Section 模型（QAbstractListModel）：QML Repeater 用此属性，增删模块时
+    // 只增删对应 delegate，避免整表替换重建全部 SectionNode（卡顿根因）。
+    // 保留 sections（全量列表）供 LinkRenderer/MiniMap/length 判断等使用。
+    Q_PROPERTY(QObject *sectionsModel READ sectionsModel CONSTANT)
     // D20：数据版本号，每次 sectionsChanged 时递增，供 QML 子模块绑定以实时刷新 getSectionData
     Q_PROPERTY(int sectionDataRevision READ sectionDataRevision NOTIFY sectionsChanged)
     Q_PROPERTY(QVariantList links READ links NOTIFY linksChanged)
@@ -47,8 +52,30 @@ class WorkspaceController : public QObject
     // 节点拖拽偏移量（屏幕坐标）：拖拽中实时更新，QML 端用它计算拖拽节点的临时位置
     // 拖拽结束后清零并写回 EqPos
     Q_PROPERTY(QPointF dragOffset READ dragOffset NOTIFY dragOffsetChanged)
+    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照不重建，
+    // QML LinkRenderer 渲染时对所有端点叠加此偏移，与节点移动保持一致
+    Q_PROPERTY(QPointF canvasDragOffset READ canvasDragOffset NOTIFY canvasDragOffsetChanged)
+    // 视口偏移（仿 canvasDragOffset）：拖拽侧边栏调宽/窗口 resize 时视口中心
+    // (width/2, height/2) 变化，所有模块随之整体平移，而端点表是"上次 rebuild 时"
+    // 的快照坐标 → 连线端点落后模块。QML LinkRenderer 渲染时对所有端点叠加此偏移，
+    // 与模块即时移动保持一致；下次端点表重建时归零（见 rebuildLinkEndpoints）
+    Q_PROPERTY(qreal viewportOffsetX READ viewportOffsetX NOTIFY viewportOffsetChanged)
+    Q_PROPERTY(qreal viewportOffsetY READ viewportOffsetY NOTIFY viewportOffsetChanged)
+    // 缩放叠加（仿 canvasDragOffset）：缩放中端点表保持快照不重建，
+    // QML LinkRenderer 按 zoomBaseRatio/zoomBaseCenter 基准换算端点坐标（等比+中心偏移），
+    // 与节点即时缩放保持一致；缩放停止防抖后重建端点表结束叠加（降低延迟）
+    Q_PROPERTY(bool zoomPending READ zoomPending NOTIFY zoomBaseChanged)
+    Q_PROPERTY(float zoomBaseRatio READ zoomBaseRatio NOTIFY zoomBaseChanged)
+    Q_PROPERTY(QPointF zoomBaseCenter READ zoomBaseCenter NOTIFY zoomBaseChanged)
+    // 缩放补间目标（QML 端动画读取）：滚轮只设定目标 Ratio，QML NumberAnimation
+    // 驱动每帧 applyZoomRatio 应用，动画在渲染线程与帧同步推进
+    Q_PROPERTY(float zoomTargetRatio READ zoomTargetRatio NOTIFY zoomTargetRatioChanged)
     // v3 批次 1.4：拖拽 LinkLimit=0 节点时 DropArea 接收状态（对应 ImGui IsDragDropPayloadBeingAccepted）
     Q_PROPERTY(bool dragInvalidLink READ dragInvalidLink NOTIFY dragInvalidLinkChanged)
+    // 拖拽目标命中：鼠标命中测试选中的目标节点（0=未命中），驱动目标节点预览框显示
+    Q_PROPERTY(qulonglong dragTargetSectionId READ dragTargetSectionId NOTIFY dragTargetChanged)
+    Q_PROPERTY(QString dragTargetColor READ dragTargetColor NOTIFY dragTargetChanged)
+    Q_PROPERTY(QString dragTargetText READ dragTargetText NOTIFY dragTargetChanged)
     // 拖拽中的节点 ID（单节点拖拽用，0 表示无拖拽）
     // 修复：避免 beginMoveSection 中 refresh() 重建 QVariantList 导致 mouse grab 丢失
     Q_PROPERTY(qulonglong draggingSectionId READ draggingSectionId NOTIFY draggingSectionIdChanged)
@@ -79,8 +106,13 @@ public:
     QRectF workspaceRect() const;
     QRectF viewportEqRect() const;
     bool isProjectOpen() const;
+    bool zoomPending() const { return m_zoomPending; }
+    float zoomBaseRatio() const { return m_zoomBaseRatio; }
+    QPointF zoomBaseCenter() const { return m_zoomBaseCenter; }
+    float zoomTargetRatio() const { return m_zoomTargetRatio; }
     int inputState() const { return m_inputState; }
     QVariantList sections() const { return m_sections; }
+    QObject *sectionsModel() const { return m_sectionsModel; }
     int sectionDataRevision() const { return m_sectionDataRevision; }
     QVariantList links() const { return m_links; }
     QVariantList linkEndpoints() const { return m_linkEndpoints; }
@@ -90,6 +122,9 @@ public:
     qulonglong focusedSectionId() const;
     bool showRegName() const;
     QPointF dragOffset() const { return m_dragOffset; }
+    QPointF canvasDragOffset() const { return m_canvasDragOffset; }
+    qreal viewportOffsetX() const { return m_viewportOffsetX; }
+    qreal viewportOffsetY() const { return m_viewportOffsetY; }
     // 拖拽中的节点 ID（0=无拖拽），QML 据此判断是否对节点应用 dragOffset
     qulonglong draggingSectionId() const { return m_draggingSectionId; }
     // 多节点拖拽标志，QML 据此判断是否对所有选中节点应用 dragOffset
@@ -99,6 +134,14 @@ public:
     // 坐标转换（对应 IBR_WorkSpace::EqPosToRePos / RePosToEqPos）
     Q_INVOKABLE QPointF eqToScreen(QPointF eqPos) const;
     Q_INVOKABLE QPointF screenToEq(QPointF screenPos) const;
+    // 鼠标命中测试：返回鼠标屏幕坐标命中的顶层 sectionId（0=未命中）；从后向前遍历（上层优先）
+    // 复用 updateSelection 的 eq 矩形 contains 模式，基于 sections 模型自带 eqX/eqY/eqW/eqH
+    Q_INVOKABLE qulonglong hitTestSection(qreal screenX, qreal screenY) const;
+    // 拖拽目标预览（拖拽源在 onPositionChanged 中调用；结束/离开时传 id=0 清除）
+    Q_INVOKABLE void setDragTarget(qulonglong targetId, const QString &color, const QString &text);
+    qulonglong dragTargetSectionId() const { return m_dragTargetSectionId; }
+    QString dragTargetColor() const { return m_dragTargetColor; }
+    QString dragTargetText() const { return m_dragTargetText; }
 
     // 鼠标交互（对应 IBR_WorkSpace::ProcessBackgroundOpr 状态机）
     // button: Qt::LeftButton=1, Qt::RightButton=2, Qt::MiddleButton=4
@@ -107,6 +150,11 @@ public:
     Q_INVOKABLE void onMouseRelease(qreal x, qreal y, int button);
     Q_INVOKABLE void onWheel(qreal x, qreal y, qreal delta);
     Q_INVOKABLE void onDrop(qreal x, qreal y, const QString &moduleKey);
+    // 缩放补间逐帧应用（QML NumberAnimation 每帧调用，用当前成员锚点原子更新
+    // Ratio/EqCenter/拖拽基准/dragOffset/预览线，与节点渲染同帧）
+    Q_INVOKABLE void applyZoomRatio(float newRatio);
+    // 缩放补间结束回调（QML 动画停止时调用：推 Undo 栈 + 更新 EqMax + 调度防抖重建端点表）
+    Q_INVOKABLE void zoomTweenFinished();
 
     // ===== 阶段 12.1：MassAfter 状态机相关 =====
     // MassAfter 状态下左键按下命中节点 → 进入 HoldingModules 多节点拖拽
@@ -212,6 +260,8 @@ public:
     Q_INVOKABLE void deleteSelected();
     Q_INVOKABLE void copySelected();
     Q_INVOKABLE void cutSelected();
+    // 复制指定节点到剪贴板（对应 IBR_SectionData::CopyToClipBoard，不改选择状态）
+    Q_INVOKABLE void copySection(qulonglong sectionId);
     Q_INVOKABLE void paste();
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void selectAll();
@@ -219,6 +269,16 @@ public:
     Q_INVOKABLE void freezeSelected(bool frozen);
     Q_INVOKABLE void hideSelected(bool hidden);
     Q_INVOKABLE void ignoreSelected(bool ignored);
+    // 导出选中模块为自定义模块（对应 ImGui GUI_ExportModule → OutputSelected）
+    // 由 QML 导出模块对话框填写名称/描述/路径后调用
+    Q_INVOKABLE bool outputSelectedModule(const QString &name, const QString &desc, const QString &path);
+    // 请求打开"导出模块"对话框（ContextMenu 调用 → emit outputModuleRequested → Main.qml 打开）
+    Q_INVOKABLE void requestOutputModuleDialog();
+    // 获取默认导出路径（对应 ImGui OutputSelected 的 IBB_ModuleAltDefault::GenerateModulePath）
+    // 供导出模块对话框初始化路径输入框
+    Q_INVOKABLE QString defaultModuleExportPath() const;
+    // 获取鼠标全局（屏幕）坐标：供级联菜单"鼠标移出自动收起"轮询
+    Q_INVOKABLE QPointF globalMousePos() const;
 
     // ===== 阶段 7 新增：缺失的快捷键对应方法 =====
     // 反选（对应 Ctrl+Shift+I）
@@ -283,9 +343,11 @@ public:
     // 对应 ImGui IsDragDropPayloadBeingAccepted（IBR_SectionData.cpp:96-106 DrawDragPreviewIcon_LinkLim0）
     Q_INVOKABLE void setDragInvalidLink(bool invalid);
     bool dragInvalidLink() const { return m_dragInvalidLink; }
-
     // 刷新数据（从 IBR_Inst_Project 同步到 QML）
     Q_INVOKABLE void refresh();
+    // 增量刷新链接数据（连线/取消连线后调用，按后端重建 LinkList/m_links，
+    // 阻止 refreshFromTimer 因计数变化触发全量 refreshSections（行重建期间坐标污染））
+    void refreshLinkIncremental();
     // 阶段 D2：根据 sectionId 查询单个 Section 的完整数据（供虚拟块递归渲染子模块用）
     // 返回与 refreshSections 中每个 item 相同字段的 QVariantMap，包括 lineModel
     Q_INVOKABLE QVariantMap getSectionData(qulonglong sectionId) const;
@@ -297,6 +359,8 @@ public:
     // 同步到 IBR_RealCenter::Center/WorkSpaceUL/WorkSpaceDR，供 EqPosToRePos 计算屏幕坐标
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
     Q_INVOKABLE void setViewportSize(qreal width, qreal height);
+    // 最近拖拽结束的节点 ID（LinkRenderer buildSectionMap 据此在端点表重建前继续叠加 dragOffset）
+    Q_INVOKABLE qulonglong lastDraggedId() const { return m_lastDraggedId; }
 
 signals:
     void ratioChanged();
@@ -316,11 +380,29 @@ signals:
     void showRegNameChanged();
     void edgeFlagsChanged();
     void dragOffsetChanged();
+    // 画布平移偏移变化通知（拖动画布时驱动 LinkRenderer 叠加渲染，端点表不重建）
+    void canvasDragOffsetChanged();
+    // 视口偏移变化通知（调宽/resize 时驱动 LinkRenderer 叠加渲染，端点表不重建）
+    void viewportOffsetChanged();
+    // 缩放叠加基准/状态变化通知（缩放时驱动 LinkRenderer 换算端点坐标，端点表不重建）
+    void zoomBaseChanged();
+    // 缩放叠加结束通知（QML SectionNode 据此用 Qt.callLater 回写缩放后的行圆点坐标）
+    void zoomFinalizeRequested();
+    // 缩放补间启动/续接请求（QML NumberAnimation 据此从当前 Ratio 平滑过渡到 zoomTargetRatio；
+    // 动画在 QML 渲染线程驱动，与帧同步，避免 C++ 定时器动画与渲染循环不同步跳帧）
+    void zoomTweenRequested();
+    // 缩放补间目标变化通知（QML 动画在 zoomTweenRequested 时读取新目标）
+    void zoomTargetRatioChanged();
+    // 缩放补间强制中止请求（收尾路径清 zoomPending 前调用：QML 立即停止动画，
+    // Ratio 已由 C++ 直接推到目标，动画不再逐帧改值）
+    void zoomTweenAbortRequested();
     // 阶段 12.7：双击空白触发模块搜索
     void moduleSearchRequested(qreal x, qreal y);
     // v3 批次 1.4：拖拽 LinkLimit=0 节点时 DropArea 接收状态通知
     // 对应 ImGui IsDragDropPayloadBeingAccepted（IBR_SectionData.cpp:96-106）
     void dragInvalidLinkChanged(bool invalid);
+    // 拖拽目标命中变化通知（QML SectionNode 据此绑定预览框显示）
+    void dragTargetChanged();
     // 拖拽节点 ID 变化通知（QML 据此决定是否应用 dragOffset）
     void draggingSectionIdChanged();
     // 多节点拖拽状态变化通知
@@ -329,6 +411,8 @@ signals:
     void selectedRevisionChanged();
     // 单节点位置变化通知（拖拽结束时不调全量 refresh，只通知 QML 更新对应节点）
     void sectionPositionChanged(qulonglong sectionId);
+    // 请求打开"导出模块"对话框（对应 ImGui GUI_ExportModule 弹窗）
+    void outputModuleRequested();
 
 private:
     // 关联控制器（由 QtMain.cpp 注入，用于选中模块时切换侧边栏）
@@ -339,6 +423,8 @@ private:
     // 对应 IBR_WorkSpace.cpp:822-830 状态机注释
     int m_inputState{0};
     QVariantList m_sections;
+    // 增量 Section 模型（供 QML Repeater，避免整表替换重建全部节点）
+    WorkspaceSectionModel *m_sectionsModel{nullptr};
     // D20：数据版本号，每次 sectionsChanged 递增
     int m_sectionDataRevision{0};
     QVariantList m_links;
@@ -357,8 +443,48 @@ private:
     // 性能优化：拖拽偏移量（屏幕坐标），拖拽中实时更新，QML 端用它计算临时位置
     // 避免每帧 refresh() 全量重建 QVariantList
     QPointF m_dragOffset;
+    // 帧率节流：待应用的拖拽/平移位置
+    // onMouseMove/updateDrag 只记录最新位置并置位，帧定时器 tick（refreshFromTimer）统一应用
+    QPointF m_pendingDragPos;
+    bool m_hasPendingDrag{false};
+    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照，LinkRenderer 叠加此偏移渲染
+    // 避免每帧全量端点表重建 + 行圆点回写（拖动画布帧率被拖垮），下次端点表重建时清零
+    QPointF m_canvasDragOffset;
+    // 视口偏移（屏幕像素）：调宽/resize 时端点表快照落后模块，LinkRenderer 叠加此偏移
+    // 实时对齐；端点表重建（rebuildLinkEndpoints）时用当前视口更新基准并归零
+    qreal m_viewportOffsetX{0};
+    qreal m_viewportOffsetY{0};
+    // 端点表重建时的视口基准尺寸（计算 viewportOffset = (当前 - 基准)/2）
+    qreal m_endpointBaseW{0};
+    qreal m_endpointBaseH{0};
+    // 缩放叠加基准与状态（仿 m_canvasDragOffset）：缩放中端点表保持快照不重建，
+    // LinkRenderer 按 m_zoomBaseRatio/m_zoomBaseCenter 基准换算端点坐标（等比+中心偏移）；
+    // 缩放停止后由 scheduleZoomFinalize 防抖重建端点表结束叠加
+    float m_zoomBaseRatio{0};
+    QPointF m_zoomBaseCenter;
+    bool m_zoomPending{false};
+    int m_zoomFinalizeToken{0};  // 防抖 token：新缩放事件使旧定时回调失效
+    // 滚轮缩放补间（QML 端驱动）：滚轮只设定目标 Ratio 与锚点并 emit zoomTweenRequested，
+    // QML NumberAnimation 每渲染帧回调 applyZoomRatio 原子应用 ——
+    // 缩放与拖拽基准修正/dragOffset 重算/预览线重发在同一回调（同一渲染帧）内完成，
+    // 消除"缩放与拖拽分帧更新"的中间态偏移；连续滚轮更新目标续接，不重启跳变。
+    // 补间搬 QML 后动画由 QQuickWindow 动画驱动推进（与渲染帧同步），
+    // 避免 C++ QVariantAnimation 定时器 tick 与渲染循环不同步导致的跳帧/低帧率。
+    bool m_zoomAnimating{false};  // 补间运行中（QML 动画期间为 true，替代 QVariantAnimation 状态查询）
+    float m_zoomTargetRatio{0};
+    QPointF m_zoomAnchorScreen;  // 补间锚点（滚轮时鼠标位置，连续滚轮取最新）
+    // 收尾路径清 zoomPending 前必须 finishZoomTweenNow 强制完成补间（Ratio 推目标 + 通知 QML 停动画）
+    void finishZoomTweenNow();
+    // 调度缩放结束后的端点表重建（防抖：最后一次缩放事件后 delayMs 再重建）
+    void scheduleZoomFinalize();
+    // 缩放叠加收尾：清 pending → 通知 QML 回写缩放后坐标 → Queued 重建端点表（先回写后重建）
+    void finalizeZoom();
     // v3 批次 1.4：拖拽 LinkLimit=0 节点时 DropArea 接收状态
     bool m_dragInvalidLink{false};
+    // 拖拽目标命中状态（命中测试驱动，拖拽源 onPositionChanged 更新，clearDraggingLink 清零）
+    qulonglong m_dragTargetSectionId{0};
+    QString m_dragTargetColor;
+    QString m_dragTargetText;
     // 拖拽中的节点 ID（单节点拖拽，INVALID_MODULE_ID=无拖拽）
     // 修复：不能用 0 作为"无拖拽"哨兵值，因为 0 是合法的 sectionId（第一个新建模块 ID=0）
     // 否则第一个新建模块会因 sectionId(0) === draggingSectionId(0) 永远显示 isDragging 蓝框
@@ -367,6 +493,13 @@ private:
     bool m_massDragging{false};
     // 选中版本号：每次 MassTarget 变化时递增，避免全量 refresh
     int m_selectedRevision{0};
+    // 进入编辑侧边栏（EDIT=4）前记录的菜单 ID；取消选中后 restoreMenuAfterDeselect 据此恢复
+    // 用户要求：取消选中回到"选中前的侧边栏"，而非固定 MODULES
+    int m_prevMenuBeforeEdit{0};
+    bool m_hasPrevMenuBeforeEdit{false};
+
+    // 最近一次拖拽结束的节点 ID（LinkRenderer 据此继续叠加 dragOffset，防松手连线弹）
+    qulonglong m_lastDraggedId{0};
 
     // ===== 阶段 12.1：MassAfter / 多节点拖拽状态 =====
     // 对应 IBR_WorkSpace.cpp:186-211 的状态变量
@@ -401,6 +534,19 @@ private:
     // 修复：拖拽结束后根据 MassTarget 是否为空决定回到 MassAfter(4) 或 Normal(0)
     // 若拖拽前有选中模块，拖拽结束应回到 MassAfter，否则点空白无法取消选中
     void restoreStateAfterDrag();
+    // 拖拽结束后同步 m_sections 快照中指定模块的 eqX/eqY（画布节点位置由 QML 实时绑定
+    // 驱动，不重建 m_sections；但 MiniMap 读的正是 m_sections 快照 → 不更新则迷你地图
+    // 模块位置不刷新）。更新后由调用方 emit sectionsChanged 触发 MiniMap 重绘。
+    void syncSectionSnapshotPos(ModuleID_t id);
+    // 清空选中/编辑状态（对应 ImGui IBR_WorkSpace.cpp:1076-1079 Clear() + ChooseMenu(MenuItemID_MODULES)）
+    // 若仍选中单个有效模块（多选取消/删除后剩余一个）→ 显示该模块的编辑侧边栏；
+    // 无选中 → 清空编辑面板、菜单恢复到选中前的侧边栏（restoreMenuAfterDeselect）
+    // 调用点：toggleSelectSection 取消选中最后一个模块、refreshFromTimer 检测到当前编辑模块被删除
+    void clearEditSelection();
+    // 切换到编辑侧边栏（EDIT=4）：记录切换前的菜单（供取消选中后恢复），再 setActiveMenu(4)
+    void enterEditMenu();
+    // 取消选中后恢复侧边栏：当前菜单是 EDIT 时切回进入编辑前记录的菜单（无记录兜底 MODULES）
+    void restoreMenuAfterDeselect();
 
     // 阶段 D2：构建单个 Section 的 QVariantMap（refreshSections 与 getSectionData 共用）
     // id=Section ID, sd=SectionData 引用, selectedSet=MassTarget 选中集合
@@ -411,6 +557,9 @@ private:
     void initMassDrag();  // 计算质心 + 各节点 EqDelta（对应 IBR_WorkSpace.cpp:1004-1024）
     void updateMassDrag(qreal curX, qreal curY);  // 整组平移（对应 UpdateScrollAlt）
     void endMassDrag();   // 清除 Dragging 标志
+    // 帧率节流：将待处理的拖拽/平移位置延迟到帧定时器（QTimer @ FrameRateLimit）统一应用
+    // 使拖动画布/模块时的实际渲染帧率与帧率设置一致（否则 SceneGraph 跟随鼠标事件率渲染跑满本机帧率）
+    void applyPendingDrag();
 
     // 性能优化：脏标记，避免 QTimer 每 50ms 全量重建 QVariantList
     // 只在关键状态变化时才全量刷新（Section 数量/Link 数量/项目开关/编辑节点）
@@ -426,6 +575,10 @@ private:
     // 由坐标回写方法（setHeadLineRN/setSectionAcceptPoint）和视口变化（onMouseMove/onWheel）设置
     // refreshFromTimer 检测到此标志才调 rebuildLinkEndpoints，避免静止时无谓重建
     bool m_linkEndpointsDirty{true};
+    // 松手过渡期抑制 tick 的端点表重建：
+    // 松手后 dragOffset 尚未清零时，若 tick 提前重建端点表，LinkRenderer 会叠加残留
+    // dragOffset 显示连线（偏移一帧）。此标志抑制 tick 重建，仅允许松手收尾的最终重建。
+    bool m_suppressLinkRebuild{false};
     // 防止多次 linkNodeCenterChanged 重复排队重建（缩放/平移时大量 LineRow 回写）
     bool m_pendingRebuild{false};
 
@@ -436,6 +589,10 @@ private:
 
     // 重建连线端点表（从 IBR_NodeSession 全局表同步 LastCenter）
     void rebuildLinkEndpoints();
+
+    // 增量刷新单条链接端点：改变连线状态（拖拽建链等）后只更新该链接 pa/pb，
+    // 避免全量 rebuild 读到行模型 resetModel 重建期间的污染坐标（连线全跑模块第一节点）
+    void refreshLinkEndpoint(qulonglong srcId, const QString &fromKey, int mult, qulonglong dstId);
 
     // D11：计算当前所有 Section 的状态哈希（Frozen/Hidden/Ignore/UICollapsed/CollapsedInComposed + ShowRegName）
     // 用于 refreshFromTimer 脏检查，检测节点状态变化

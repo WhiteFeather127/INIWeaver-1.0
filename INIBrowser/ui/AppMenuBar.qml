@@ -41,14 +41,6 @@ Rectangle {
                 width: 56
                 height: parent.height
                 text: modelData.text
-                Component.onCompleted: {
-                    if (modelData.menuId === 0 || modelData.menuId === 1)
-                        console.log("[DIAG MenuBar] Button created menuId=", modelData.menuId, "text=", modelData.text, "width=", width, "height=", height, "enabled=", enabled, "parent.height=", parent.height)
-                }
-                onHeightChanged: {
-                    if (modelData.menuId === 0)
-                        console.log("[DIAG MenuBar] Button height changed to", height, "parent.height=", parent.height)
-                }
                 // 禁用规则动态绑定，对齐 ImGui 版本（IBR_Panel.cpp:210-225）：
                 //   File/Modules/Setting/About：始终启用
                 //   View/List：仅项目打开时启用
@@ -67,7 +59,6 @@ Rectangle {
                 checkable: true
                 checked: menuController.activeMenu === modelData.menuId
                 onClicked: {
-                    console.log("[DIAG MenuBar] clicked menuId=", modelData.menuId, "text=", modelData.text, "enabled=", enabled, "checked=", checked)
                     menuController.activeMenu = modelData.menuId
                 }
 

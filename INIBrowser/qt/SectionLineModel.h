@@ -13,6 +13,8 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 #include "IBR_Project.h"  // ModuleID_t, StrPoolID
 
+class WorkspaceController;
+
 class SectionLineModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -64,15 +66,22 @@ public:
     // 重新遍历后端，重建 m_entries（对应 ImGui 每帧 RenderUI_Lines）
     Q_INVOKABLE void refresh();
 
+    // 注入所属 WorkspaceController（链接修改后同步触发工作区全量刷新，消除队列延迟）
+    void setWorkspaceController(WorkspaceController *wc) { m_workspace = wc; }
+
     // QML layout 后回写 RadioButton 屏幕坐标到 IBR_NodeSession::SessionValue.LastCenter
     // 对应 ImGui 立即模式下每帧重算 DefaultCenter
     Q_INVOKABLE void setLinkNodeCenter(int row, qreal x, qreal y);
     // 行级接受点回写（对应 ImGui ActiveLines[key].AcceptCenter[mult]）
     // 该坐标作为连线终点 pb 的行精确值，由 LineRow.updateLinkNodeCenter 同步回写
     Q_INVOKABLE void setAcceptCenter(int row, qreal x, qreal y);
+    // 行级接受点回写（按 keyName+mult 直接定位，免疫 m_entries 重建/行顺序变化导致的 row 错位）
+    Q_INVOKABLE void setAcceptCenterByKey(const QString &keyName, int lineMult, qreal x, qreal y);
     // 阶段 3：按 keyName + lineMult 查询行接受点（供 WorkspaceController::rebuildLinkEndpoints 构建 pb）
     // 返回 QPointF() 表示无记录（调用方需回退到标题栏接受点）
     Q_INVOKABLE QPointF acceptCenterByKey(const QString &keyName, int lineMult) const;
+    // 诊断：返回已回写接受点的全部 keyName@mult 复合键（排查 FromKey 查询不匹配）
+    QStringList acceptCenterKeys() const;
 
     // 类型校验（对应 IBR_SectionData.cpp:438-465 Acceptor_CheckLinkType/CheckSecType）
     Q_INVOKABLE bool checkLinkType(int row, qulonglong destSectionId) const;
@@ -144,15 +153,50 @@ private:
         QString exportValue;
         bool isInputMode{ false };  // D14: IICStatus 持久化（true=Input 态，false=Link 态）
         bool isMultiple{ false };   // InputType.Multiple（可增行）
+
+        // 内容比较：refresh() 用快照判断行数据是否变化。
+        // 删除/新建模块等全量刷新时，无关节点的行数据未变，跳过
+        // dataChanged/resetModel 可避免 QML 行绑定重求值（卡顿主因之一）
+        bool operator==(const LineEntry &o) const
+        {
+            return keyId == o.keyId
+                && keyName == o.keyName
+                && onShow == o.onShow
+                && descLong == o.descLong
+                && subSecName == o.subSecName
+                && subSecType == o.subSecType
+                && hasLinkNode == o.hasLinkNode
+                && linkCol == o.linkCol
+                && linkLimit == o.linkLimit
+                && linkType == o.linkType
+                && isEmpty == o.isEmpty
+                && isInherit == o.isInherit
+                && isImport == o.isImport
+                && lineIdx == o.lineIdx
+                && lineMult == o.lineMult
+                && compIdx == o.compIdx
+                && sessionId == o.sessionId
+                && links == o.links
+                && isCollapsed == o.isCollapsed
+                && exportValue == o.exportValue
+                && isInputMode == o.isInputMode
+                && isMultiple == o.isMultiple;
+        }
     };
 
     qulonglong m_sectionId{ 0 };
     bool m_showRegName{ false };
+    WorkspaceController *m_workspace{ nullptr };  // 所属控制器（链接修改后同步全量刷新）
     std::vector<LineEntry> m_entries;
+    // 上次已发出信号的内容快照（refresh() 内容比较用，未变则跳过信号）
+    std::vector<LineEntry> m_entriesSnapshot;
 
-    // 阶段 3：行级接受点缓存（按 row 索引）
-    // 对应 ImGui ActiveLines[key].AcceptCenter[mult]，供 WorkspaceController 查询 pb
-    QHash<int, QPointF> m_acceptCenters;
+    // 行级接受点（keyName@mult → 坐标），对应 ImGui ActiveLines[key].AcceptCenter[mult]
+    // 修复1：原按 row 索引存储，rebuildEntries 重建 m_entries 后旧 row 坐标残留导致串线
+    //（增删行/重排后 acceptCenterByKey 取到错误行的坐标）。改按 keyName 存储，天然免疫行重排。
+    // 修复2：多分量键同名 key 的每个分量有独立圆点，仅按 keyName 会把多分量合并到最后一个坐标
+    //（起点错位），复合 keyName@mult 精确区分各分量。
+    QHash<QString, QPointF> m_acceptCentersByKey;
 
     // SpecialAccept 临时态缓存（按 keyId 索引，跨 rebuild 保留）
     // 对应 ImGui WorkSpaceLine::SpecialAccept（画布会话级，不持久化到 INI）

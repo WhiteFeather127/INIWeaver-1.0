@@ -1,6 +1,7 @@
 // SectionLineModel.cpp
 // 行列表模型实现：遍历后端 IBB_Section 提取行数据，对应 ImGui RenderUI_Lines
 #include "SectionLineModel.h"
+#include "WorkspaceController.h"  // m_workspace->refresh()（链接修改后同步全量刷新）
 #include "Global.h"
 #include "IBR_Project.h"
 #include "IBR_Misc.h"
@@ -123,7 +124,34 @@ void SectionLineModel::setShowRegName(bool v)
 
 void SectionLineModel::refresh()
 {
+    const int oldCount = static_cast<int>(m_entries.size());
     rebuildEntries();
+
+    // 性能优化：行内容未变时跳过信号。
+    // 删除/新建模块等触发全量 refreshSections 时，无关节点的行数据不变，
+    // 不发 dataChanged/resetModel 可避免 QML 行绑定重新求值（全量重建卡顿主因）
+    if (m_entries.size() == m_entriesSnapshot.size()
+        && std::equal(m_entries.begin(), m_entries.end(), m_entriesSnapshot.begin()))
+    {
+        // 内容相同：快照同步（新 entries 与旧等价），直接返回
+        m_entriesSnapshot = m_entries;
+        return;
+    }
+    m_entriesSnapshot = m_entries;
+
+    // 行数不变时用 dataChanged 局部更新（连线/取消连线只改链接，行数不变）：
+    // 避免 resetModel 触发 QML 行重建，行重建瞬间圆点坐标未就绪会污染 acceptCenter
+    // 缓存 → 该模块所有连线起点画到第一个节点。行数变化才 resetModel。
+    const int newCount = static_cast<int>(m_entries.size());
+    if (newCount != oldCount)
+    {
+        beginResetModel();
+        endResetModel();
+    }
+    else if (newCount > 0)
+    {
+        emit dataChanged(index(0), index(newCount - 1));
+    }
 }
 
 void SectionLineModel::rebuildEntries()
@@ -131,9 +159,7 @@ void SectionLineModel::rebuildEntries()
     std::vector<LineEntry> newEntries;
 
     if (m_sectionId == 0) {
-        beginResetModel();
         m_entries = std::move(newEntries);
-        endResetModel();
         return;
     }
 
@@ -281,9 +307,7 @@ void SectionLineModel::rebuildEntries()
         }
     }
 
-    beginResetModel();
     m_entries = std::move(newEntries);
-    endResetModel();
 }
 
 QVariantList SectionLineModel::collectLinks(const IBB_SubSec &sub,
@@ -401,24 +425,43 @@ void SectionLineModel::setAcceptCenter(int row, qreal x, qreal y)
 {
     // 阶段 3：行级接受点回写（对应 ImGui ActiveLines[key].AcceptCenter[mult]）
     // 该坐标作为连线终点 pb 的行精确值
-    m_acceptCenters[row] = QPointF(x, y);
+    // 按 keyName@mult 复合键存储（而非 row 索引）：rebuildEntries 重建 m_entries 后 row 顺序可能变化，
+    // 按索引会取到错误行的坐标导致串线；多分量键（Multiple 行）同名 key 的每个分量有独立圆点，
+    // 仅按 keyName 会把多分量合并到最后一个坐标（起点错位），故复合 keyName+mult。
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) {
+        return;
+    }
+    const auto &e = m_entries[row];
+    m_acceptCentersByKey.insert(
+        QStringLiteral("%1@%2").arg(e.keyName).arg(e.lineMult), QPointF(x, y));
+}
+
+void SectionLineModel::setAcceptCenterByKey(const QString &keyName, int lineMult, qreal x, qreal y)
+{
+    // 阶段 3（修复）：按 keyName@mult 直接存接受点，不查 m_entries。
+    // 修复 root：rebuildEntries 重建 m_entries 后 QML Repeater 旧 delegate 的 rowIndex 可能错位，
+    // setAcceptCenter(row) 用旧 row 查新 entries → 存到错误 key（如 Warhead 行被 Projectile 坐标覆盖），
+    // 导致链接起点/终点画到相邻行圆点上。keyName/mult 由 LineRow delegate 直接绑定，天然正确。
+    m_acceptCentersByKey.insert(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult), QPointF(x, y));
 }
 
 QPointF SectionLineModel::acceptCenterByKey(const QString &keyName, int lineMult) const
 {
-    // 阶段 3：按 keyName + lineMult 查询行接受点
+    // 阶段 3：按 keyName@mult 复合键查询行接受点
     // 对应 ImGui RenderUI_Links 中 RSD->ActiveLines[DestKey].AcceptCenter[LineMult]
-    for (int i = 0; i < static_cast<int>(m_entries.size()); ++i)
-    {
-        const auto &e = m_entries[i];
-        if (e.keyName == keyName && e.lineMult == lineMult)
-        {
-            auto it = m_acceptCenters.find(i);
-            if (it != m_acceptCenters.end()) return it.value();
-            return QPointF();  // 找到行但无坐标记录
-        }
-    }
-    return QPointF();  // 未找到行
+    // 同一行的多键值（lineMult 不同）各有独立圆点坐标
+    auto it = m_acceptCentersByKey.constFind(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
+    if (it != m_acceptCentersByKey.constEnd()) return it.value();
+    return QPointF();  // 未找到（QML 尚未回写该行接受点）
+}
+
+QStringList SectionLineModel::acceptCenterKeys() const
+{
+    QStringList keys = m_acceptCentersByKey.keys();
+    keys.sort();
+    return keys;
 }
 
 bool SectionLineModel::checkLinkType(int row, qulonglong destSectionId) const
@@ -481,7 +524,7 @@ bool SectionLineModel::createLink(int row, qulonglong destSectionId, const QStri
     size_t srcLineMult = static_cast<size_t>(e.lineMult);
     size_t srcLineIdx = static_cast<size_t>(e.lineIdx);
 
-    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, srcLineIdx, dstKeyId]() {
+    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, srcLineIdx, dstKeyId, this]() {
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto dstRsec = IBR_Inst_Project.GetSectionFromID(dstId);
         auto srcBsec = srcRsec.GetBack_Unsafe();
@@ -553,10 +596,12 @@ bool SectionLineModel::createLink(int row, qulonglong destSectionId, const QStri
         line->Merge(srcLineMult, str, IBB_IniMergeMode::Replace);
         srcBsec->UpdateAll();
         IBR_Inst_Project.RefreshLinkList = true;
+        // 修复：业务修改完成后再刷新/通知（SendToR 队列在下一 QTimer tick 才执行 lambda，
+        // 原来的立即 refresh/emit 读到旧数据，导致连线与侧边栏不更新）
+        refresh();
+        emit sectionDataChanged(m_sectionId);
     } });
 
-    refresh();
-    emit sectionDataChanged(m_sectionId);
     return true;
 }
 
@@ -570,7 +615,7 @@ bool SectionLineModel::deleteLink(int row, int linkIdx)
     size_t lineIdx = static_cast<size_t>(e.lineIdx);
     size_t lineMult = static_cast<size_t>(e.lineMult);
 
-    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, lineIdx, lineMult, linkIdx]() {
+    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, lineIdx, lineMult, linkIdx, this]() {
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto srcBsec = srcRsec.GetBack_Unsafe();
         if (!srcBsec) return;
@@ -611,10 +656,12 @@ bool SectionLineModel::deleteLink(int row, int linkIdx)
         line->Merge(lineMult, str, IBB_IniMergeMode::Replace);
         srcBsec->UpdateAll();
         IBR_Inst_Project.RefreshLinkList = true;
+        // 修复：业务修改完成后再刷新/通知（增量按后端，避免全量 resetModel 坐标污染）
+        refresh();
+        emit sectionDataChanged(m_sectionId);
+        if (m_workspace) m_workspace->refreshLinkIncremental();
     } });
 
-    refresh();
-    emit sectionDataChanged(m_sectionId);
     return true;
 }
 
@@ -627,22 +674,30 @@ void SectionLineModel::deleteAllLinks(int row)
     StrPoolID srcKeyId = e.keyId;
     size_t lineMult = static_cast<size_t>(e.lineMult);
 
-    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, lineMult]() {
-        auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
-        auto srcBsec = srcRsec.GetBack_Unsafe();
-        if (!srcBsec) return;
+    // 同步执行：QML 调用本就在主线程，业务修改 + 前端刷新即时完成，
+    // 避免 SendToR 队列等下一 tick（~40ms）才执行导致的取消连线延迟
+    auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
+    auto srcBsec = srcRsec.GetBack_Unsafe();
+    if (!srcBsec) return;
 
-        auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
-        if (!line) return;
+    auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
+    if (!line) return;
 
-        // D12 修正：写空值清除所有链接（对应 ImGui Session.NewValue = ""）
-        line->Merge(lineMult, "", IBB_IniMergeMode::Replace);
-        srcBsec->UpdateAll();
-        IBR_Inst_Project.RefreshLinkList = true;
-    } });
+    // D12 修正：写空值清除所有链接（对应 ImGui Session.NewValue = ""）
+    line->Merge(lineMult, "", IBB_IniMergeMode::Replace);
+    srcBsec->UpdateAll();
+    IBR_Inst_Project.RefreshLinkList = true;
 
-    refresh();
-    emit sectionDataChanged(m_sectionId);
+    // 后端已改值。前端刷新（模型重建/侧边栏/工作区连线）统一 queued 到当前
+    // QML 事件处理完成后执行：onClicked 栈内同步 beginResetModel 会销毁正在
+    // 执行回调的 delegate（崩溃风险）；queued 后几乎无感（下一事件迭代），
+    // 远快于原 SendToR 队列（下一 tick ~40ms）
+    const qulonglong sid = m_sectionId;
+    QMetaObject::invokeMethod(this, [this, sid]() {
+        refresh();
+        emit sectionDataChanged(sid);
+        if (m_workspace) m_workspace->refreshLinkIncremental();
+    }, Qt::QueuedConnection);
 }
 
 bool SectionLineModel::applyLinkStates(int row, QVariantList keepLinkIdxs)
@@ -659,48 +714,53 @@ bool SectionLineModel::applyLinkStates(int row, QVariantList keepLinkIdxs)
     std::set<int> keepSet;
     for (const auto &v : keepLinkIdxs) keepSet.insert(v.toInt());
 
-    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, lineIdx, lineMult, keepSet]() {
-        auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
-        auto srcBsec = srcRsec.GetBack_Unsafe();
-        if (!srcBsec) return;
+    // 同步执行：QML 调用本就在主线程，业务修改 + 前端刷新即时完成，避免队列延迟
+    auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
+    auto srcBsec = srcRsec.GetBack_Unsafe();
+    if (!srcBsec) return false;
 
-        auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
-        if (!line) return;
+    auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
+    if (!line) return false;
 
-        IBB_SubSec *foundSub = nullptr;
-        for (auto subIdx : srcBsec->SubSecOrder) {
-            auto &sub = srcBsec->SubSecs[subIdx];
-            if (sub.CanOwnKey(srcKeyId)) {
-                foundSub = &sub;
-                break;
-            }
+    IBB_SubSec *foundSub = nullptr;
+    for (auto subIdx : srcBsec->SubSecOrder) {
+        auto &sub = srcBsec->SubSecs[subIdx];
+        if (sub.CanOwnKey(srcKeyId)) {
+            foundSub = &sub;
+            break;
         }
-        if (!foundSub) return;
+    }
+    if (!foundSub) return false;
 
-        // D17：按 keepLinkIdxs 过滤，仅保留 checked 的链接（对应 ImGui RadioButton UseLink 切换）
-        auto [begin, end] = foundSub->GetLink(lineIdx, lineMult, 0);
-        std::vector<size_t> indices;
-        for (auto it = begin; it != end; ++it) {
-            indices.push_back(it->second);
-        }
+    // D17：按 keepLinkIdxs 过滤，仅保留 checked 的链接（对应 ImGui RadioButton UseLink 切换）
+    auto [begin, end] = foundSub->GetLink(lineIdx, lineMult, 0);
+    std::vector<size_t> indices;
+    for (auto it = begin; it != end; ++it) {
+        indices.push_back(it->second);
+    }
 
-        std::string str;
-        bool first = true;
-        for (int i = 0; i < static_cast<int>(indices.size()); ++i) {
-            if (keepSet.find(i) == keepSet.end()) continue;
-            if (indices[i] >= foundSub->NewLinkTo.size()) continue;
-            if (!first) str += ",";
-            str += foundSub->NewLinkTo[indices[i]].TargetValue();
-            first = false;
-        }
+    std::string str;
+    bool first = true;
+    for (int i = 0; i < static_cast<int>(indices.size()); ++i) {
+        if (keepSet.find(i) == keepSet.end()) continue;
+        if (indices[i] >= foundSub->NewLinkTo.size()) continue;
+        if (!first) str += ",";
+        str += foundSub->NewLinkTo[indices[i]].TargetValue();
+        first = false;
+    }
 
-        line->Merge(lineMult, str, IBB_IniMergeMode::Replace);
-        srcBsec->UpdateAll();
-        IBR_Inst_Project.RefreshLinkList = true;
-    } });
+    line->Merge(lineMult, str, IBB_IniMergeMode::Replace);
+    srcBsec->UpdateAll();
+    IBR_Inst_Project.RefreshLinkList = true;
 
-    refresh();
-    emit sectionDataChanged(m_sectionId);
+    // 后端已改值。前端刷新（模型重建/侧边栏/工作区连线）统一 queued 到当前
+    // QML 事件处理完成后执行（onClicked 栈内 beginResetModel 会销毁 delegate）
+    const qulonglong sid = m_sectionId;
+    QMetaObject::invokeMethod(this, [this, sid]() {
+        refresh();
+        emit sectionDataChanged(sid);
+        if (m_workspace) m_workspace->refreshLinkIncremental();
+    }, Qt::QueuedConnection);
     return true;
 }
 
@@ -713,7 +773,7 @@ bool SectionLineModel::modifyValue(int row, const QString &newText)
     StrPoolID srcKeyId = e.keyId;
     std::string value = newText.toUtf8().constData();
 
-    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, value]() {
+    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, value, this]() {
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto srcBsec = srcRsec.GetBack_Unsafe();
         if (!srcBsec) return;
@@ -724,10 +784,11 @@ bool SectionLineModel::modifyValue(int row, const QString &newText)
         // 用 Merge 替换第 0 个分量的值（对应 ImGui ModifyAndShow）
         line->Merge(0, value, IBB_IniMergeMode::Replace);
         srcBsec->UpdateAll();
+        // 修复：业务修改完成后再刷新/通知
+        refresh();
+        emit sectionDataChanged(m_sectionId);
     } });
 
-    refresh();
-    emit sectionDataChanged(m_sectionId);
     return true;
 }
 
@@ -796,17 +857,20 @@ void SectionLineModel::removeLine(int row)
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID keyId = e.keyId;
 
-    IBRF_CoreBump.SendToR({ [srcId, keyId]() {
+    IBRF_CoreBump.SendToR({ [srcId, keyId, this]() {
         auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto bsec = rsec.GetBack_Unsafe();
         if (!bsec) return;
         bsec->RemoveLine(keyId);
+        // 删行可能带走该行链接，标记重建 LinkList
+        IBR_Inst_Project.RefreshLinkList = true;
+        // 修复：业务修改完成后再刷新/通知
+        refresh();
+        emit sectionDataChanged(m_sectionId);
     } });
 
     m_specialAccept.remove(keyId);
     m_inputOnShow.remove(keyId);
-    refresh();
-    emit sectionDataChanged(m_sectionId);
 }
 
 // 行级右键菜单：翻转 InputOnShow 编辑态（对应 IBR_Misc.cpp:245-250 CC->InputOnShow = !CC->InputOnShow）
@@ -832,16 +896,16 @@ void SectionLineModel::editDesc(int row, const QString& text)
     StrPoolID keyId = e.keyId;
     std::string utf8 = text.toUtf8().toStdString();
 
-    IBRF_CoreBump.SendToR({ [srcId, keyId, utf8]() {
+    IBRF_CoreBump.SendToR({ [srcId, keyId, utf8, this]() {
         auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto bsec = rsec.GetBack_Unsafe();
         if (!bsec) return;
         // 空串写 EmptyOnShowDesc 标记（对应 ImGui: if(EditOnShow.empty()) OnShow = EmptyOnShowDesc）
         bsec->OnShow[keyId] = utf8.empty() ? std::string(EmptyOnShowDesc) : utf8;
+        // 修复：业务修改完成后再刷新/通知
+        refresh();
+        emit sectionDataChanged(m_sectionId);
     } });
-
-    refresh();
-    emit sectionDataChanged(m_sectionId);
 }
 
 // 行级增行按钮：对 Multiple 行追加新分量（对应 IBR_Misc.cpp:373-385 "+" 按钮）
@@ -855,7 +919,7 @@ void SectionLineModel::addLine(int row)
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID keyId = e.keyId;
 
-    IBRF_CoreBump.SendToR({ [srcId, keyId]() {
+    IBRF_CoreBump.SendToR({ [srcId, keyId, this]() {
         auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto bsec = rsec.GetBack_Unsafe();
         if (!bsec) return;
@@ -864,8 +928,8 @@ void SectionLineModel::addLine(int row)
         // Form->GetFormattedString() 提供格式化空值模板（对应 ImGui def->GetInputType().Form->GetFormattedString()）
         const std::string& formStr = line->Default->GetInputType().Form->GetFormattedString();
         bsec->MergeLine(keyId, Index_AlwaysNew, formStr, IBB_IniMergeMode::Replace);
+        // 修复：业务修改完成后再刷新/通知
+        refresh();
+        emit sectionDataChanged(m_sectionId);
     } });
-
-    refresh();
-    emit sectionDataChanged(m_sectionId);
 }

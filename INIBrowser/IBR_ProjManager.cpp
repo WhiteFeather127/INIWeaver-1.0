@@ -1,4 +1,4 @@
-﻿#include "IBR_Project.h"
+#include "IBR_Project.h"
 #include "IBR_Misc.h"
 #include "IBFront.h"
 #include "Global.h"
@@ -202,19 +202,20 @@ namespace IBR_ProjectManager
         if (IBS_Inst_Project.Load(Path))
         {
             while (!LoadDatabaseComplete)Sleep(0);
-            std::shared_ptr<bool> SigF = std::make_shared<bool>(false), SigR = std::make_shared<bool>(false);
-            IBRF_CoreBump.SendToR({ [=]()
-                {
-                    IBR_Inst_Project.Load(IBS_Inst_Project);
-                    *SigR = true;
-                },nullptr });
-            IBRF_CoreBump.SendToF({ [=]()
-                {
-                    IBF_Inst_Project.Load(IBS_Inst_Project);
-                    *SigF = true;
-                    while (!*SigR);
-                    Next(true);
-                } });
+        // 修复死锁：IBF_Process 持 FInterruptLock 执行消息，若 F 侧在持锁期间
+        // while(!*SigR) 等待 R 完成，而 R 侧 IBR_Inst_Project.Load -> AddModule 的
+        // IBD_RInterruptF 又要获取 FInterruptLock -> 两个线程互相等待，各自忙等占满 CPU
+        // 改为：F 侧只做无阻塞数据拷贝；Next 由 R 完成后经 SendToF 触发
+        // （InfoStack FIFO 保证 F Load 消息先于 Next 被 front thread 处理）
+        IBRF_CoreBump.SendToF({ [=]()
+            {
+                IBF_Inst_Project.Load(IBS_Inst_Project);
+            } });
+        IBRF_CoreBump.SendToR({ [=]()
+            {
+                IBR_Inst_Project.Load(IBS_Inst_Project);
+                IBRF_CoreBump.SendToF({ [=]() { Next(true); } });
+            },nullptr });
         }
         else Next(false);
     }
@@ -648,6 +649,26 @@ namespace IBR_ProjectManager
         if (IBF_Inst_Project.Project.IsNewlyCreated)SaveAsAction();
         else SaveAction();
     }
+    void _IN_RENDER_THREAD SaveAs_WithQtPath(std::wstring Path)
+    {
+        // Qt 专用：路径由 QFileDialog 选定后直接保存，跳过 SetWaitingPopup + AskSavePath
+        // （AskSavePath 依赖 Win32 对话框 + "请稍候"等待弹窗，Qt 环境下体验割裂）
+        // 另存为无条件写盘，不受 ChangeAfterSave 影响（SaveAction 无修改时会跳过写盘）
+        if (!Path.ends_with(ExtensionNameW))Path += ExtensionNameW;
+        IBS_Push([=]()
+            {
+                Save(Path, [Path](bool OK) {IBRF_CoreBump.SendToR({ [=]()
+                    {
+                        if (OK)
+                        {
+                            IBF_Inst_Project.Project.Path = Path;
+                            IBF_Inst_Project.Project.ProjName = FileName(Path);
+                            IBR_HintManager::SetHint(loc("GUI_SaveSuccess"), HintStayTimeMillis);
+                        }
+                        else IBR_HintManager::SetHint(loc("GUI_SaveFailure"), HintStayTimeMillis);
+                    }, nullptr }); });
+            });
+    }
     void _IN_RENDER_THREAD OutputAction()
     {
         struct IniNameInput
@@ -990,6 +1011,17 @@ namespace IBR_ProjectManager
         IBRF_CoreBump.SendToR({ []() {CreateAction(); }, &ActionAfterClose });
         CloseAction();
     }
+    void _IN_RENDER_THREAD ProjOpen_CreateAction_NoAsk()
+    {
+        // Qt 专用：跳过 CloseAction 的 AskIfSave 询问，直接关闭当前项目（丢弃未保存修改）并新建
+        IBRF_CoreBump.SendToR({ []() {CreateAction(); }, &ActionAfterClose });
+        IBRF_CoreBump.SendToR({ []() {Close(); } });
+    }
+    void _IN_RENDER_THREAD CloseAction_NoAsk()
+    {
+        // Qt 专用：跳过 AskIfSave 询问，直接关闭当前项目（丢弃未保存修改）
+        IBRF_CoreBump.SendToR({ []() {Close(); } });
+    }
     void _IN_RENDER_THREAD ProjOpen_OpenAction()
     {
         IBRF_CoreBump.SendToR({ []() {OpenAction(); }, &ActionAfterClose });
@@ -999,6 +1031,13 @@ namespace IBR_ProjectManager
     {
         IBRF_CoreBump.SendToR({ [=]() {OpenRecentAction(Path); }, &ActionAfterClose });
         CloseAction();
+    }
+    void _IN_RENDER_THREAD ProjOpen_OpenRecentAction_NoAsk(const std::wstring& Path)
+    {
+        // Qt 专用：跳过 CloseAction 的 AskIfSave 询问（Qt 层已通过 ConfirmDialog3 处理过未保存确认）
+        // 直接关闭当前项目（丢弃未保存修改），再通过 ActionAfterClose 打开新项目
+        IBRF_CoreBump.SendToR({ [=]() {OpenRecentAction(Path); }, &ActionAfterClose });
+        IBRF_CoreBump.SendToR({ []() {Close(); } });
     }
     void _IN_RENDER_THREAD OpenRecentOptAction(const std::wstring& Path)
     {

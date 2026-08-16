@@ -73,20 +73,23 @@ void ModuleTreeModel::toggleExpanded(int row)
     if (row < 0 || row >= static_cast<int>(m_nodes.size())) return;
     if (!m_nodes[row].isFolder) return;
     m_nodes[row].expanded = !m_nodes[row].expanded;
-    QModelIndex idx = index(row);
-    emit dataChanged(idx, idx, {ExpandedRole});
+    // 持久化展开状态，rebuild 后仍能恢复（否则 traverse 会重置为展开，收起失效）
+    if (!m_nodes[row].path.isEmpty())
+        m_expandedState[m_nodes[row].path] = m_nodes[row].expanded;
     rebuild();
 }
 
 void ModuleTreeModel::expandAll()
 {
-    for (auto &n : m_nodes) if (n.isFolder) n.expanded = true;
+    for (auto &n : m_nodes)
+        if (n.isFolder) { n.expanded = true; if (!n.path.isEmpty()) m_expandedState[n.path] = true; }
     rebuild();
 }
 
 void ModuleTreeModel::collapseAll()
 {
-    for (auto &n : m_nodes) if (n.isFolder) n.expanded = false;
+    for (auto &n : m_nodes)
+        if (n.isFolder) { n.expanded = false; if (!n.path.isEmpty()) m_expandedState[n.path] = false; }
     rebuild();
 }
 
@@ -102,9 +105,9 @@ void ModuleTreeModel::rebuild()
     m_nodes.clear();
     if (m_includeSpecial)
     {
-        traverse(&IBB_ModuleAltDefault::GetSpecialModulesTree(), 0);
+        traverse(&IBB_ModuleAltDefault::GetSpecialModulesTree(), 0, QStringLiteral("S:"));
     }
-    traverse(&IBB_ModuleAltDefault::GetAllModulesTree(), 0);
+    traverse(&IBB_ModuleAltDefault::GetAllModulesTree(), 0, QStringLiteral("A:"));
     // 阶段 6.1：应用搜索过滤，移除不匹配的模块节点和无可见子节点的目录
     if (!m_filter.isEmpty())
     {
@@ -168,7 +171,7 @@ void ModuleTreeModel::applyFilter()
     m_nodes = std::move(filtered);
 }
 
-void ModuleTreeModel::traverse(const void *treePtr, int depth)
+void ModuleTreeModel::traverse(const void *treePtr, int depth, const QString &prefix)
 {
     using ModuleTree = IBB_ModuleAltDefault::ModuleTree;
     const auto *tree = static_cast<const ModuleTree *>(treePtr);
@@ -180,13 +183,19 @@ void ModuleTreeModel::traverse(const void *treePtr, int depth)
     int childCount = static_cast<int>(tree->Sub.size() + tree->Modules.size());
 
     // 当前目录节点本身（非根）
+    QString myPath;
     if (depth > 0)
     {
+        myPath = prefix.endsWith(u':') ? prefix + QString::fromUtf8(tree->Name)
+                                       : prefix + u'/' + QString::fromUtf8(tree->Name);
         Node n;
         n.name = QString::fromUtf8(tree->Name);
+        n.path = myPath;
         n.depth = depth - 1;
         n.isFolder = true;
-        n.expanded = true;
+        // 从持久化状态恢复展开/收起（默认折叠，需求：侧边栏文件夹默认全部折叠）。
+        // 未记录过的文件夹默认折叠；用户手动展开过的（toggleExpanded 写入 m_expandedState）保持展开
+        n.expanded = m_expandedState.value(myPath, false);
         n.childCount = childCount;
         m_nodes.push_back(std::move(n));
     }
@@ -195,10 +204,11 @@ void ModuleTreeModel::traverse(const void *treePtr, int depth)
     bool expanded = (depth == 0) ? true : m_nodes.back().expanded;
     if (!expanded) return;
 
-    // 先 Sub（子目录）
+    // 先 Sub（子目录），路径前缀：当前节点无路径时用传入前缀，否则用当前节点路径
+    const QString subPrefix = myPath.isEmpty() ? prefix : myPath;
     for (const auto &sub : tree->Sub)
     {
-        traverse(sub.get(), depth + 1);
+        traverse(sub.get(), depth + 1, subPrefix);
     }
     // 后 ModuleOrder（模块）
     for (const auto &name : tree->ModuleOrder)
@@ -287,4 +297,83 @@ QVariantList ModuleTreeModel::searchWithConsider(const QString &text,
         results.append(item);
     }
     return results;
+}
+
+// ===== 右键菜单级联树：按路径取某文件夹的直接子项 =====
+namespace
+{
+    using ModuleTreeT = IBB_ModuleAltDefault::ModuleTree;
+
+    // 收集 tree 的直接子项（子目录 + 模块）到 out；parentPath 为父文件夹完整路径（如 "S:" / "S:车辆"）
+    void collectLevelItems(const ModuleTreeT &tree, const QString &parentPath, QVariantList &out)
+    {
+        for (const auto &sub : tree.Sub)
+        {
+            const auto nm = QString::fromUtf8(sub->Name);
+            QVariantMap m;
+            m["path"] = parentPath + "/" + nm;
+            m["name"] = nm;
+            m["isFolder"] = true;
+            m["hasChildren"] = !sub->Sub.empty() || !sub->Modules.empty();
+            m["moduleKey"] = QString();
+            m["descLong"] = QString();
+            out.append(m);
+        }
+        for (const auto &modName : tree.ModuleOrder)
+        {
+            auto it = tree.Modules.find(modName);
+            if (it == tree.Modules.end() || !it->second) continue;
+            const auto *mod = it->second;
+            QVariantMap m;
+            m["path"] = parentPath + "/" + QString::fromUtf8(mod->Name);
+            m["name"] = QString::fromUtf8(mod->DescShort.empty() ? mod->Name : mod->DescShort);
+            m["isFolder"] = false;
+            m["hasChildren"] = false;
+            m["moduleKey"] = QString::fromUtf8(mod->Name);
+            m["descLong"] = QString::fromUtf8(mod->DescLong);
+            out.append(m);
+        }
+    }
+
+    // 从树根沿路径下钻（relPath 不含 "S:"/"A:" 前缀，如 "车辆/发动机"）
+    const ModuleTreeT *drillTree(const ModuleTreeT &root, const QString &relPath)
+    {
+        if (relPath.isEmpty()) return &root;
+        const auto parts = relPath.split('/', Qt::SkipEmptyParts);
+        const ModuleTreeT *cur = &root;
+        for (const auto &seg : parts)
+        {
+            const ModuleTreeT *next = nullptr;
+            for (const auto &sub : cur->Sub)
+                if (QString::fromUtf8(sub->Name) == seg) { next = sub.get(); break; }
+            if (!next) return nullptr;
+            cur = next;
+        }
+        return cur;
+    }
+}
+
+QVariantList ModuleTreeModel::levelChildren(const QString &folderPath) const
+{
+    QVariantList out;
+    if (folderPath.isEmpty())
+    {
+        // 根层：Special 树（S: 前缀）+ All 树（A: 前缀），对应 ImGui SpecialTree_RenderUI + Tree_RenderUI
+        if (m_includeSpecial)
+        {
+            const auto &sp = IBB_ModuleAltDefault::GetSpecialModulesTree();
+            collectLevelItems(sp, "S:", out);
+        }
+        const auto &all = IBB_ModuleAltDefault::GetAllModulesTree();
+        collectLevelItems(all, "A:", out);
+        return out;
+    }
+
+    const bool isSpecial = folderPath.startsWith("S:");
+    const auto &tree = isSpecial ? IBB_ModuleAltDefault::GetSpecialModulesTree()
+                                 : IBB_ModuleAltDefault::GetAllModulesTree();
+    const auto *target = drillTree(tree, folderPath.mid(2));
+    if (!target) return out;
+    collectLevelItems(*target, folderPath, out);
+    return out;
 }

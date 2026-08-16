@@ -4,6 +4,7 @@
 // 交互：左键拖拽移动、单击选中、右键菜单、双击编辑、折叠按钮
 import QtQuick
 import QtQuick.Controls
+import "../components"
 
 Item {
     id: root
@@ -42,16 +43,23 @@ Item {
     // 否则缩小时字体被钳到 8px 而行高跟着停住，但块其他部分继续缩小，
     // 导致行高占比过大、块被拉长。
     readonly property real _r: workspaceController.ratio
-    readonly property int fontTitle: Math.max(1, Math.round(12 * _r))
-    readonly property int fontBody: Math.max(1, Math.round(11 * _r))
-    readonly property int fontSmall: Math.max(1, Math.round(10 * _r))
-    readonly property int fontBtn: Math.max(1, Math.round(11 * _r))
+    // ===== 缩放方案：内部尺寸/字体全部逻辑化，根节点用 GPU scale 随 _r 缩放 =====
+    // 缩放动画期间内部尺寸/字体不变 → 零文本重排/零布局传播（此前每帧全场景重排 15ms）。
+    // 位置 x/y 仍为屏幕坐标（WorkspaceView 绑定），transformOrigin 左上保证缩放不偏位。
+    // 虚拟块内子模块（isSubModule=true）不重复缩放：由父虚拟块 scale 统一缩放。
+    scale: isSubModule ? 1.0 : _r
+    transformOrigin: Item.TopLeft
+    // ===== 缩放方案结束 =====
+    readonly property int fontTitle: 12
+    readonly property int fontBody: 11
+    readonly property int fontSmall: 10
+    readonly property int fontBtn: 11
 
-    // 尺寸（由内容自适应驱动，所有部分随 _r 等比缩放，保证缩放时块间距与块尺寸比例恒定）
-    // 宽度：max(WidthFix, wbase) * ratio（对应 ImGui IBR_WorkSpace.cpp:1840-1841）
+    // 尺寸（由内容自适应驱动；缩放方案下为逻辑尺寸，视觉尺寸 = 逻辑 × scale(_r)）
+    // 宽度：max(WidthFix, wbase)（对应 ImGui IBR_WorkSpace.cpp:1840-1841）
     // 高度：标题栏 + 内容区，折叠时只保留标题栏
-    implicitWidth: Math.max(sectionData.widthFix || 0, sectionData.widthBase || 221) * _r
-    implicitHeight: header.height + contentContainer.height + (contentContainer.visible ? Math.round(4 * _r) : 0)
+    implicitWidth: Math.max(sectionData.widthFix || 0, sectionData.widthBase || 221)
+    implicitHeight: header.height + contentContainer.height + (contentContainer.visible ? 4 : 0)
 
     // 拖拽时置顶 + 透明度（对应 IBR_WorkSpace.cpp:1673-1708 完整透明度计算）
     // v3 批次 1.2：全状态透明度对齐 ImGui：
@@ -77,7 +85,9 @@ Item {
     // 拖拽中：跳过头部回写（避免 dragOffset 污染 m_sectionAcceptPoint），
     //         LineRow 自身处理 dragOffset（减去后回写 LastCenter）
     // 非拖拽：头部 + 所有 LineRow 全部回写
-    onXChanged: updateAllCenters()
+    onXChanged: {
+        updateAllCenters()
+    }
     onYChanged: updateAllCenters()
     onIsCollapsedChanged: updateAllCenters()
     onCollapsedInComposedChanged: updateAllCenters()
@@ -87,9 +97,32 @@ Item {
         function onEqCenterChanged() { updateAllCenters() }
         function onRatioChanged() { updateAllCenters() }
         function onDragOffsetChanged() { if (root.isDragging) updateAllCenters() }
+        // 缩放叠加结束：回写缩放后的行圆点坐标（先于 C++ QueuedConnection 的端点表重建入队，
+        // 与画布平移收尾的 onInputStateChanged 同模式：先回写、后重建，pb 读到新基准坐标）。
+        // force=true：缩放收尾必须绕过 inputState==1/zoomPending 跳过检查——若缩放后立即
+        // 拖画布（onMousePress 已把 inputState 置 1），callLater 执行时默认检查会 return，
+        // 行圆点停在缩放前旧坐标 → 重建端点表缓存"缩放前连线"→ 拖画布时连线错位/放缩。
+        function onZoomFinalizeRequested() {
+            Qt.callLater(() => updateAllCenters(true))
+        }
+        // 状态切换（含画布平移结束 state 1 → 其他）：延迟到事件循环末尾触发全量坐标回写。
+        // 必须延迟：updateInputState 的 emit 发生时 dragOffset 等拖拽状态可能还没清零，
+        // 同步回写会读到含旧 dragOffset 的位置污染基准。Qt.callLater 先于 C++ 的
+        // QueuedConnection 端点表重建入队 → 先回写、后重建，端点表固化为平移后的正确基准。
+        function onInputStateChanged() {
+            if (workspaceController.inputState !== 1) {
+                Qt.callLater(() => updateAllCenters())
+            }
+        }
     }
 
-    function updateAllCenters() {
+    function updateAllCenters(force) {
+        // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomPending 叠加渲染），
+        // 跳过全部回写避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
+        // force=true 用于缩放收尾（onZoomFinalizeRequested）：缩放结束后必须把缩放后的
+        // 行圆点坐标回写（即使随后立即进入画布平移 inputState==1），否则重建端点表会
+        // 读到缩放前旧坐标 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
         // 头部坐标：拖拽中不回写（松手时 isDragging→false 触发回写新位置）
         if (!root.isDragging) {
             headLineRN.updateRNCenter()
@@ -98,8 +131,29 @@ Item {
         for (var i = 0; i < lineColumnRepeater.count; ++i) {
             var item = lineColumnRepeater.itemAt(i)
             if (item && item.updateLinkNodeCenter) {
-                item.updateLinkNodeCenter()
+                item.updateLinkNodeCenter(force)
             }
+        }
+    }
+
+    // 拖拽目标命中 + 预览（供标题栏圆点拖拽复用）
+    // toX/toY 为鼠标在 workspaceView 坐标系的坐标；srcId 为拖拽源节点；linkType/isLinkDrag 区分连线/合并
+    // 命中 → checkMergePreview/mergePreviewText 生成预览 → setDragTarget 通知目标节点显示预览框
+    // 未命中或命中源自身 → setDragTarget(0) 清除预览
+    function updateDragTarget(toX, toY, srcId, linkType, isLinkDrag) {
+        var targetId = workspaceController.hitTestSection(toX, toY)
+        if (targetId && targetId !== srcId) {
+            var code = workspaceController.checkMergePreview(srcId, targetId, linkType, isLinkDrag)
+            var text = workspaceController.mergePreviewText(srcId, targetId, linkType, isLinkDrag)
+            // 颜色规则沿用原 DropArea onEntered 逻辑：
+            //   lineDrag：code==0 蓝、否则红
+            //   sectionDrag：code==1 蓝、code==2 橙、否则红（0=允许,2=无默认链接 key）
+            var color = (code === 0) ? "#4fc3f7"
+                      : (isLinkDrag ? "#d63b3b"
+                                    : (code === 2 ? "#d6a23b" : "#d63b3b"))
+            workspaceController.setDragTarget(targetId, color, text)
+        } else {
+            workspaceController.setDragTarget(0, "", "")
         }
     }
 
@@ -150,8 +204,8 @@ Item {
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
-            // 标题栏高度随 ratio 缩放，保证块整体高度线性缩放（与 EqPos 间距的线性缩放一致）
-            height: Math.round(28 * root._r)
+            // 标题栏高度（逻辑尺寸，视觉高度 = 逻辑 × scale）
+            height: 28
             // 注册表颜色填充标题栏（对应 ImGui UCol），Ignore 时用暗色
             color: isIgnored ? "#1e1e1e" : registerColor
             radius: 3
@@ -159,6 +213,7 @@ Item {
             // E3：标题栏 RadioButton（对应 IBR_SectionData.cpp:757-774 ImGui::RadioButton）
             // 既是整块拖拽源视觉标记，还是折叠态连线锚点
             // Ignore 节点 RadioButton 变白（对应 TempWbg）
+            // 仅负责视觉；拖拽源挂在 headDragProxy 上（对应 ImGui BeginDragDropSource IBR_SecDrag）
             Rectangle {
                 id: headLineRN
                 // Import 块 RadioButton 居中（对应 ImGui ImportCount>0 时 X=半宽-0.5*FontHeight）
@@ -167,7 +222,7 @@ Item {
                 anchors.left: root.isImport ? undefined : parent.left
                 anchors.leftMargin: root.isImport ? 0 : 8
                 anchors.verticalCenter: parent.verticalCenter
-                width: Math.max(8, Math.round(10 * root._r))
+                width: 10  // 逻辑尺寸（缩放方案，视觉随 scale）
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
                 // Ignore → 白色半透明（TempWbg）；否则用白色边框圆点（标题栏已是注册表颜色）
@@ -190,40 +245,71 @@ Item {
                     }
                 }
                 Component.onCompleted: updateRNCenter()
+            }
 
-                // sectionDrag 拖拽源（对应 ImGui IBR_SectionData.cpp:761-774 BeginDragDropSource IBR_SecDrag）
-                // 从标题 RadioButton 拖出 → 拖到目标节点 DropArea → mergeSectionToSection 合并
-                // 单击圆点 → 选中节点（对应 ImGui CurOnRender_Clicked）
-                MouseArea {
-                    id: headRNMouseArea
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton
-                    hoverEnabled: false
-                    drag.target: sectionDragInitiator
-                    drag.threshold: 4
-                    drag.axis: Drag.XAndYAxis
-                    preventStealing: true
-                    onClicked: {
-                        // 单击 RadioButton 选中节点（非子模块）
-                        if (!root.isSubModule) {
-                            workspaceController.toggleSelectSection(root.sectionData.sectionId, false)
-                        }
+            // sectionDrag 拖拽代理（对应 ImGui IBR_SectionData.cpp:761-774 BeginDragDropSource IBR_SecDrag）
+            // 仅作为 headRNMouseArea.drag.target 的可移动载体（目标命中改由鼠标坐标命中测试
+            // hitTestSection 驱动，不再使用 Qt Drag/DropArea，因此无需 Drag attached 属性）。
+            // 不可见 Item 不参与渲染，不影响布局。
+            Item {
+                id: headDragProxy
+                width: headLineRN.width
+                height: headLineRN.height
+                visible: false
+            }
+
+            // sectionDrag 拖拽源 MouseArea（对应 ImGui IBR_SectionData.cpp:761-774 BeginDragDropSource IBR_SecDrag）
+            // 从标题 RadioButton 拖出 → 鼠标命中目标节点 → mergeSectionToSection 合并
+            // 单击圆点 → 选中节点（对应 ImGui CurOnRender_Clicked）
+            // 注意：drag.target 必须是非祖先（兄弟），否则移动 target 会连带移动 MouseArea 自身
+            MouseArea {
+                id: headRNMouseArea
+                anchors.fill: headLineRN
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: false
+                drag.target: headDragProxy
+                drag.threshold: 4
+                drag.axis: Drag.XAndYAxis
+                preventStealing: true
+                onPressed: {
+                    // 拖拽代理对齐到圆点位置（drag.target 移动的起始点）
+                    headDragProxy.x = headLineRN.x
+                    headDragProxy.y = headLineRN.y
+                }
+                // 滚轮转发：合并拖拽期间 grab 在本 MouseArea，转发滚轮保证拖动中可缩放
+                onWheel: {
+                    var wsPt = mapToItem(workspaceView, wheel.x, wheel.y)
+                    workspaceController.onWheel(wsPt.x, wsPt.y, wheel.angleDelta.y)
+                }
+                onReleased: {
+                    // 用拖拽终点（或按下位置）命中目标节点，命中则合并（对应 IBR_SecDrag 落点）
+                    var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
+                    var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
+                    if (targetId && targetId !== (root.sectionData.sectionId || 0)) {
+                        workspaceController.mergeSectionToSection(root.sectionData.sectionId, targetId)
+                    }
+                    workspaceController.clearDraggingLink()
+                }
+                // 拖拽中：实时更新 Bezier 预览线 + 目标命中预览（对应 ImGui RenderUI_Links）
+                onPositionChanged: {
+                    if (drag.active) {
+                        // 起点 = 标题栏圆点中心在 workspaceView 坐标系中的位置
+                        var fromPos = headLineRN.mapToItem(workspaceView, headLineRN.width / 2, headLineRN.height / 2)
+                        // 终点 = 鼠标在 workspaceView 坐标系中的位置
+                        var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
+                        workspaceController.setDraggingLink(fromPos.x, fromPos.y, toPos.x, toPos.y)
+                        // 预览框跟随鼠标（对应 ImGui 拖拽图像）：toPos 已是 workspaceView 坐标
+                        workspaceView.dragPreviewItem.x = toPos.x + 8
+                        workspaceView.dragPreviewItem.y = toPos.y + 8
+                        // 目标命中 + 预览（sectionDrag：合并）
+                        root.updateDragTarget(toPos.x, toPos.y, root.sectionData.sectionId, "", false)
                     }
                 }
-
-                Item {
-                    id: sectionDragInitiator
-                    visible: false
-                    Drag.active: headRNMouseArea.drag.active
-                    Drag.dragType: Drag.Internal
-                    Drag.mimeData: {
-                        "sectionDrag": JSON.stringify({
-                            sourceId: root.sectionData.sectionId || 0
-                        })
+                onClicked: {
+                    // 单击 RadioButton 选中节点（非子模块）
+                    if (!root.isSubModule) {
+                        workspaceController.toggleSelectSection(root.sectionData.sectionId, false)
                     }
-                    Drag.supportedActions: Qt.CopyAction
-                    Drag.proposedAction: Qt.CopyAction
-                    Drag.keys: ["sectionDrag"]
                 }
             }
 
@@ -258,7 +344,7 @@ Item {
             visible: !isComment && !isCollapsed && !collapsedInComposed
             // 高度由 Qt 内容驱动（Column.implicitHeight 累加所有行高度），不依赖 EqH
             height: visible ? (isVirtualBlock ? virtualBlockContainer.height
-                                              : lineColumn.implicitHeight + Math.round(8 * root._r))
+                                              : lineColumn.implicitHeight + 8)
                             : 0
 
             // ===== 普通块：行列表 =====
@@ -273,7 +359,7 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: Math.round(4 * root._r)
+                anchors.margins: 4
                 spacing: 0
 
                 Repeater {
@@ -329,7 +415,7 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 // 对应 ImGui SetCursorPosY(+TextLineHeight * 0.5) 间距
-                spacing: Math.round(6 * root._r)
+                spacing: 6
 
                 Repeater {
                     model: (isVirtualBlock && sectionData.includingModules) ? sectionData.includingModules : []
@@ -477,124 +563,8 @@ Item {
     // LinkPoint 已移至每行右端（LinkNodePoint.qml），对应 ImGui RadioButton 位置
     // 不再在节点左右边缘放 LinkPoint
 
-    // C4 + E2：节点 Acceptor DropTarget（对应 IBR_SectionData.cpp:477-563 RenderUI_Acceptor）
-    // 接收两种拖拽：
-    //   1. sectionDrag（整块拖入）→ MergeLine 合并
-    //   2. lineDrag（连线拖入）→ 合并链接（对应 IBR_LineDrag 路径）
-    DropArea {
-        id: mergeDropArea
-        anchors.fill: parent
-        // 同时接收内部节点拖拽和连线拖拽
-        keys: ["sectionDrag", "lineDrag"]
-
-        onEntered: {
-            var linePayload = drag.getDataAsString("lineDrag")
-            if (linePayload && linePayload.length > 0) {
-                // ===== lineDrag 路径（对应 RenderUI_Acceptor IBR_LineDrag 分支） =====
-                var info = JSON.parse(linePayload)
-                var srcId = info.sourceId
-                if (srcId === sectionData.sectionId) return  // 不可连自身
-                // v3 批次 1.4：LinkLimit=0 拖拽预览（对应 ImGui DrawDragPreviewIcon_LinkLim0）
-                // 拖拽源 LinkLimit=0 时无法建立链接，通知源端显示红色叉号 + "无效链接"文本
-                if (info.linkLimit === 0) {
-                    workspaceController.setDragInvalidLink(true)
-                    mergePreviewRect.visible = true
-                    mergePreviewRect.color = "#d63b3b"
-                    mergePreviewText.text = qsTr("无效链接")
-                    return
-                }
-                // 类型校验（对应 Acceptor_CheckLinkType）
-                // 修复：原调 lineModel.checkLinkType(info.lineIdx, sectionData.sectionId) 存在 Bug
-                //   lineModel 是目标 section 的 model，info.lineIdx 是源行索引
-                //   导致 srcId==dstId，类型校验失效。改用 checkMergePreview 正确传入源/目标 sectionId
-                var previewCode = workspaceController.checkMergePreview(
-                    srcId, sectionData.sectionId, info.linkType, true)
-                var previewText = workspaceController.mergePreviewText(
-                    srcId, sectionData.sectionId, info.linkType, true)
-                mergePreviewRect.visible = true
-                mergePreviewRect.color = previewCode === 0 ? "#4fc3f7" : "#d63b3b"
-                mergePreviewText.text = previewText
-            } else {
-                // ===== sectionDrag 路径（对应 RenderUI_Acceptor IBR_SecDrag 分支） =====
-                var secPayload = drag.getDataAsString("sectionDrag")
-                var secInfo = secPayload ? JSON.parse(secPayload) : {}
-                var dragId = secInfo.sourceId || 0
-                if (dragId === sectionData.sectionId) return  // 不可合并自身
-                var previewCode = workspaceController.checkMergePreview(
-                    dragId, sectionData.sectionId, "", false)
-                // 0=不可合并(类型不匹配), 1=可合并, 2=已存在, 3=其他
-                mergePreviewRect.visible = true
-                mergePreviewRect.color = previewCode === 1 ? "#4fc3f7"
-                                      : previewCode === 2 ? "#d6a23b"
-                                      : "#d63b3b"
-                mergePreviewText.text = workspaceController.mergePreviewText(
-                    dragId, sectionData.sectionId, "", false)
-            }
-        }
-        onExited: {
-            mergePreviewRect.visible = false
-            mergePreviewText.text = ""
-            // v3 批次 1.4：清除拖拽无效链接状态
-            workspaceController.setDragInvalidLink(false)
-        }
-        onDropped: {
-            var linePayload = drag.getDataAsString("lineDrag")
-            if (linePayload && linePayload.length > 0) {
-                // ===== lineDrag drop：创建链接 =====
-                var info = JSON.parse(linePayload)
-                var srcId = info.sourceId
-                if (srcId === sectionData.sectionId) return
-                // v3 批次 1.4：LinkLimit=0 不创建链接（对应 ImGui DrawDragPreviewIcon_LinkLim0 不创建链接）
-                if (info.linkLimit === 0) {
-                    workspaceController.setDragInvalidLink(false)
-                    mergePreviewRect.visible = false
-                    mergePreviewText.text = ""
-                    return
-                }
-                var lineModel = sectionData.lineModel
-                if (lineModel) {
-                    // destKey 传空字符串，由 C++ 侧查询目标 DLK
-                    lineModel.createLink(info.lineIdx, sectionData.sectionId, "")
-                }
-                mergePreviewRect.visible = false
-                mergePreviewText.text = ""
-            } else {
-                // ===== sectionDrag drop：合并节点 =====
-                var secPayload2 = drag.getDataAsString("sectionDrag")
-                var secInfo2 = secPayload2 ? JSON.parse(secPayload2) : {}
-                var dragId2 = secInfo2.sourceId || 0
-                if (dragId2 === sectionData.sectionId) return
-                var ok = workspaceController.mergeSectionToSection(dragId2, sectionData.sectionId)
-                mergePreviewRect.visible = false
-                mergePreviewText.text = ""
-            }
-            // v3 批次 1.4：清除拖拽无效链接状态
-            workspaceController.setDragInvalidLink(false)
-        }
-    }
-
-    // C4：合并预览覆盖层
-    Rectangle {
-        id: mergePreviewRect
-        anchors.fill: parent
-        visible: false
-        color: "#4fc3f7"
-        opacity: 0.2
-        radius: 3
-        z: 20
-        border.color: "#4fc3f7"
-        border.width: 2
-
-        Text {
-            id: mergePreviewText
-            anchors.bottom: parent.bottom
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottomMargin: 2
-            color: "#ffffff"
-            font.pixelSize: root.fontSmall
-            text: ""
-        }
-    }
+    // 拖拽目标预览已移至 WorkspaceView 顶层（dragPreview，跟随鼠标显示，对应 ImGui DrawDragPreviewIcon）
+    // 本文件不再持有预览框，位置与内容由 headRNMouseArea.onPositionChanged 更新 workspaceView.dragPreview
 
     // 节点交互 MouseArea（覆盖整个节点）
     // 左键拖拽移动、单击选中、右键菜单、双击编辑
@@ -619,6 +589,14 @@ Item {
         // 对应 ImGui 使用全局屏幕坐标进行拖拽计算
         function mapToWorkspace(mx, my) {
             return mapToItem(workspaceView, mx, my)
+        }
+
+        // 滚轮转发：模块拖拽期间鼠标 grab 在本 MouseArea 上，显式转发滚轮到
+        // 工作区缩放入口（与背景 onWheel 一致），保证拖动中滚轮缩放可用；
+        // C++ 侧拖拽中缩放与非拖拽一致（鼠标锚定），模块随画布同步缩放
+        onWheel: {
+            var wsPt = mapToWorkspace(wheel.x, wheel.y)
+            workspaceController.onWheel(wsPt.x, wsPt.y, wheel.angleDelta.y)
         }
 
         onPressed: {
@@ -687,9 +665,21 @@ Item {
                     workspaceController.toggleSelectSection(sectionData.sectionId, additive)
                 }
             } else if (mouse.button === Qt.RightButton) {
-                // 右键菜单（单节点）
-                sectionContextMenu.sectionId = sectionData.sectionId
-                sectionContextMenu.popup(nodeMouseArea, mouseX, mouseY)
+                // 右键仅标题栏触发（对齐 ImGui RenderUI_TitleBar 标题栏右键，内容区不弹菜单）
+                if (mouseY <= header.height) {
+                    var g = nodeMouseArea.mapToGlobal(mouseX, mouseY)
+                    // 多选态（MassAfter）右键选中模块 → 多选操作菜单（对应 IBR_WorkSpace.cpp:1170-1290）
+                    // 否则 → 单节点菜单（对应 IBR_SectionData.cpp:584-806）
+                    if (workspaceController.inputState === 4
+                            && workspaceController.isSectionSelected(root.sectionData.sectionId)
+                            && workspaceController.massTargetIds().length > 1) {
+                        contextMenuHost.show(workspaceView.massAfterDescs(), g.x, g.y,
+                                             (a) => workspaceView.dispatchMassAction(a))
+                    } else {
+                        contextMenuHost.show(root.buildSectionDescs(), g.x, g.y,
+                                             (a) => root.dispatchSectionAction(a))
+                    }
+                }
             }
         }
 
@@ -702,111 +692,62 @@ Item {
     }
 
     // 单节点右键菜单（对应 IBR_SectionData.cpp:566-806 RenderUI_TitleBar 右键菜单）
-    // 阶段 12.5：智能互斥 Ignore/Freeze/Hide + 补齐 Rename/RegRename/Decompose/EditText
-    // Comment 块特殊菜单：无 RegRename/Freeze/Hide/Fold（对应 IBR_SectionData.cpp:584-626）
-    Menu {
-        id: sectionContextMenu
-        property var sectionId: 0
+    // 顺序对齐 ImGui（IBR_SectionData.cpp:627-729）：
+    //   忽略/冻结/隐藏 → 折叠/展开(虚拟块) → 解散 → 重命名/寄存器名/编辑文本 → 复制 → 删除
+    // Comment 块特殊菜单：仅 忽略/重命名/复制/删除（对应 IBR_SectionData.cpp:584-626）
+    // 统一写法：构建 itemDescs 提交给单例 ContextMenuHost
+    function dispatchSectionAction(action) {
+        switch (action) {
+        case "ignore":    workspaceController.toggleIgnore(root.sectionData.sectionId); break
+        case "freeze":    workspaceController.toggleFreeze(root.sectionData.sectionId); break
+        case "hide":      workspaceController.toggleHide(root.sectionData.sectionId); break
+        case "fold":      workspaceController.foldComposed(root.sectionData.sectionId); break
+        case "unfold":    workspaceController.unfoldComposed(root.sectionData.sectionId); break
+        case "decompose": workspaceController.decomposeSection(root.sectionData.sectionId); break
+        case "rename":    workspaceController.renameSelected(); break
+        case "regRename": workspaceController.renameRegisterSelected(); break
+        case "editText":  workspaceController.enterEditTextMode(root.sectionData.sectionId); break
+        case "copy":      workspaceController.copySection(root.sectionData.sectionId); break
+        case "delete":    workspaceController.toggleSelectSection(root.sectionData.sectionId, false);
+                          workspaceController.deleteSelected(); break
+        }
+    }
 
-        // ===== 编辑操作 =====
-        MenuItem {
-            text: qsTr("重命名 (F2)")
-            onTriggered: workspaceController.renameSelected()
+    // 按当前节点状态生成菜单项描述，顺序对齐 ImGui（IBR_SectionData.cpp:627-731）：
+    //   忽略 → 冻结 → 隐藏 → [虚拟块折叠/展开] → 重命名 → 寄存器名 → 复制 → [解散] → 编辑文本 → 删除
+    // Comment 块：忽略 → 重命名 → 复制 → 删除（对应 IBR_SectionData.cpp:584-626）
+    // 注意：ImGui 原版无分隔线，全部项连续排列（外层 sectionData 即当前右键节点）
+    function buildSectionDescs() {
+        var descs = []
+        // 状态操作（智能互斥：按节点当前状态只显示可执行项）
+        descs.push({ type: "item", text: root.isIgnored ? qsTr("取消忽略") : qsTr("忽略"), action: "ignore" })
+        if (!root.isComment) {
+            descs.push({ type: "item", text: root.isFrozen ? qsTr("解冻") : qsTr("冻结"), action: "freeze" })
+            descs.push({ type: "item", text: root.isHidden ? qsTr("显示") : qsTr("隐藏"), action: "hide" })
         }
-        MenuItem {
-            text: qsTr("重命名寄存器名 (F3)")
-            visible: !isComment
-            onTriggered: workspaceController.renameRegisterSelected()
+        // 虚拟块折叠/展开（对应 IBR_SectionData.cpp:677-695）
+        if (root.isVirtualBlock) {
+            var allFold = sectionData.isComposedAllFold || false
+            descs.push({ type: "item", text: allFold ? qsTr("展开内部块") : qsTr("折叠内部块"),
+                         action: allFold ? "unfold" : "fold" })
         }
-        MenuItem {
-            text: qsTr("编辑文本")
-            onTriggered: workspaceController.enterEditTextMode(sectionContextMenu.sectionId)
+        // 编辑操作（对应 IBR_SectionData.cpp:697-706）
+        descs.push({ type: "item", text: qsTr("重命名 (F2)"), action: "rename" })
+        if (!root.isComment) {
+            descs.push({ type: "item", text: qsTr("重命名寄存器名 (F3)"), action: "regRename" })
         }
-
-        MenuSeparator {}
-
-        // ===== 复制/剪切/粘贴/删除/克隆 =====
-        MenuItem {
-            text: qsTr("复制")
-            onTriggered: {
-                workspaceController.toggleSelectSection(sectionContextMenu.sectionId, true)
-                workspaceController.copySelected()
-            }
+        // 复制（对应 IBR_SectionData.cpp:707-711）
+        descs.push({ type: "item", text: qsTr("复制"), action: "copy" })
+        // 解散虚拟块（对应 IBR_SectionData.cpp:712-719，Decomposable 时显示）
+        if (root.isVirtualBlock) {
+            descs.push({ type: "item", text: qsTr("解散虚拟块"), action: "decompose" })
         }
-        MenuItem {
-            text: qsTr("剪切")
-            onTriggered: {
-                workspaceController.toggleSelectSection(sectionContextMenu.sectionId, true)
-                workspaceController.cutSelected()
-            }
+        // 编辑文本（对应 IBR_SectionData.cpp:720-724）
+        if (!root.isComment) {
+            descs.push({ type: "item", text: qsTr("编辑文本"), action: "editText" })
         }
-        MenuItem {
-            text: qsTr("粘贴")
-            onTriggered: workspaceController.paste()
-        }
-        MenuItem {
-            text: qsTr("克隆")
-            onTriggered: {
-                workspaceController.toggleSelectSection(sectionContextMenu.sectionId, true)
-                workspaceController.duplicateSelected()
-            }
-        }
-        MenuItem {
-            text: qsTr("删除")
-            onTriggered: {
-                workspaceController.toggleSelectSection(sectionContextMenu.sectionId, false)
-                workspaceController.deleteSelected()
-            }
-        }
-
-        MenuSeparator {}
-
-        // ===== 智能互斥：Ignore/Freeze/Hide（对应 IBR_SectionData.cpp:629-676） =====
-        // 仅显示当前可执行的操作，而非同时显示两个相反选项
-        MenuItem {
-            text: isIgnored ? qsTr("取消忽略") : qsTr("忽略")
-            visible: !isComment
-            onTriggered: workspaceController.toggleIgnore(sectionContextMenu.sectionId)
-        }
-        MenuItem {
-            text: isFrozen ? qsTr("解冻") : qsTr("冻结")
-            visible: !isComment
-            onTriggered: workspaceController.toggleFreeze(sectionContextMenu.sectionId)
-        }
-        MenuItem {
-            text: isHidden ? qsTr("显示") : qsTr("隐藏")
-            visible: !isComment
-            onTriggered: workspaceController.toggleHide(sectionContextMenu.sectionId)
-        }
-
-        MenuSeparator {}
-
-        // ===== 虚拟块操作（对应 IBR_SectionData.cpp:677-695, 712-719） =====
-        MenuItem {
-            text: qsTr("缩合")
-            onTriggered: {
-                workspaceController.toggleSelectSection(sectionContextMenu.sectionId, true)
-                workspaceController.composeSelected()
-            }
-        }
-        // 虚拟块：折叠/展开所有内部块
-        MenuItem {
-            text: qsTr("折叠内部块")
-            visible: sectionData.isVirtualBlock || false
-            enabled: !(sectionData.isComposedAllFold || false)
-            onTriggered: workspaceController.foldComposed(sectionContextMenu.sectionId)
-        }
-        MenuItem {
-            text: qsTr("展开内部块")
-            visible: sectionData.isVirtualBlock || false
-            enabled: (sectionData.isComposedAllFold || false)
-            onTriggered: workspaceController.unfoldComposed(sectionContextMenu.sectionId)
-        }
-        // 虚拟块：解散
-        MenuItem {
-            text: qsTr("解散虚拟块")
-            visible: sectionData.isVirtualBlock || false
-            onTriggered: workspaceController.decomposeSection(sectionContextMenu.sectionId)
-        }
+        // 删除（对应 IBR_SectionData.cpp:725-727）
+        descs.push({ type: "item", text: qsTr("删除"), action: "delete" })
+        return descs
     }
 }

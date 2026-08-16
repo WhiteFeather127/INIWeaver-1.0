@@ -478,9 +478,26 @@ Item {
                             if (mouse.button === Qt.LeftButton) {
                                 sectionListModel.select(index, true)
                             } else {
-                                // 右键菜单：先选中再弹出
+                                // 右键菜单：先选中再弹出（QML 扩展，ImGui 列表无右键）
                                 sectionListModel.select(index, true)
-                                listContextMenu.popup(mouseArea, mouseX, mouseY)
+                                var gp = mouseArea.mapToGlobal(mouseX, mouseY)
+                                contextMenuHost.show([
+                                    { type: "item", text: qsTr("冻结/解冻"), action: "freeze" },
+                                    { type: "item", text: qsTr("隐藏/显示"), action: "hide" },
+                                    { type: "item", text: qsTr("忽略/取消忽略"), action: "ignore" },
+                                    { type: "separator" },
+                                    { type: "item", text: qsTr("删除"), action: "delete" }
+                                ], gp.x, gp.y, (action) => {
+                                    switch (action) {
+                                    case "freeze": sectionListModel.freeze(index, !frozen); break
+                                    case "hide":   sectionListModel.hide(index, !hidden); break
+                                    case "ignore": sectionListModel.ignore(index, !ignored); break
+                                    case "delete": sectionListModel.deleteSection(index); break
+                                    }
+                                    // 侧边栏操作与画布统一：立即刷新画布（对应 ImGui 立即模式
+                                    // 每帧重读 SectionData 的 Frozen/Hidden/Ignore，两侧天然同步）
+                                    workspaceController.refresh()
+                                })
                             }
                         }
                         onDoubleClicked: {
@@ -488,31 +505,6 @@ Item {
                                 // 双击跳转工作区（对应 IBR_ListView.cpp:303-307）
                                 sectionListModel.jumpToSection(index)
                             }
-                        }
-                    }
-
-                    // 右键菜单（对应 ImGui 列表项右键菜单）
-                    Menu {
-                        id: listContextMenu
-
-                        MenuItem {
-                            text: qsTr("冻结/解冻")
-                            onTriggered: sectionListModel.freeze(index, !frozen)
-                        }
-                        MenuItem {
-                            text: qsTr("隐藏/显示")
-                            onTriggered: sectionListModel.hide(index, !hidden)
-                        }
-                        MenuItem {
-                            text: qsTr("忽略/取消忽略")
-                            onTriggered: sectionListModel.ignore(index, !ignored)
-                        }
-
-                        MenuSeparator {}
-
-                        MenuItem {
-                            text: qsTr("删除")
-                            onTriggered: sectionListModel.deleteSection(index)
                         }
                     }
                 }

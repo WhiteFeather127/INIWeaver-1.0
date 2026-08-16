@@ -3,10 +3,13 @@
 // 阶段 2：建立 Qt 骨架；阶段 4.1：注册 Controller 为 context property
 // 阶段 6.1：QTimer 驱动主循环（替代 ShellLoop）
 #include <QApplication>
+#include <QClipboard>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTimer>
 #include <QThread>
+#include <QElapsedTimer>
+#include <atomic>
 #include <QLoggingCategory>
 #include <QQuickStyle>
 #include <QFont>
@@ -15,6 +18,9 @@
 #include <QMouseEvent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSurfaceFormat>
+#include <QScreen>
+#include <QFileInfo>
 #include <cstdio>
 #include <Windows.h>
 #include <mmsystem.h>  // timeBeginPeriod 提升系统定时器分辨率（winmm.lib）
@@ -35,30 +41,45 @@ protected:
             auto win = qobject_cast<QQuickWindow*>(watched);
             if (win) {
                 QQuickItem* focusItem = win->activeFocusItem();
-                if (focusItem) {
-                    // 检查 focusItem 是否为 TextInput（QQuickTextInput）或 TextField
-                    // QQuickTextInput 有 cursorPosition 属性，用 metaObject 检测
-                    const QMetaObject* mo = focusItem->metaObject();
+                // 沿焦点链向上找输入控件（含父级）：
+                // - TextInput / TextField → QQuickTextInput（TextField 继承 QQuickTextInput）
+                // - TextEdit / TextArea → QQuickTextEdit（TextArea 继承 QQuickTextEdit）
+                // - SpinBox → QQuickSpinBox（本体不继承输入类，需单独识别）
+                // 用 metaObject 沿继承链检测 className
+                QQuickItem* inputItem = nullptr;
+                QQuickItem* node = focusItem;
+                while (node && !inputItem) {
+                    const QMetaObject* mo = node->metaObject();
                     bool isInput = false;
                     while (mo) {
-                        if (strcmp(mo->className(), "QQuickTextInput") == 0) {
+                        const char* cn = mo->className();
+                        if (strcmp(cn, "QQuickTextInput") == 0
+                            || strcmp(cn, "QQuickTextEdit") == 0
+                            || strcmp(cn, "QQuickSpinBox") == 0) {
                             isInput = true;
                             break;
                         }
                         mo = mo->superClass();
                     }
-                    if (isInput) {
-                        // 当前焦点是输入框，检查点击是否在输入框矩形外
-                        QRectF itemRect = focusItem->mapRectToScene(focusItem->boundingRect());
-                        QPointF clickPos = me->position();
-                        bool outside = clickPos.x() < itemRect.x()
-                                    || clickPos.x() > itemRect.x() + itemRect.width()
-                                    || clickPos.y() < itemRect.y()
-                                    || clickPos.y() > itemRect.y() + itemRect.height();
-                        if (outside) {
-                            // 让输入框失去焦点：setFocus(false) 在 FocusScope 中生效
-                            // QML 的 ApplicationWindow 是 FocusScope，setFocus(false) 可清除 activeFocus
-                            focusItem->setFocus(false);
+                    if (isInput) inputItem = node;
+                    else node = node->parentItem();
+                }
+                if (inputItem) {
+                    // 当前焦点在输入控件内，检查点击是否在其矩形外
+                    QRectF itemRect = inputItem->mapRectToScene(inputItem->boundingRect());
+                    QPointF clickPos = me->position();
+                    bool outside = clickPos.x() < itemRect.x()
+                                || clickPos.x() > itemRect.x() + itemRect.width()
+                                || clickPos.y() < itemRect.y()
+                                || clickPos.y() > itemRect.y() + itemRect.height();
+                    if (outside) {
+                        // 清焦点链：从 activeFocusItem 逐层到输入控件本体全部 setFocus(false)，
+                        // 确保 SpinBox（焦点在其内部 TextField）整体失焦
+                        QQuickItem* cur = focusItem;
+                        while (cur) {
+                            cur->setFocus(false);
+                            if (cur == inputItem) break;
+                            cur = cur->parentItem();
                         }
                     }
                 }
@@ -86,6 +107,7 @@ static void debugLog(const char* msg)
 #include "IBR_Components.h"
 #include "IBR_ErrorCollector.h"
 #include "IBR_ImportIni.h"
+#include "IBR_Misc.h"
 #include "qt/ProjectController.h"
 #include "qt/ModuleTreeModel.h"
 #include "qt/SectionListModel.h"
@@ -105,6 +127,17 @@ int main(int argc, char* argv[])
     // 关闭 Qt Quick 渲染循环的 vsync（在 QApplication/渲染循环创建前设置）
     // 帧率不再被显示器刷新率锁死，允许更高帧率（代价：可能画面撕裂、GPU 占用升高）
     qputenv("QSG_NO_VSYNC", "1");
+    // 双保险：QSurfaceFormat::swapInterval(0) 请求禁用 vsync（Qt 6.4+ 文档：与 QSG_NO_VSYNC
+    // 等效，均请求渲染线程 swap 时不阻塞；对 D3D11 RHI 后端是否真正生效取决于驱动，见诊断日志）
+    // 必须在 QGuiApplication / 窗口创建前设置默认格式
+    {
+        QSurfaceFormat fmt;
+        fmt.setSwapInterval(0);
+        // 8bit alpha 通道：视图窗口（miniMapWindow）用透明背景 + 圆角容器，
+        // 无 alpha 时 QQuickWindow 透明背景（color: transparent）无法渲染，圆角窗口退化为方窗
+        fmt.setAlphaBufferSize(8);
+        QSurfaceFormat::setDefaultFormat(fmt);
+    }
 
     // 提高 Windows 系统定时器分辨率到 1ms（默认 15.6ms ≈ 64Hz）
     // 否则 QTimer interval=0 最快只能 ~60FPS，拖动/缩放帧率被锁死
@@ -120,13 +153,16 @@ int main(int argc, char* argv[])
     // 打开调试日志文件（写入工作目录）
     g_debugLog = fopen("iniweaver_debug.log", "w");
     // 安装消息处理器：把 qDebug 输出重定向到 debug log 文件（selftest 模式下捕获测试详细输出）
+    // 注意：不能用 msg.toStdWString() —— 它返回 std::wstring，由 Qt DLL 的 CRT 分配、EXE 的 CRT 释放，
+    // Debug 下两套 CRT 堆不一致会导致堆损坏（0xC0000374）。改用 Qt 自管内存的 toUtf8()。
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &ctx, const QString &msg) {
+        const QByteArray utf8 = msg.toUtf8();
         if (g_debugLog) {
-            fprintf(g_debugLog, "[%lu] %s\n", GetCurrentThreadId(), msg.toUtf8().constData());
+            fprintf(g_debugLog, "[%lu] %s\n", GetCurrentThreadId(), utf8.constData());
             fflush(g_debugLog);
         }
-        OutputDebugStringW(msg.toStdWString().c_str());
-        OutputDebugStringW(L"\n");
+        OutputDebugStringA(utf8.constData());
+        OutputDebugStringA("\n");
     });
     debugLog(selfTestMode ? "=== INIWeaver selftest starting ===" : "=== INIWeaver Qt starting ===");
 
@@ -176,6 +212,12 @@ int main(int argc, char* argv[])
     LoadDatabaseComplete = true;
     debugLog("LoadDatabaseComplete set");
 
+    // 加载最近文件列表（对应 Initialize.cpp:728 IBR_RecentManager::Load）
+    // 原版在 Stage_IV 中调用，Qt 版不执行 Stage_IV，否则启动后最近文件列表为空
+    // 且首次 Push 后保存的文件内容无法在下次启动时读回
+    IBR_RecentManager::Load();
+    debugLog("RecentManager Load done");
+
     // 阶段3：启动 save thread 和 front thread（对应 Initialize.cpp:675 Initialize_Stage_III）
     // save thread (IBS_Thr_SaveLoop)：处理 IBS_Push 推入的任务（项目加载/保存等）
     // front thread (IBF_Thr_FrontLoop)：处理 IBRF_CoreBump.SendToF 推入的 F 队列消息
@@ -193,6 +235,24 @@ int main(int argc, char* argv[])
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = NULL;
     ImGui::GetIO().LogFilename = NULL;
+    // 桥接 ImGui 剪贴板到 Qt 系统剪贴板（对应 GLFW 后端的 SetClipboardTextFn/GetClipboardTextFn）：
+    // 复制/粘贴（IBR_WorkSpace::CopySelected/Paste、IBR_SectionData::CopyToClipBoard）经
+    // ImGui::SetClipboardText/GetClipboardText 读写剪贴板；Qt 版无平台后端，不设置回调时
+    // SetClipboardText 静默无效、GetClipboardText 返回空串 → 粘贴永远报"粘贴失败"。
+    // 所有调用均在 GUI 线程（QML → Q_INVOKABLE → 主线程），QGuiApplication::clipboard() 线程安全。
+    {
+        ImGuiIO &imGuiIo = ImGui::GetIO();
+        imGuiIo.SetClipboardTextFn = [](void *, const char *text) {
+            if (!text) text = "";
+            QGuiApplication::clipboard()->setText(QString::fromUtf8(text));
+        };
+        imGuiIo.GetClipboardTextFn = [](void *) -> const char * {
+            // ImGui 期望返回指针在下一次调用前保持有效：用静态 QByteArray 缓存
+            static QByteArray buf;
+            buf = QGuiApplication::clipboard()->text().toUtf8();
+            return buf.constData();
+        };
+    }
     debugLog("Triggering CallReadSetting");
     IBR_Inst_Setting.SetSettingName(SettingFileName);
     IBR_Inst_Setting.CallReadSetting();
@@ -377,11 +437,32 @@ int main(int argc, char* argv[])
 
     // 全局点击失焦：在 QML 根窗口安装事件过滤器
     // 点击 TextField 外部时清除输入框焦点（画布、面板、对话框等所有区域通用）
+    QQuickWindow *rootWindow = nullptr;
     {
-        auto rootWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+        rootWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
         if (rootWindow) {
             rootWindow->installEventFilter(new FocusBlurFilter(rootWindow));
             debugLog("FocusBlurFilter installed on root window");
+            // 记录实际图形渲染后端：Qt 6 在 Windows 默认 D3D11（GPU 硬件加速），
+            // 仅在驱动不可用/远程桌面等场景才回退到 Software 软件渲染
+            const char *apiName = "unknown";
+            switch (QQuickWindow::graphicsApi()) {
+            case QSGRendererInterface::Direct3D11: apiName = "Direct3D11 (GPU)"; break;
+            case QSGRendererInterface::Direct3D12: apiName = "Direct3D12 (GPU)"; break;
+            case QSGRendererInterface::OpenGL:      apiName = "OpenGL (GPU)"; break;
+            case QSGRendererInterface::Metal:       apiName = "Metal (GPU)"; break;
+            case QSGRendererInterface::Vulkan:      apiName = "Vulkan (GPU)"; break;
+            case QSGRendererInterface::Software:    apiName = "Software (CPU)"; break;
+            case QSGRendererInterface::Null:        apiName = "Null (no rendering)"; break;
+            default: break;
+            }
+            debugLog(QString("SceneGraph backend: %1 (QSG_NO_VSYNC=%2)")
+                         .arg(apiName).arg(qEnvironmentVariableIsSet("QSG_NO_VSYNC") ? "1" : "0").toUtf8().constData());
+            // 诊断：窗口所在屏幕的刷新率，用于区分 60fps 是 VSync 锁定（60Hz 屏）还是渲染耗时瓶颈
+            if (rootWindow->screen()) {
+                debugLog(QString("Screen refreshRate=%1Hz")
+                             .arg(rootWindow->screen()->refreshRate()).toUtf8().constData());
+            }
         }
     }
 
@@ -395,13 +476,61 @@ int main(int argc, char* argv[])
     // PreciseTimer：配合 timeBeginPeriod(1)，让 interval=0 的 QTimer 突破 ~60Hz 系统节拍限制
     // 默认 CoarseTimer 会与系统 15.6ms 节拍合并，拖动/缩放时帧率上不去
     timer.setTimerType(Qt::PreciseTimer);
+
+    // 全局渲染帧率节流（对齐 ImGui AdjustFrameRate 的软限帧）：
+    // Qt 6.8.1 无 QQuickWindow::setFrameSwappedInterval（该 API 于 Qt 6.9 才引入），
+    // 改在渲染线程的 beforeRendering 里按帧率间隔睡眠：SceneGraph 是"内容变化才渲染"，
+    // 任何 UI 变化（画布/连线/侧边栏 hover/框选矩形/拖拽预览等）触发的每一帧渲染都
+    // 经过此处被拉长到帧间隔 → 帧率上限**全局生效**（而非仅定时器驱动的画布数据刷新）。
+    // 无内容变化时不渲染、不进入本回调，无额外开销。
+    // 线程安全：frameIntervalUs 由 GUI 线程（设置变更）与渲染线程（每帧读取）共享，用原子。
+    std::atomic<qint64> g_frameIntervalUs{0};   // 帧间隔（微秒），0=不限帧
+    std::atomic<qint64> g_nextFrameUs{0};       // 下一帧允许渲染的时刻（相对时钟起点，微秒）
+    QElapsedTimer frameClock;
+    frameClock.start();  // 单调时钟，渲染线程只读 nsecsElapsed，跨线程安全
+
     auto applyFrameRateLimit = [&]() {
         int fps = settingController.frameRateLimit();
         int intervalMs = (fps <= 0) ? 0 : (1000 / fps);
         timer.setInterval(intervalMs);
+        // 全局渲染节流间隔（微秒）；fps<=0（含 -1=不限）→ 0=不节流
+        g_frameIntervalUs.store((fps <= 0) ? 0 : (1000000 / fps));
+        // 帧率限制的实现说明（Qt 6.8.1 无 QQuickWindow::setFrameSwappedInterval，该 API 于 Qt 6.9 才引入）：
+        // 1) QTimer（本定时器）按帧率设置驱动数据刷新：连线端点表/项目同步/节流后的拖拽位置
+        //    （WorkspaceController 的拖拽/平移位置更新延迟到此 tick 统一应用，见 applyPendingDrag）。
+        // 2) SceneGraph 渲染是"内容变化才渲染"，拖动画布/模块时的位置属性按帧率设置变化
+        //    → 实际渲染帧率即受帧率设置限制（避免鼠标事件率驱动渲染跑满本机帧率）。
+        // 3) beforeRendering 软节流（见下）把**全部**渲染统一限制到帧间隔，覆盖侧边栏/框选等
+        //    不经过定时器数据节流的 UI 变化。
     };
     applyFrameRateLimit();
     QObject::connect(&settingController, &SettingController::settingsChanged, [&]() { applyFrameRateLimit(); });
+    if (rootWindow) {
+        QObject::connect(rootWindow, &QQuickWindow::beforeRendering,
+                         [&frameClock, &g_frameIntervalUs, &g_nextFrameUs]() {
+            qint64 intervalUs = g_frameIntervalUs.load();
+            if (intervalUs <= 0) return;  // 不限帧
+            qint64 nowUs = frameClock.nsecsElapsed() / 1000;
+            qint64 targetUs = g_nextFrameUs.load();
+            if (targetUs == 0) {
+                // 首帧：规划下一帧目标时刻
+                g_nextFrameUs.store(nowUs + intervalUs);
+                return;
+            }
+            qint64 remainUs = targetUs - nowUs;
+            if (remainUs > 0) {
+                // 距上一帧不足帧间隔 → 渲染线程睡眠到目标时刻，本帧被拉长
+                QThread::usleep(static_cast<unsigned int>(remainUs));
+                nowUs = frameClock.nsecsElapsed() / 1000;
+            }
+            // 推进到下一帧目标；若严重落后（sleep 精度/卡顿）则跳到"现在+间隔"，避免积压追赶
+            qint64 nextTarget = targetUs + intervalUs;
+            if (nextTarget <= nowUs)
+                g_nextFrameUs.store(nowUs + intervalUs);
+            else
+                g_nextFrameUs.store(nextTarget);
+        });
+    }
     QObject::connect(&timer, &QTimer::timeout, [&]() {
         // 处理核心消息队列（对应 MainStage.h:147 IBRF_CoreBump.IBR_AutoProc()）
         // 这会执行所有通过 SendToR 发送的消息：项目打开/保存/导出、Section 操作等
@@ -425,6 +554,26 @@ int main(int argc, char* argv[])
         sectionListModel.refreshFromTimer();
     });
     timer.start();
+
+    // 启动时若无附加 .iproj 文件则自动新建项目（对应 Initialize.cpp:832-835
+    // 数据库加载完成后无条件 CreateAction；Qt 版按需求仅"无附加文件"时新建）
+    // 附加文件判定与 ProcessCommandLine 相同：命令行参数含存在的 .iproj 文件
+    const QStringList cmdArgs = QApplication::arguments();
+    bool hasAttachedProject = false;
+    for (int i = 1; i < cmdArgs.size(); ++i) {
+        QFileInfo fi(cmdArgs.at(i));
+        if (fi.exists() && fi.suffix().compare("iproj", Qt::CaseInsensitive) == 0) {
+            hasAttachedProject = true;
+            break;
+        }
+    }
+    if (!hasAttachedProject) {
+        // 延迟到事件循环开始后执行：QML 已加载、save/front 线程已就绪，
+        // CreateAction 同步创建空白项目（无弹窗副作用，Create() 见 IBR_ProjManager.cpp:74）
+        QTimer::singleShot(0, &projectController, []() {
+            IBR_ProjectManager::CreateAction();
+        });
+    }
 
     return app.exec();
 }

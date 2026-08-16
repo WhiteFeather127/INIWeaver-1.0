@@ -625,8 +625,8 @@ void IBR_Project::Load(const IBS_Project& Proj)
     IBB_ClipBoardData ClipData;
     IBB_ClipBoardData::ErrorContext.ModulePath = Proj.Path;
     IBB_ClipBoardData::ErrorContext.ModuleName = UnicodetoUTF8(Proj.ProjName);
-    if (ClipData.SetStream(Proj.Data, GetClipFormatVersion(Proj.GetCreateVersionN())))
-        AddModule(ClipData.Modules, false);
+    ClipData.SetStream(Proj.Data, GetClipFormatVersion(Proj.GetCreateVersionN()));
+    AddModule(ClipData.Modules, false);
     IBF_Inst_Project.Project.ChangeAfterSave = false;
     for (auto& List : Proj.RegisterLists)
         IBF_Inst_Project.Project.GetRegisterList(List.Type, List.IniType).Load(List);

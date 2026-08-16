@@ -6,9 +6,13 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../workspace"
+import "../components"
 
 Item {
     id: root
+
+    // 请求打开独立"视图窗口"（Main.qml miniMapWindow 显示迷你地图浮窗）
+    signal openMiniMapWindow()
 
     // 项目未打开时显示提示（对应 ControlPanel_WaitOpen）
     Text {
@@ -95,12 +99,26 @@ Item {
             color: "#1e1e1e"
         }
 
-        // 迷你地图标题
-        Text {
-            text: qsTr("迷你地图")
-            color: "#cccccc"
-            font.pixelSize: 13
-            font.bold: true
+        // 迷你地图标题 + 视图窗口按钮
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Text {
+                text: qsTr("迷你地图")
+                color: "#cccccc"
+                font.pixelSize: 13
+                font.bold: true
+                Layout.fillWidth: true
+            }
+
+            // 打开独立"视图窗口"（可拖动/调整大小的迷你地图浮窗，见 Main.qml miniMapWindow）
+            StyledButton {
+                text: qsTr("视图窗口")
+                implicitWidth: 76
+                implicitHeight: 24
+                onClicked: root.openMiniMapWindow()
+            }
         }
 
         // 迷你地图（对应 IBR_FullView::DrawView）
@@ -111,6 +129,11 @@ Item {
             Layout.minimumHeight: 200
             sections: workspaceController.sections
             viewRect: {
+                // 显式依赖 eqCenter/ratio：viewportEqRect 的 NOTIFY 只有 workspaceRectChanged，
+                // 平移（eqCenterChanged）/缩放（ratioChanged）后视图框必须跟随更新，
+                // 否则视图框停在旧视野，与画布实际显示不符
+                workspaceController.eqCenter
+                workspaceController.ratio
                 var r = workspaceController.viewportEqRect
                 return { x: r.x, y: r.y, w: r.width, h: r.height }
             }

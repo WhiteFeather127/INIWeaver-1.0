@@ -6,6 +6,7 @@
 
 #include <QAbstractListModel>
 #include <QString>
+#include <QHash>
 #include <QVariant>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <vector>
@@ -67,6 +68,12 @@ public:
                                                  bool considerDescName,
                                                  bool considerDesc) const;
 
+    // 右键菜单级联树：按路径取某文件夹的直接子项（对应 ImGui RenderModuleTreeUI 逐层渲染）
+    // 直接遍历 IBB_ModuleAltDefault 原始树，不依赖 m_nodes/展开状态，不与左侧面板互相干扰
+    // folderPath 编码：""=根层；"S:"前缀=Special 树；"A:"前缀=All 树；嵌套用 "/" 连接
+    // 返回项字段：{path, name, isFolder, hasChildren, moduleKey, descLong}
+    Q_INVOKABLE QVariantList levelChildren(const QString &folderPath) const;
+
 signals:
     void includeSpecialChanged();
     void isEmptyChanged();
@@ -77,9 +84,10 @@ private:
         QString name;          // 显示名
         QString descLong;      // 长描述
         QString moduleKey;     // 模块标识（目录为空）
+        QString path;          // 文件夹唯一路径（"S:车辆/发动机" / "A:..."），模块节点为空
         int depth{0};
         bool isFolder{false};
-        bool expanded{true};   // 默认展开
+        bool expanded{false};   // 默认折叠（需求：侧边栏文件夹默认全部折叠；用户可手动展开）
         int childCount{0};
         void *modulePtr{nullptr};  // IBB_ModuleAlt* 原始指针（非拥有，仅模块节点有效）
     };
@@ -87,10 +95,13 @@ private:
     std::vector<Node> m_nodes;     // 扁平化列表（仅可见节点）
     bool m_includeSpecial{true};
     QString m_filter;              // 阶段 6.1：搜索过滤文本
+    // 文件夹展开状态（path -> expanded），rebuild 时据此恢复，避免每次重建都重置为展开
+    QHash<QString, bool> m_expandedState;
 
     void rebuild();
     // 通过 void* 避免头文件依赖 IBB_ModuleAlt.h（实现在 .cpp 中转换）
-    void traverse(const void *treePtr, int depth);
+    // prefix 为树路径前缀（"S:" / "A:"），用于生成文件夹唯一路径
+    void traverse(const void *treePtr, int depth, const QString &prefix);
     // 阶段 6.1：应用搜索过滤（保留匹配模块 + 祖先目录）
     void applyFilter();
 };

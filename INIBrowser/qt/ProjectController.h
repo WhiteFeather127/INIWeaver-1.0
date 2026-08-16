@@ -10,6 +10,7 @@
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+class QTimer;
 class DialogController;
 
 class ProjectController : public QObject
@@ -77,10 +78,19 @@ public slots:
     void saveProject();
     void saveAsProject();
     void saveOptProject();
-    void closeProject();
     void exportIni();
-    // 带参数版本：由 ExportDialog 调用，先写入 LastOutputDir/LastOutputIniName 再调用 AutoOutputAction
+    // Qt 版：不直调 ImGui 版 OutputAction（复杂控件弹窗经 PopupHook 转发后只剩空白框），
+    // 改为触发 QML 导出对话框；带参数版本由 ExportDialog 调用，先写入
+    // LastOutputDir/LastOutputIniName（对应 IBR_ProjManager.cpp:770-798 确认分支）再调 AutoOutputAction
     Q_INVOKABLE void exportIni(const QString &outputDir, const QVariantMap &iniNames);
+    // 导出对话框数据快照（对应 ImGui 版 OutputAction 的数据准备，IBR_ProjManager.cpp:683-731）：
+    // dir = 默认输出目录（LastOutputDir 优先，否则项目所在目录）；
+    // inis = 可导出的 INI 列表 [{name: 类型名, fileName: 默认文件名}]（跳过内部 INI 与无 Section 的 INI）
+    Q_INVOKABLE QVariantMap exportDialogData() const;
+    // 目录存在性检查（对应 ImGui 版 IsExistingDir）
+    Q_INVOKABLE bool dirExists(const QString &dir) const;
+    // 文件已存在检查（对应 ImGui 版 PathFileExistsW 警告）
+    Q_INVOKABLE bool fileExists(const QString &path) const;
     void importIni();
     // 带参数版本：由 ImportIniDialog 调用，直接使用指定路径
     Q_INVOKABLE void importIni(const QString &path);
@@ -177,9 +187,18 @@ private:
     void doClearRecentFiles();
     // 实际执行打开项目（由 openProject 弹三态确认后调用）
     void doOpenProject();
+    // 不保存分支：QFileDialog 选路径后用 NoAsk 入口打开（跳过业务层 AskIfSave，避免弹窗卡死）
+    void doOpenProjectNoAsk();
     // 阶段 13.3.2：根据用户选择的类型创建 SHP 模块（对应 IBR_ProjManager.cpp:1163-1212）
     void createShpModules(const QStringList &names, const std::vector<int> &types);
+    // 保存完成后打开（轮询 ChangeAfterSave，等待异步保存完成）
+    void startOpenAfterSave(const QString &kind);
+    void onOpenWaitTimeout();
     DialogController *m_dialogController{nullptr};
+    QTimer *m_openWaitTimer{nullptr};
+    QString m_afterSaveKind;
+    QString m_pendingRecentPath;
+    int m_openWaitCount{0};
 
     // 对应 IBR_Debug.cpp:85 的 static bool Ext（DebugOutputExtra 开关）
     // 因 Ext 是 ImGui RenderUI 内的 static 局部变量，不持久化到 IBR_Inst_Debug，这里用 ProjectController 静态成员承载

@@ -6,6 +6,7 @@
 // 双击切换 IICStatus（Input 显示文本框 / Link 显示 LinkNode）
 import QtQuick
 import QtQuick.Controls
+import "../components"
 
 Item {
     id: root
@@ -34,6 +35,12 @@ Item {
     property int lineMult: 0
     property int compIdx: 0
     property string keyName: ""
+
+    // 修复：行重建/布局完成门控。delegate 创建到首次布局完成前（layoutDone=false），
+    // onXChanged/onYChanged 回写的中间坐标（行堆叠在第一个节点位置）会污染 acceptCenter 缓存，
+    // 故跳过；onCompleted 用 Qt.callLater 在布局完成后置 true 并回写一次最终坐标。
+    // 布局完成后（layoutDone=true）立即回写，保证拖动模块/画布时连线跟手不滞后。
+    property bool layoutDone: false
 
     // D14：IICStatus 持久化（绑定 model role，对应 ImGui Status_Workspace/ComponentStatus）
     // false=Link 态（显示 RadioButton），true=Input 态（显示文本框）
@@ -144,9 +151,13 @@ Item {
         }
 
         // layout 后回写坐标到 lineModel（供 LinkRenderer 查表）
-        onXChanged: root.updateLinkNodeCenter()
-        onYChanged: root.updateLinkNodeCenter()
-        Component.onCompleted: root.updateLinkNodeCenter()
+        // layoutDone 门控：行重建期间跳过中间坐标，避免污染缓存
+        onXChanged: if (root.layoutDone) root.updateLinkNodeCenter()
+        onYChanged: if (root.layoutDone) root.updateLinkNodeCenter()
+        // 修复：onCompleted 延迟到事件循环末尾（Qt.callLater），此时 Positioner 已完成布局。
+        // 直接 onCompleted 回写会读到行重建瞬间的初始坐标（所有行堆叠在第一个节点位置），
+        // 污染 acceptCenter 缓存 → 该模块所有连线起点画到第一个节点。
+        Component.onCompleted: Qt.callLater(() => { root.layoutDone = true; root.updateLinkNodeCenter() })
     }
 
     // 无 LinkNode 的行显示灰色 Disabled 点（对应 RenderUI_Node_Disabled）
@@ -165,9 +176,11 @@ Item {
         // 修复：无 LinkNode 的行也需回写位置，否则 Data_String 类型行
         // （键值为块名）的连线源端点 LastCenter 始终为 (0,0) 导致连线不可见
         // 对应 ImGui IBB_IniLine_Data_String::RenderUI 无条件调 UpdateLink
-        onXChanged: root.updateLinkNodeCenter()
-        onYChanged: root.updateLinkNodeCenter()
-        Component.onCompleted: root.updateLinkNodeCenter()
+        // layoutDone 门控：行重建期间跳过中间坐标，避免污染缓存
+        onXChanged: if (root.layoutDone) root.updateLinkNodeCenter()
+        onYChanged: if (root.layoutDone) root.updateLinkNodeCenter()
+        // 修复：onCompleted 延迟回写（同 linkNode，避免行重建时污染坐标）
+        Component.onCompleted: Qt.callLater(() => { root.layoutDone = true; root.updateLinkNodeCenter() })
     }
 
     // Input 态文本框（双击行文本切换显示）
@@ -331,62 +344,53 @@ Item {
         onClicked: {
             if (mouse.button === Qt.RightButton) {
                 var globalPos = lineRightClickMA.mapToGlobal(mouse.x, mouse.y)
-                lineMenu.popup(globalPos.x, globalPos.y)
+                contextMenuHost.show(root.buildLineDescs(), globalPos.x, globalPos.y,
+                                     (a) => root.dispatchLineAction(a))
             }
         }
     }
 
     // ===== 行级右键菜单（对应 IBR_Misc.cpp:201-252 WorkSpaceLine 右键菜单 4 项） =====
-    Menu {
-        id: lineMenu
+    // 统一写法：构建 itemDescs 提交给单例 ContextMenuHost
+    function buildLineDescs() {
+        return [
+            // 1. 切换输入态（对应 GUI_SwitchIICStatus → CC->SwitchInput = true）
+            { type: "item", text: qsTr("切换输入态"), action: "toggleInput" },
+            // 2. SpecialAccept 开关（对应 GUI_SpecialAcceptOff/On）
+            // 文本根据当前态切换：已开启显示"关闭特殊接受"，未开启显示"开启特殊接受"
+            { type: "item", text: root.specialAccept ? qsTr("关闭特殊接受") : qsTr("开启特殊接受"),
+              action: "toggleSpecial" },
+            // 3. 删除行（对应 GUI_RemoveLine → pbk->RemoveLine(Key)）
+            { type: "item", text: qsTr("删除行"), action: "removeLine" },
+            // 4. 编辑描述（对应 GUI_EditDesc → CC->InputOnShow = !CC->InputOnShow）
+            { type: "item", text: qsTr("编辑描述"), action: "editDesc" }
+        ]
+    }
 
-        // 1. 切换输入态（对应 GUI_SwitchIICStatus → CC->SwitchInput = true）
-        // ImGui 中 SwitchInput 由后续帧处理翻转 IICStatus，Qt 版直接调 toggleInputMode
-        MenuItem {
-            text: qsTr("切换输入态")
-            onTriggered: {
-                if (root.lineModel) {
-                    root.lineModel.toggleInputMode(root.rowIndex)
-                }
-            }
-        }
-
-        // 2. SpecialAccept 开关（对应 GUI_SpecialAcceptOff/On → CC->SpecialAccept = !CC->SpecialAccept）
-        // 文本根据当前态切换：已开启显示"关闭特殊接受"，未开启显示"开启特殊接受"
-        MenuItem {
-            text: root.specialAccept ? qsTr("关闭特殊接受") : qsTr("开启特殊接受")
-            onTriggered: {
-                if (root.lineModel) {
-                    root.lineModel.toggleSpecialAccept(root.rowIndex)
-                }
-            }
-        }
-
-        // 3. 删除行（对应 GUI_RemoveLine → pbk->RemoveLine(Key)）
-        MenuItem {
-            text: qsTr("删除行")
-            onTriggered: {
-                if (root.lineModel) {
-                    root.lineModel.removeLine(root.rowIndex)
-                }
-            }
-        }
-
-        // 4. 编辑描述（对应 GUI_EditDesc → CC->InputOnShow = !CC->InputOnShow）
-        // 切换 OnShow 描述编辑框显示/隐藏
-        MenuItem {
-            text: qsTr("编辑描述")
-            onTriggered: {
-                if (root.lineModel) {
-                    root.lineModel.toggleInputOnShow(root.rowIndex)
-                }
-            }
+    function dispatchLineAction(action) {
+        if (!root.lineModel) return
+        switch (action) {
+        case "toggleInput":   root.lineModel.toggleInputMode(root.rowIndex); break
+        case "toggleSpecial": root.lineModel.toggleSpecialAccept(root.rowIndex); break
+        case "removeLine":    root.lineModel.removeLine(root.rowIndex); break
+        case "editDesc":      root.lineModel.toggleInputOnShow(root.rowIndex); break
         }
     }
 
     // 回写 LinkNode 屏幕坐标到 lineModel（供 WorkspaceController::rebuildLinkEndpoints 同步）
-    function updateLinkNodeCenter() {
+    // 布局完成后立即回写（保证拖动模块/画布时连线跟手）；
+    // 行重建期间的中间坐标由 layoutDone 门控拦截（见 onXChanged/onYChanged）。
+    function updateLinkNodeCenter(force) {
+        doUpdateLinkNodeCenter(force)
+    }
+
+    function doUpdateLinkNodeCenter(force) {
         if (!root.lineModel || root.rowIndex < 0) return
+        // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomTransform 叠加渲染），
+        // 跳过回写，避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
+        // force=true 用于缩放收尾（SectionNode.updateAllCenters 传入）：缩放后必须回写缩放后
+        // 坐标，否则重建端点表读到缩放前旧值 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
         // 对应 ImGui IBR_LinkNode::UpdateLink：对所有 Data_String 行无条件设置 LastCenter
         // ImGui: Center = IsImport ? ImportCenter() : DefaultCenter()
         //   DefaultCenter = GetLineEndPos() - {FontHeight*1.5, HalfLine}（行末位置）
@@ -422,6 +426,8 @@ Item {
         root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
         // 阶段 3：同一 RadioButton 位置也作为行级接受点回写（对应 ImGui AcceptCenter）
         // 该坐标作为连线终点 pb 的行精确值
-        root.lineModel.setAcceptCenter(root.rowIndex, cx - dx, cy - dy)
+        // 按 keyName+mult 直接回写：rowIndex 在 m_entries 重建后可能错位，
+        // setAcceptCenter(row) 会存错行导致 Warhead 被 Projectile 坐标覆盖，改按 key 免疫
+        root.lineModel.setAcceptCenterByKey(root.keyName, root.lineMult, cx - dx, cy - dy)
     }
 }

@@ -1,4 +1,4 @@
-﻿#include "IBR_Project.h"
+#include "IBR_Project.h"
 #include "IBFront.h"
 #include "Global.h"
 #include "FromEngine/RFBump.h"
@@ -694,6 +694,28 @@ namespace IBR_WorkSpace
         Alt.ParamDescShort = Alt.ParamDescLong = "";
         Alt.Parameter = "****";
         Alt.Path = UTF8toUnicode(IPath);
+        Alt.Modules = std::move(ClipData.Modules);
+        Alt.FullyLoaded = true;
+        Alt.SaveToFile();
+
+        IBB_ModuleAltDefault::NewModule(std::move(Alt));
+    }
+
+    // Qt 版本导出模块（对应 ImGui OutputSelectedImpl，QML 对话框填名后调用）
+    // 由 WorkspaceController::outputSelectedModule 调用（WorkspaceController.cpp 前向声明）
+    void ExportSelectedModuleQt(const std::string& Utf8Name, const std::string& Utf8Desc, const std::string& Utf8Path)
+    {
+        IBB_ModuleAlt Alt;
+        IBB_ClipBoardData ClipData;
+        GenerateClipDataFromMassSelect(ClipData);
+
+        Alt.Available = true;
+        Alt.Name = Utf8Name;
+        Alt.DescShort = Utf8Name;
+        Alt.DescLong = Utf8Desc;
+        Alt.ParamDescShort = Alt.ParamDescLong = "";
+        Alt.Parameter = "****";
+        Alt.Path = UTF8toUnicode(Utf8Path.c_str());
         Alt.Modules = std::move(ClipData.Modules);
         Alt.FullyLoaded = true;
         Alt.SaveToFile();

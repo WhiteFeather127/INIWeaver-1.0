@@ -115,24 +115,40 @@ void SettingController::setSettingValue(const QString &name, const QVariant &val
         switch (t.Type)
         {
         case IBB_SettingType::IntA:
+            if (t.Data)
+            {
+                int32_t v = value.toInt();
+                // 合法区间检查（对应 ImGui InputInt：从 i=1 起步长 2 检查 [Limit[i], Limit[i+1]]）
+                // 不在任何合法区间则回退 Def=Limit[0]；-1 等 SpV 特殊值（单独区间）可正常接受
+                bool legal = false;
+                for (size_t i = 1; i + 1 < t.Limit.size(); i += 2)
+                {
+                    if (t.Limit[i] && t.Limit[i + 1])
+                    {
+                        int32_t lo = *static_cast<const int32_t*>(t.Limit[i]);
+                        int32_t hi = *static_cast<const int32_t*>(t.Limit[i + 1]);
+                        if (lo <= v && v <= hi) { legal = true; break; }
+                    }
+                }
+                if (!legal)
+                {
+                    if (!t.Limit.empty() && t.Limit[0])
+                        v = *static_cast<const int32_t*>(t.Limit[0]);
+                    else
+                        v = 0;
+                }
+                *static_cast<int32_t*>(t.Data) = v;
+            }
+            break;
         case IBB_SettingType::IntB:
             if (t.Data)
             {
                 int32_t v = value.toInt();
-                // 应用范围约束（对应 ImGui InputInt 的 min/max）
-                if (!t.Limit.empty())
-                {
-                    if (t.Limit.size() >= 1 && t.Limit[0])
-                    {
-                        int32_t minVal = *static_cast<const int32_t*>(t.Limit[0]);
-                        v = std::max(v, minVal);
-                    }
-                    if (t.Limit.size() >= 2 && t.Limit[1])
-                    {
-                        int32_t maxVal = *static_cast<const int32_t*>(t.Limit[1]);
-                        v = std::min(v, maxVal);
-                    }
-                }
+                // IntB 布局 {Min, Max, Format}：clamp 到 [Min, Max]（对应 SliderInt 范围）
+                if (t.Limit.size() >= 1 && t.Limit[0])
+                    v = std::max(v, *static_cast<const int32_t*>(t.Limit[0]));
+                if (t.Limit.size() >= 2 && t.Limit[1])
+                    v = std::min(v, *static_cast<const int32_t*>(t.Limit[1]));
                 *static_cast<int32_t*>(t.Data) = v;
             }
             break;

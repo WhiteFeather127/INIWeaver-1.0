@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "IBFront.h"
 #include "FromEngine/RFBump.h"
 #include "IBSave.h"
@@ -204,6 +204,8 @@ struct IBR_Project
     {
         IBB_SectionID Dest;
         StrPoolID DestKey;
+        StrPoolID FromKey;   // 源行 key（重建端点表时按 key 查源行圆点，免疫 SessionID 不匹配）
+        size_t SrcMult;      // 源行分量索引（FromLoc.Mult），配合 FromKey 精确定位源行圆点
         size_t LineMult;
         uint64_t SourceID;
         ModuleID_t SrcModuleID;

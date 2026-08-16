@@ -1,6 +1,8 @@
 // MiniMap.qml
 // 迷你地图组件，对应 IBR_FullView::DrawView() (line 71-162)
-// 绘制所有 Section 矩形（归一化坐标）+ 视口框 + 点击定位
+// 绘制所有 Section 矩形（fit 自适应）+ 视图框 + 点击定位（不画画布边缘外框，最大占用空间）
+// 内容固定 fit 全览（模块 + 视口），不提供内容缩放；
+// 可在独立"视图窗口"（Main.qml miniMapWindow）中拖动/调整大小使用
 import QtQuick
 
 Canvas {
@@ -8,9 +10,9 @@ Canvas {
     property var sections: []
     property var viewRect: ({ x: 0, y: 0, w: 0, h: 0 })  // 视口在 Eq 坐标
     property var eqCenter: ({ x: 0, y: 0 })
-    property real viewScale: 20.0  // 固定缩放因子
+    property real viewScale: 20.0  // 固定缩放因子（保留兼容）
     // 阶段 13.4：背景拖拽状态（对应 IBR_WorkSpace::IsBgDragging）
-    // true 时视口框用 CenterCrossColor，false 时用 ClipFrameLineColor
+    // true 时视图框用 CenterCrossColor，false 时用 ClipFrameLineColor
     property bool isBgDragging: false
 
     // 点击定位信号
@@ -28,6 +30,8 @@ Canvas {
         if (sections.length === 0) return;
 
         // 计算所有 Section 的边界
+        // 注意：world bounds 仅由模块范围决定，不包含视口（用户要求：
+        // 画布大小不随拖动位置到边缘而改变，避免迷你地图随视野缩放跳动）
         var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (var i = 0; i < sections.length; i++) {
             var s = sections[i];
@@ -37,17 +41,11 @@ Canvas {
             maxY = Math.max(maxY, s.eqY + s.eqH);
         }
 
-        // 包含视口
-        minX = Math.min(minX, viewRect.x);
-        minY = Math.min(minY, viewRect.y);
-        maxX = Math.max(maxX, viewRect.x + viewRect.w);
-        maxY = Math.max(maxY, viewRect.y + viewRect.h);
-
         var worldW = maxX - minX;
         var worldH = maxY - minY;
         if (worldW < 1 || worldH < 1) return;
 
-        // 缩放到迷你地图尺寸
+        // 缩放到迷你地图尺寸（fit 自适应，随组件尺寸变化自动重算）
         var scaleX = width / worldW;
         var scaleY = height / worldH;
         var scale = Math.min(scaleX, scaleY) * 0.9;  // 留边距
@@ -74,13 +72,17 @@ Canvas {
         }
         ctx.globalAlpha = 1.0;
 
-        // 绘制视口框
+        // 视图框（当前视野，对应 ImGui ClipVUL+CPos 矩形）
         // 阶段 13.4：拖拽背景时切色（对应 IBR_FullView.cpp:160）
         // IsBgDragging ? CenterCrossColor : ClipFrameLineColor
+        // 半透明填充标示视野范围，边框标定边界；viewRect 数据由调用方按
+        // viewportEqRect 实时提供（跟随 eqCenter/ratio/视口尺寸变化）
         var vpUL = eqToMini(viewRect.x, viewRect.y);
         var vpDR = eqToMini(viewRect.x + viewRect.w, viewRect.y + viewRect.h);
+        ctx.fillStyle = isBgDragging ? "rgba(133,133,133,0.12)" : "rgba(0,122,204,0.12)";
+        ctx.fillRect(vpUL.x, vpUL.y, vpDR.x - vpUL.x, vpDR.y - vpUL.y);
         ctx.strokeStyle = isBgDragging ? "#858585" : "#007acc";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.strokeRect(vpUL.x, vpUL.y, vpDR.x - vpUL.x, vpDR.y - vpUL.y);
 
         // 中心十字
@@ -110,12 +112,10 @@ Canvas {
                 root.locateTo(mouseX, mouseY)
             }
         }
-
-        // 复用：逆变换迷你地图坐标 -> Eq 坐标并发信号
-        // 提取为函数避免重复（onClicked 旧逻辑已合并到此处）
     }
 
     // 逆变换：迷你地图坐标 -> Eq 坐标，发出 clicked 信号
+    // 注意：与 onPaint 一致，world bounds 仅由模块范围决定（不包含视口）
     function locateTo(mx, my) {
         if (sections.length === 0) return;
 
@@ -127,10 +127,6 @@ Canvas {
             maxX = Math.max(maxX, s.eqX + s.eqW);
             maxY = Math.max(maxY, s.eqY + s.eqH);
         }
-        minX = Math.min(minX, viewRect.x);
-        minY = Math.min(minY, viewRect.y);
-        maxX = Math.max(maxX, viewRect.x + viewRect.w);
-        maxY = Math.max(maxY, viewRect.y + viewRect.h);
 
         var worldW = maxX - minX;
         var worldH = maxY - minY;

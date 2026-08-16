@@ -1,4 +1,4 @@
-﻿#include "IBB_ModuleAlt.h"
+#include "IBB_ModuleAlt.h"
 #include <wincrypt.h>
 #include "Global.h"
 #include "Shlwapi.h"
@@ -107,12 +107,13 @@ std::string_view TrimView(std::string_view Line)
 {
     while (!Line.empty())
     {
-        if (isspace(Line.front()))Line = Line.substr(1, Line.size() - 1);
+        // isspace 参数必须是 unsigned char 或 EOF；UTF-8 多字节末尾字节为负值时是 UB
+        if (isspace(static_cast<unsigned char>(Line.front())))Line = Line.substr(1, Line.size() - 1);
         else break;
     }
     while (!Line.empty())
     {
-        if (isspace(Line.back()))
+        if (isspace(static_cast<unsigned char>(Line.back())))
         {
             if (Line.size() >= 2 && Line[Line.size() - 2] < 0)break;
             else Line = Line.substr(0, Line.size() - 1);

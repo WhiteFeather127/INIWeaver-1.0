@@ -28,18 +28,61 @@ Canvas {
     property real ratio: 1.0
     // 阶段 2：拖拽偏移量（拖拽中实时更新 pa/pb）
     property point dragOffset: Qt.point(0, 0)
+    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照，渲染时对所有端点叠加此偏移
+    //（来自 workspaceController.canvasDragOffset，端点表重建时清零）
+    property point canvasOffset: Qt.point(0, 0)
+    // 视口偏移（屏幕像素）：拖拽侧边栏调宽/窗口 resize 时视口中心变化，所有模块整体
+    // 平移而端点表是上次 rebuild 的快照 → 渲染时叠加此偏移使连线端点与模块即时对齐
+    //（来自 workspaceController.viewportOffsetX/Y，端点表重建时归零）
+    property real viewportOffsetX: workspaceController.viewportOffsetX
+    property real viewportOffsetY: workspaceController.viewportOffsetY
 
     // FontHeight 对应 ImGui 的 FontHeight（基准 13px × ratio）
     readonly property real fontHeight: 13.0 * ratio
     readonly property real lineWidth: fontHeight / 5.0
 
     onLinksChanged: requestPaint()
-    onSectionsChanged: requestPaint()
-    onLinkEndpointsChanged: requestPaint()
+    onSectionsChanged: { cachedSectionMap = null; requestPaint() }
+    onLinkEndpointsChanged: { cachedEndpointMap = null; requestPaint() }
     onLinkEndpointsMapChanged: requestPaint()
     onFocusedSectionIdChanged: requestPaint()
     onRatioChanged: requestPaint()
-    onDragOffsetChanged: requestPaint()
+    // 拖拽中 dragOffset/draggingSectionId 会变，sectionMap 需重建（缩放补间动画期间
+    // 无拖拽，sectionMap 不变 → 缓存生效，避免每帧重建 JS map）
+    onDragOffsetChanged: { cachedSectionMap = null; requestPaint() }
+    onCanvasOffsetChanged: requestPaint()
+    onViewportOffsetXChanged: requestPaint()
+    onViewportOffsetYChanged: requestPaint()
+    // 性能优化：缓存端点/节点查找表。缩放补间动画每帧只变 ratio/eqCenter，
+    // links/sections/linkEndpoints 均不变，每帧重建 map 是纯浪费；
+    // 数据变化时清缓存，拖拽中由 onDragOffsetChanged 触发重建
+    property var cachedEndpointMap: null
+    property var cachedSectionMap: null
+    // 缩放叠加（仿 canvasOffset）：缩放中端点表保持快照，按 zoomBaseRatio/zoomBaseCenter
+    // 基准把端点坐标换算到当前 ratio/eqCenter 下，与节点即时缩放保持一致（缩放停止后端点
+    // 表重建，zoomPending 变 false，换算自动失效）
+    Connections {
+        target: workspaceController
+        function onZoomBaseChanged() { requestPaint() }
+    }
+
+    // 缩放换算：把端点表快照坐标（基准 ratio/eqCenter 下的屏幕坐标）换算到当前视图。
+    // 公式：E = (S_b - V)/r_b + C_b → S_c = (E - C_c)*r_c + V
+    //      = (S_b - V)*(r_c/r_b) + (C_b - C_c)*r_c + V
+    function zoomTransform(px, py) {
+        if (!workspaceController.zoomPending) return { x: px, y: py }
+        var rBase = workspaceController.zoomBaseRatio
+        if (rBase <= 0) return { x: px, y: py }
+        var rCur = ratio
+        var vx = width / 2.0, vy = height / 2.0
+        var k = rCur / rBase
+        var cBase = workspaceController.zoomBaseCenter
+        var cCur = workspaceController.eqCenter
+        return {
+            x: (px - vx) * k + (cBase.x - cCur.x) * rCur + vx,
+            y: (py - vy) * k + (cBase.y - cCur.y) * rCur + vy
+        }
+    }
 
     // 构建 sessionId → {x, y, isCollapsed} 查找表
     function buildEndpointMap() {
@@ -58,10 +101,16 @@ Canvas {
         // 因为 beginMoveSection 不再调用 refresh()，sectionData.dragging 在拖拽期间为 false
         var dragId = workspaceController.draggingSectionId;
         var massDrag = workspaceController.massDragging;
+        // 修复"松手连线弹"：刚结束拖拽的节点（lastDraggedId，dragOffset 尚未清零）继续叠加
+        // dragOffset，使连线在端点表重建完成前持续跟随鼠标终点，不弹回拖拽前位置
+        var lastDragId = workspaceController.lastDraggedId();
+        var hasOffset = (workspaceController.dragOffset.x !== 0
+                         || workspaceController.dragOffset.y !== 0);
         for (var i = 0; i < sections.length; i++) {
             var s = sections[i];
             var isDragging = (s.dragging || false)
                 || s.sectionId === dragId
+                || (s.sectionId === lastDragId && hasOffset)
                 || (massDrag && (s.selected || false));
             map[s.sectionId] = {
                 screenX: s.screenX || 0,
@@ -102,8 +151,17 @@ Canvas {
 
         if (links.length === 0) return;
 
-        var endpointMap = buildEndpointMap();
-        var sectionMap = buildSectionMap();
+        // 用缓存查找表（数据变化时由 onXxxChanged 清空，动画/平移期间直接复用）
+        var endpointMap = root.cachedEndpointMap;
+        if (endpointMap === null) {
+            endpointMap = buildEndpointMap();
+            root.cachedEndpointMap = endpointMap;
+        }
+        var sectionMap = root.cachedSectionMap;
+        if (sectionMap === null) {
+            sectionMap = buildSectionMap();
+            root.cachedSectionMap = sectionMap;
+        }
 
         for (var i = 0; i < links.length; i++) {
             var link = links[i];
@@ -119,11 +177,12 @@ Canvas {
             // 源 section（用于判断源节点是否拖拽）
             var srcSec = sectionMap[link.sourceId];
 
-            // pa 叠加 dragOffset（当源节点拖拽时）
+            // pa 叠加 canvasOffset（画布平移）+ dragOffset（当源节点拖拽时）
             // 端点表中的 pa 是拖拽前的坐标（拖拽中不回写，见 SectionNode.qml onXChanged），
-            // 需要叠加 dragOffset 让连线跟随节点移动
-            var paX = srcEp.x;
-            var paY = srcEp.y;
+            // 需要叠加偏移让连线跟随节点移动；缩放中先按基准换算（zoomTransform）
+            var srcT = zoomTransform(srcEp.x, srcEp.y);
+            var paX = srcT.x + viewportOffsetX + canvasOffset.x;
+            var paY = srcT.y + viewportOffsetY + canvasOffset.y;
             if (srcSec && srcSec.dragging) {
                 paX += dragOffset.x;
                 paY += dragOffset.y;
@@ -137,9 +196,11 @@ Canvas {
             var mapKey = link.sourceSessionId + ":" + link.destId;
             var ep = linkEndpointsMap[mapKey];
             if (ep && ep.pbValid) {
-                // 精确 pb 叠加 dragOffset（当目标节点拖拽时）
-                var pbX = ep.pbX;
-                var pbY = ep.pbY;
+                // 精确 pb 叠加 canvasOffset（画布平移）+ dragOffset（当目标节点拖拽时）
+                // 缩放中先按基准换算（zoomTransform）
+                var pbT = zoomTransform(ep.pbX, ep.pbY);
+                var pbX = pbT.x + viewportOffsetX + canvasOffset.x;
+                var pbY = pbT.y + viewportOffsetY + canvasOffset.y;
                 if (dstSec && dstSec.dragging) {
                     pbX += dragOffset.x;
                     pbY += dragOffset.y;
@@ -154,6 +215,8 @@ Canvas {
             } else if (!pbPrecise) {
                 // 回退：边界近似（对应无回写时的兜底，computeDestPoint 内部叠加 dragOffset）
                 pb = computeDestPoint(dstSec, link.fromImport);
+                pb.x += viewportOffsetX + canvasOffset.x;
+                pb.y += viewportOffsetY + canvasOffset.y;
             }
 
             // 分支 1：IsSelfLinked && Collapsed → 不画（对应 ImGui line 1511）

@@ -15,11 +15,17 @@
 #include "DialogController.h"
 #include <QMessageBox>
 #include <QFileDialog>
+#include <QDir>
+#include <QFileInfo>
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
 #include <QGuiApplication>
 #include <QKeyCombination>
+#include <QTimer>
+
+// 内部 INI 类型名（定义于 IBB_Ini.cpp，跟随 IBR_ProjManager.cpp:24 的 extern 声明惯例）
+extern const char* Internal_IniName;
 
 // IBR_WorkSpace 内部状态变量（对应 IBR_Debug.cpp:56-66 的 extern 声明）
 // 这些变量在 IBR_WorkSpace.cpp 中定义，但未在头文件中完整声明，这里按 IBR_Debug.cpp 的方式 extern 引用
@@ -148,22 +154,85 @@ void ProjectController::doOpenProject()
     refreshProperties();
 }
 
+void ProjectController::doOpenProjectNoAsk()
+{
+    // 不保存分支：QFileDialog 选路径后，用 NoAsk 入口直接关闭+打开
+    // 避免 CloseAction 因 ChangeAfterSave 仍为 true 触发 AskIfSave（ImGui 弹窗在 Qt 下卡死）
+    QString path = QFileDialog::getOpenFileName(
+        nullptr,
+        QString::fromUtf8(u8"打开项目"),
+        QString(),
+        QString::fromUtf8(u8"INIWeaver 项目文件 (*.iproj);;所有文件 (*.*)"));
+    if (path.isEmpty())
+    {
+        emit hintMessage(QString::fromUtf8(u8"已取消"));
+        return;
+    }
+    IBR_ProjectManager::ProjOpen_OpenRecentAction_NoAsk(path.toStdWString());
+    refreshProperties();
+}
+
 void ProjectController::openRecentProject(const QString &path)
 {
+    // 修复：原 openRecentProject 不检查 ChangeAfterSave，有未保存修改时
+    // OpenRecentOptAction -> CloseAction 会触发 AskIfSave（ImGui 弹窗在 Qt 下卡死）
+    // 与 openProject 一致：先弹三态确认，确认后再打开
+    if (IBR_ProjectManager::IsOpen() && IBF_Inst_Project.Project.ChangeAfterSave)
+    {
+        m_pendingRecentPath = path;
+        if (m_dialogController)
+        {
+            m_dialogController->showConfirm3(
+                QString::fromUtf8(u8"打开项目"),
+                QString::fromUtf8(u8"项目有未保存的修改，是否在打开前保存？"),
+                QString::fromUtf8("openRecentWithUnsaved"));
+        }
+        return;
+    }
     IBR_ProjectManager::OpenRecentOptAction(path.toStdWString());
     refreshProperties();
 }
 
 void ProjectController::saveProject()
 {
+    // 新项目（尚未保存过）：ImGui 版 SaveOptAction 会走 SaveAsAction（Win32 对话框 + "请稍候"弹窗）
+    // Qt 版统一改走 QFileDialog 另存为
+    if (IBF_Inst_Project.Project.IsNewlyCreated)
+    {
+        saveAsProject();
+        return;
+    }
+    // 无未保存修改：SaveAction 会跳过写盘改走 OutputOnSaveAction，其中 OutputAction
+    // 弹复杂 ImGui 弹窗，Qt 下转发后为空白窗——这里在 Qt 层复刻该逻辑，
+    // 需要弹窗的分支改用 QML 导出对话框（与导出按钮一致）
+    if (!IBF_Inst_Project.Project.ChangeAfterSave)
+    {
+        if (IBF_Inst_Setting.OutputOnSave())
+        {
+            bool allNamesSet = true;
+            for (const auto &ini : IBF_Inst_Project.Project.Inis)
+            {
+                if (IBF_Inst_Project.Project.LastOutputIniName[ini.Name].empty())
+                {
+                    allNamesSet = false;
+                    break;
+                }
+            }
+            if (allNamesSet) IBR_ProjectManager::AutoOutputAction();
+            else if (m_dialogController) m_dialogController->showExportDialog();
+        }
+        refreshProperties();
+        return;
+    }
     IBR_ProjectManager::SaveOptAction();
     refreshProperties();
 }
 
 void ProjectController::saveAsProject()
 {
-    // 修复：原 SaveAsAction 内部依赖 GetSaveFileNameW + ImGui SetWaitingPopup，Qt 环境下无法显示
-    // 改为 QFileDialog 获取路径，设置 Project.Path + IsNewlyCreated=false，然后调用 SaveAction（不弹对话框）
+    // QFileDialog 选路径，走业务层 SaveAs_WithQtPath（跳过 SetWaitingPopup + AskSavePath）
+    // 注意：不能调 SaveAction——无未保存修改时 SaveAction 会跳过写盘改走 OutputOnSaveAction，
+    // 其 OutputAction 弹复杂 ImGui 弹窗，Qt 下转发后为空白窗（且文件实际未保存）
     QString path = QFileDialog::getSaveFileName(
         nullptr,
         QString::fromUtf8(u8"另存为"),
@@ -174,47 +243,105 @@ void ProjectController::saveAsProject()
         emit hintMessage(QString::fromUtf8(u8"已取消"));
         return;
     }
-    // 设置新路径，标记为非新建项目，然后调用 SaveAction（使用 Project.Path 保存）
-    IBF_Inst_Project.Project.Path = path.toStdWString();
-    IBF_Inst_Project.Project.IsNewlyCreated = false;
-    IBR_ProjectManager::SaveAction();
+    // Path/ProjName/IsNewlyCreated 由业务层保存完成回调统一更新（写盘成功才生效）
+    IBR_ProjectManager::SaveAs_WithQtPath(path.toStdWString());
     refreshProperties();
 }
 
 void ProjectController::saveOptProject()
 {
-    IBR_ProjectManager::SaveOptAction();
-    refreshProperties();
-}
-
-void ProjectController::closeProject()
-{
-    IBR_ProjectManager::CloseAction();
-    refreshProperties();
+    // 与保存按钮同语义（ImGui SaveOptAction：新项目=另存为，否则保存）
+    saveProject();
 }
 
 void ProjectController::exportIni()
 {
-    IBR_ProjectManager::OutputAction();
-    refreshProperties();
+    // Qt 版：不直调 ImGui 版 OutputAction（InputText/按钮等复杂控件经 PopupHook
+    // 转发后只剩 Title+Texts，QML 侧表现为空白框），改为触发 QML 导出对话框
+    if (m_dialogController)
+        m_dialogController->showExportDialog();
 }
 
 void ProjectController::exportIni(const QString &outputDir, const QVariantMap &iniNames)
 {
-    // 由 ExportDialog 调用：先写入用户指定的输出目录和 INI 文件名
+    // 由 ExportDialog 确认后调用（对应 ImGui 版 OutputAction 的 OK 分支，IBR_ProjManager.cpp:770-798）：
+    // 更新 LastOutputDir/LastOutputIniName（有变化时置 ChangeAfterSave）、写设置、再 AutoOutputAction
     if (!outputDir.isEmpty())
     {
-        IBF_Inst_Project.Project.LastOutputDir = outputDir.toStdWString();
+        std::wstring WP = outputDir.toStdWString();
+        if (IBF_Inst_Project.Project.LastOutputDir != WP)
+        {
+            IBF_Inst_Project.Project.LastOutputDir = WP;
+            IBF_Inst_Project.Project.ChangeAfterSave = true;
+        }
+        IBF_Inst_Setting.OutputDir() = outputDir.toStdString();
+        IBR_Inst_Setting.CallSaveSetting();
     }
     for (auto it = iniNames.begin(); it != iniNames.end(); ++it)
     {
         std::string iniName = it.key().toStdString();
         std::wstring fileName = it.value().toString().toStdWString();
-        IBF_Inst_Project.Project.LastOutputIniName[iniName] = fileName;
+        auto &U = IBF_Inst_Project.Project.LastOutputIniName[iniName];
+        if (U != fileName)
+        {
+            U = fileName;
+            IBF_Inst_Project.Project.ChangeAfterSave = true;
+        }
     }
     // 调用 AutoOutputAction（无 UI 版本，直接使用 LastOutputDir/LastOutputIniName）
     IBR_ProjectManager::AutoOutputAction();
     refreshProperties();
+}
+
+QVariantMap ProjectController::exportDialogData() const
+{
+    QVariantMap data;
+    const auto &P = IBF_Inst_Project.Project;
+
+    // 默认输出目录（对应 ImGui 版 WP 初始化，IBR_ProjManager.cpp:724-732）：
+    // LastOutputDir 优先，否则项目所在目录
+    std::wstring WP;
+    if (!P.LastOutputDir.empty())
+        WP = P.LastOutputDir;
+    else if (!P.Path.empty())
+        WP = RemoveSpec(P.Path);
+    data["dir"] = QString::fromStdWString(WP);
+
+    // 默认文件名基名 = ProjName 去扩展名（对应 IBR_ProjManager.cpp:698-705）
+    std::wstring Base = P.ProjName;
+    auto DotPos = Base.find_last_of(L'.');
+    if (DotPos != std::wstring::npos)
+        Base = Base.substr(0, DotPos);
+
+    // ImGui 版 Ignore 规则（IBR_ProjManager.cpp:706-722）实际生效行为：
+    // 有 Section 的 INI 可导出（内层 Register 引用扫描因前置 continue 为死代码）；
+    // 内部 INI（Internal_IniName）不参与导出 UI
+    QVariantList inis;
+    for (const auto &I : P.Inis)
+    {
+        if (I.Name == Internal_IniName || I.Secs.empty())
+            continue;
+        QVariantMap row;
+        row["name"] = QString::fromUtf8(I.Name.c_str());
+        const auto &Last = P.LastOutputIniName.find(I.Name);
+        if (Last != P.LastOutputIniName.end() && !Last->second.empty())
+            row["fileName"] = QString::fromStdWString(Last->second);
+        else
+            row["fileName"] = QString::fromStdWString(Base + L"_" + QString::fromUtf8(I.Name.c_str()).toStdWString() + L".ini");
+        inis.append(row);
+    }
+    data["inis"] = inis;
+    return data;
+}
+
+bool ProjectController::dirExists(const QString &dir) const
+{
+    return QDir(dir).exists();
+}
+
+bool ProjectController::fileExists(const QString &path) const
+{
+    return QFileInfo::exists(path);
 }
 
 void ProjectController::importIni()
@@ -350,6 +477,19 @@ void ProjectController::onDropFiles(const QStringList &paths)
         else if (ext == "IPROJ")
         {
             // 项目文件：直接打开（不走 OnDropFile 的批量处理）
+            // 有未保存修改时先走三态确认（避免 CloseAction 触发 AskIfSave 在 Qt 下卡死）
+            if (IBR_ProjectManager::IsOpen() && IBF_Inst_Project.Project.ChangeAfterSave)
+            {
+                m_pendingRecentPath = path;
+                if (m_dialogController)
+                {
+                    m_dialogController->showConfirm3(
+                        QString::fromUtf8(u8"打开项目"),
+                        QString::fromUtf8(u8"项目有未保存的修改，是否在打开前保存？"),
+                        QString::fromUtf8("openRecentWithUnsaved"));
+                }
+                continue;
+            }
             auto wPath = path.toStdWString();
             IBR_ProjectManager::ProjOpen_OpenRecentAction(wPath);
         }
@@ -504,7 +644,7 @@ void ProjectController::onConfirmResult(const QString &actionId, bool accepted)
         // 阶段 11.3：closeWithUnsaved 已迁移到 onConfirmResult3，此处保留兼容
         if (accepted)
         {
-            IBR_ProjectManager::SaveOptAction();
+            saveProject();
             IBR_ProjectManager::CloseAction();
         }
         refreshProperties();
@@ -534,49 +674,67 @@ void ProjectController::onConfirmResult3(const QString &actionId, int result)
     {
         if (result == 1)
         {
-            // 保存后关闭（对应 ImGui AskIfSave Yes）
-            IBR_ProjectManager::SaveOptAction();
-            IBR_ProjectManager::CloseAction();
+            // 保存后关闭（等异步保存完成，避免 CloseAction 触发 AskIfSave 卡死）
+            saveProject();
+            startOpenAfterSave(QString::fromUtf8("close"));
         }
         else if (result == 2)
         {
-            // 不保存直接关闭（对应 ImGui AskIfSave No）
-            IBR_ProjectManager::CloseAction();
+            // 不保存直接关闭：走 NoAsk 入口
+            IBR_ProjectManager::CloseAction_NoAsk();
+            refreshProperties();
         }
         // result == 0：取消，什么都不做（对应 ImGui AskIfSave Cancel）
-        refreshProperties();
     }
     else if (actionId == QString::fromUtf8("openProjectWithUnsaved"))
     {
         if (result == 1)
         {
             // 保存后打开新项目
-            IBR_ProjectManager::SaveOptAction();
-            // CloseAction 在 OpenRecentOptAction 内部自动执行
-            doOpenProject();
+            // 注意：SaveOptAction 是异步的，保存完成前 ChangeAfterSave 仍为 true，
+            // 直接 doOpenProject 会让 CloseAction 触发 AskIfSave（ImGui 弹窗在 Qt 下卡死）
+            // 因此先保存，轮询等待保存完成（ChangeAfterSave==false）后再打开
+            saveProject();
+            startOpenAfterSave(QString::fromUtf8("openProject"));
         }
         else if (result == 2)
         {
-            // 不保存直接打开
-            doOpenProject();
+            // 不保存直接打开：走 NoAsk 入口，跳过业务层 AskIfSave
+            doOpenProjectNoAsk();
         }
         // result == 0：取消
         refreshProperties();
+    }
+    else if (actionId == QString::fromUtf8("openRecentWithUnsaved"))
+    {
+        if (result == 1)
+        {
+            // 保存后打开最近文件（等待异步保存完成）
+            saveProject();
+            startOpenAfterSave(QString::fromUtf8("openRecent"));
+        }
+        else if (result == 2)
+        {
+            // 不保存直接打开：走 NoAsk 入口
+            IBR_ProjectManager::ProjOpen_OpenRecentAction_NoAsk(m_pendingRecentPath.toStdWString());
+            refreshProperties();
+        }
+        // result == 0：取消
     }
     else if (actionId == QString::fromUtf8("newProjectWithUnsaved"))
     {
         if (result == 1)
         {
-            // 保存后新建
-            IBR_ProjectManager::SaveOptAction();
-            IBR_ProjectManager::ProjOpen_CreateAction();
+            // 保存后新建（等异步保存完成，避免 ProjOpen_CreateAction -> CloseAction 触发 AskIfSave 卡死）
+            saveProject();
+            startOpenAfterSave(QString::fromUtf8("newProject"));
         }
         else if (result == 2)
         {
-            // 不保存直接新建
-            IBR_ProjectManager::ProjOpen_CreateAction();
+            // 不保存直接新建：走 NoAsk 入口
+            IBR_ProjectManager::ProjOpen_CreateAction_NoAsk();
+            refreshProperties();
         }
-        refreshProperties();
     }
     else if (actionId == QString::fromUtf8("quitWithUnsaved"))
     {
@@ -584,7 +742,7 @@ void ProjectController::onConfirmResult3(const QString &actionId, int result)
         if (result == 1)
         {
             // 保存后退出（对应 ImGui AskIfSave Yes）
-            IBR_ProjectManager::SaveOptAction();
+            saveProject();
             QCoreApplication::quit();
         }
         else if (result == 2)
@@ -595,6 +753,56 @@ void ProjectController::onConfirmResult3(const QString &actionId, int result)
         // result == 0：取消，不退出
         refreshProperties();
     }
+}
+
+void ProjectController::startOpenAfterSave(const QString &kind)
+{
+    // 保存是异步的（save 线程），保存完成前 ChangeAfterSave 仍为 true
+    // 用 QTimer 轮询等待保存完成（ChangeAfterSave==false）后再执行后续动作
+    // 避免在保存完成前调用 CloseAction/ProjOpen_* 触发 AskIfSave（ImGui 弹窗在 Qt 下卡死）
+    m_afterSaveKind = kind;
+    m_openWaitCount = 0;
+    if (!m_openWaitTimer)
+    {
+        m_openWaitTimer = new QTimer(this);
+        m_openWaitTimer->setInterval(100);
+        connect(m_openWaitTimer, &QTimer::timeout, this, &ProjectController::onOpenWaitTimeout);
+    }
+    m_openWaitTimer->start();
+}
+
+void ProjectController::onOpenWaitTimeout()
+{
+    // 保存完成：ChangeAfterSave 变 false；超时（30s）则放弃等待并提示，避免无限卡住
+    bool saved = !IBF_Inst_Project.Project.ChangeAfterSave;
+    if (!saved && ++m_openWaitCount <= 300)
+    {
+        return;
+    }
+    m_openWaitTimer->stop();
+    QString kind = m_afterSaveKind;
+    m_afterSaveKind.clear();
+    if (kind == QString::fromUtf8("openProject"))
+    {
+        if (saved) doOpenProject();
+        else emit hintMessage(QString::fromUtf8(u8"保存失败，未打开新项目"));
+    }
+    else if (kind == QString::fromUtf8("openRecent"))
+    {
+        if (saved) IBR_ProjectManager::OpenRecentOptAction(m_pendingRecentPath.toStdWString());
+        else emit hintMessage(QString::fromUtf8(u8"保存失败，未打开新项目"));
+    }
+    else if (kind == QString::fromUtf8("newProject"))
+    {
+        if (saved) IBR_ProjectManager::ProjOpen_CreateAction_NoAsk();
+        else emit hintMessage(QString::fromUtf8(u8"保存失败，未新建项目"));
+    }
+    else if (kind == QString::fromUtf8("close"))
+    {
+        if (saved) IBR_ProjectManager::CloseAction_NoAsk();
+        else emit hintMessage(QString::fromUtf8(u8"保存失败，未关闭项目"));
+    }
+    refreshProperties();
 }
 
 void ProjectController::refreshAllRegName()

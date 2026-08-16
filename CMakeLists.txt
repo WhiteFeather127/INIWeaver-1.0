@@ -4,8 +4,11 @@ project(INIWeaver VERSION 1.0.9 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# MSVC /MD 运行时（Qt6 标准发行版使用 /MD，需匹配；原 ImGui 版用 /MT）
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+# MSVC 动态运行时（Qt6 标准发行版使用 /MD，需匹配；原 ImGui 版用 /MT）
+# 必须区分配置：Debug 用 /MDd（MSVCP140D.dll），Release 用 /MD（MSVCP140.dll）
+# 否则 Debug EXE 链接 Release CRT，与 Qt 的 Debug DLL（MSVCP140D.dll）跨边界
+# 传递 std::string 等内存时堆不一致，导致堆损坏/崩溃（0xC0000374 / 0xC0000005）
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 # Qt6
 set(CMAKE_PREFIX_PATH "C:/Qt6/6.8.1/msvc2022_64")
@@ -147,15 +150,19 @@ qt_add_qml_module(INIWeaver
         INIBrowser/ui/components/LinkRow.qml
         INIBrowser/ui/components/StyledButton.qml
         INIBrowser/ui/components/StyledCheckBox.qml
+        INIBrowser/ui/components/FolderIcon.qml
+        INIBrowser/ui/components/ContextMenuHost.qml
+        INIBrowser/ui/components/ContextMenuItemList.qml
+        INIBrowser/ui/components/ContextMenuSubLevel.qml
         INIBrowser/ui/dialogs/ConfirmDialog.qml
         INIBrowser/ui/dialogs/ConfirmDialog3.qml
         INIBrowser/ui/dialogs/ExportDialog.qml
+        INIBrowser/ui/dialogs/ExportModuleDialog.qml
         INIBrowser/ui/dialogs/ImportIniDialog.qml
         INIBrowser/ui/dialogs/ImportPreviewDialog.qml
         INIBrowser/ui/dialogs/WaitingDialog.qml
         INIBrowser/ui/dialogs/MessageDialog.qml
         INIBrowser/ui/dialogs/ErrorQueueDialog.qml
-        INIBrowser/ui/dialogs/RightClickMenu.qml
         INIBrowser/ui/dialogs/SearchModuleDialog.qml
         INIBrowser/ui/dialogs/ShpTypeDialog.qml
         INIBrowser/ui/panels/FilePanel.qml
@@ -172,7 +179,6 @@ qt_add_qml_module(INIWeaver
         INIBrowser/ui/workspace/MiniMap.qml
         INIBrowser/ui/workspace/SelectionBox.qml
         INIBrowser/ui/workspace/SelectionActionButton.qml
-        INIBrowser/ui/workspace/ContextMenu.qml
         INIBrowser/ui/workspace/LineRow.qml
         INIBrowser/ui/workspace/LinkNodePoint.qml
     SOURCES
@@ -192,6 +198,8 @@ qt_add_qml_module(INIWeaver
         INIBrowser/qt/DialogController.cpp
         INIBrowser/qt/WorkspaceController.h
         INIBrowser/qt/WorkspaceController.cpp
+        INIBrowser/qt/WorkspaceSectionModel.h
+        INIBrowser/qt/WorkspaceSectionModel.cpp
         INIBrowser/qt/EditPanelController.h
         INIBrowser/qt/EditPanelController.cpp
 )

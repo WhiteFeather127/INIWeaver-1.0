@@ -1,4 +1,4 @@
-﻿#include "FromEngine/Include.h"
+#include "FromEngine/Include.h"
 #include <ranges>
 #include <filesystem>
 
@@ -9,12 +9,13 @@ std::wstring_view WTrimView(std::wstring_view Line)
 {
     while (!Line.empty())
     {
-        if (isspace(Line.front()))Line = Line.substr(1, Line.size() - 1);
+        // 宽字符用 iswspace（isspace 仅接受 unsigned char/EOF）
+        if (iswspace(static_cast<wint_t>(Line.front())))Line = Line.substr(1, Line.size() - 1);
         else break;
     }
     while (!Line.empty())
     {
-        if (isspace(Line.back()))
+        if (iswspace(static_cast<wint_t>(Line.back())))
         {
             if (Line.size() >= 2 && Line[Line.size() - 2] < 0)break;
             else Line = Line.substr(0, Line.size() - 1);

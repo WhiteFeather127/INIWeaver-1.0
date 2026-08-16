@@ -1,7 +1,6 @@
 // SettingPanel.qml
 // 设置菜单面板，对应 IBR_Inst_Setting.RenderUI()
-// 布局：常用设置（深色模式/帧率限制/自动换行阈值/保存时导出/导出后打开文件夹）
-//       + 设置项列表（按 type 渲染可编辑控件）
+// 布局：设置项列表（按 type 渲染可编辑控件）
 //       + 底部 DescLong 显示区（对应 IBR_Setting.cpp:112-114 BeginChildFrame(113003)）
 //       + 自动保存定时器（对应 IBR_Setting.cpp:55-60 每 5 秒 CallSaveSetting）
 import QtQuick
@@ -38,274 +37,14 @@ ScrollView {
         width: root.availableWidth
         spacing: 8
 
-        // 标题
-        Text {
-            Layout.leftMargin: 8
-            Layout.topMargin: 8
-            text: qsTr("常用设置")
-            color: "#cccccc"
-            font.pixelSize: 13
-            font.bold: true
-        }
-
-        // 深色模式开关
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8
-            Layout.rightMargin: 8
-            Layout.preferredHeight: 36
-            color: "#2d2d2d"
-            radius: 3
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("深色模式")
-                color: "#cccccc"
-                font.pixelSize: 13
-            }
-
-            Switch {
-                id: darkModeSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                checked: settingController.darkMode
-                onToggled: settingController.setDarkMode(checked)
-
-                indicator: Rectangle {
-                    implicitWidth: 36
-                    implicitHeight: 18
-                    x: darkModeSwitch.leftPadding
-                    y: darkModeSwitch.topPadding + darkModeSwitch.availableHeight / 2 - height / 2
-                    radius: 9
-                    color: darkModeSwitch.checked ? "#007acc" : "#3c3c3c"
-                    border.color: "#1e1e1e"
-
-                    Rectangle {
-                        x: darkModeSwitch.checked ? parent.width - width - 3 : 3
-                        y: parent.height / 2 - height / 2
-                        width: 12; height: 12
-                        radius: 6
-                        color: "#ffffff"
-                    }
-                }
-            }
-        }
-
-        // 帧率限制
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8
-            Layout.rightMargin: 8
-            Layout.preferredHeight: 52
-            color: "#2d2d2d"
-            radius: 3
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 2
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Text {
-                        text: qsTr("帧率限制")
-                        color: "#cccccc"
-                        font.pixelSize: 12
-                    }
-                    Item { Layout.fillWidth: true }
-                    Text {
-                        text: settingController.frameRateLimit + " FPS"
-                        color: "#858585"
-                        font.pixelSize: 12
-                    }
-                }
-
-                Slider {
-                    id: fpsSlider
-                    Layout.fillWidth: true
-                    from: 15; to: 200
-                    value: settingController.frameRateLimit
-                    stepSize: 5
-                    onMoved: settingController.frameRateLimit = Math.round(value)
-
-                    background: Rectangle {
-                        x: fpsSlider.leftPadding
-                        y: fpsSlider.topPadding + fpsSlider.availableHeight / 2 - height / 2
-                        implicitWidth: 200; implicitHeight: 3
-                        width: fpsSlider.availableWidth; height: implicitHeight
-                        radius: 2; color: "#3c3c3c"
-                        Rectangle {
-                            width: fpsSlider.visualPosition * parent.width
-                            height: parent.height; radius: 2; color: "#007acc"
-                        }
-                    }
-                    handle: Rectangle {
-                        x: fpsSlider.leftPadding + fpsSlider.visualPosition * (fpsSlider.availableWidth - width)
-                        y: fpsSlider.topPadding + fpsSlider.availableHeight / 2 - height / 2
-                        implicitWidth: 12; implicitHeight: 12; radius: 6
-                        color: fpsSlider.pressed ? "#ffffff" : "#cccccc"
-                        border.width: 1; border.color: "#007acc"
-                    }
-                }
-            }
-        }
-
-        // 保存时导出
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8
-            Layout.rightMargin: 8
-            Layout.preferredHeight: 36
-            color: "#2d2d2d"
-            radius: 3
-
-            Text {
-                anchors.left: parent.left; anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("保存时导出")
-                color: "#cccccc"; font.pixelSize: 13
-            }
-
-            Switch {
-                id: outputOnSaveSwitch
-                anchors.right: parent.right; anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                checked: settingController.outputOnSave
-                onToggled: settingController.outputOnSave = checked
-
-                indicator: Rectangle {
-                    implicitWidth: 36; implicitHeight: 18
-                    x: outputOnSaveSwitch.leftPadding
-                    y: outputOnSaveSwitch.topPadding + outputOnSaveSwitch.availableHeight / 2 - height / 2
-                    radius: 9
-                    color: outputOnSaveSwitch.checked ? "#007acc" : "#3c3c3c"
-                    border.color: "#1e1e1e"
-                    Rectangle {
-                        x: outputOnSaveSwitch.checked ? parent.width - width - 3 : 3
-                        y: parent.height / 2 - height / 2
-                        width: 12; height: 12; radius: 6; color: "#ffffff"
-                    }
-                }
-            }
-        }
-
-        // 导出后打开文件夹
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8
-            Layout.rightMargin: 8
-            Layout.preferredHeight: 36
-            color: "#2d2d2d"
-            radius: 3
-
-            Text {
-                anchors.left: parent.left; anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("导出后打开文件夹")
-                color: "#cccccc"; font.pixelSize: 13
-            }
-
-            Switch {
-                id: openFolderSwitch
-                anchors.right: parent.right; anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                checked: settingController.openFolderOnOutput
-                onToggled: settingController.openFolderOnOutput = checked
-
-                indicator: Rectangle {
-                    implicitWidth: 36; implicitHeight: 18
-                    x: openFolderSwitch.leftPadding
-                    y: openFolderSwitch.topPadding + openFolderSwitch.availableHeight / 2 - height / 2
-                    radius: 9
-                    color: openFolderSwitch.checked ? "#007acc" : "#3c3c3c"
-                    border.color: "#1e1e1e"
-                    Rectangle {
-                        x: openFolderSwitch.checked ? parent.width - width - 3 : 3
-                        y: parent.height / 2 - height / 2
-                        width: 12; height: 12; radius: 6; color: "#ffffff"
-                    }
-                }
-            }
-        }
-
-        // 自动换行阈值
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8; Layout.rightMargin: 8
-            Layout.preferredHeight: 52
-            color: "#2d2d2d"; radius: 3
-
-            ColumnLayout {
-                anchors.fill: parent; anchors.margins: 8; spacing: 2
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Text {
-                        text: qsTr("自动换行阈值")
-                        color: "#cccccc"; font.pixelSize: 12
-                    }
-                    Item { Layout.fillWidth: true }
-                    Text {
-                        text: settingController.autoWrapThreshold
-                        color: "#858585"; font.pixelSize: 12
-                    }
-                }
-
-                Slider {
-                    id: wrapSlider
-                    Layout.fillWidth: true
-                    from: 10; to: 200
-                    value: settingController.autoWrapThreshold
-                    stepSize: 1
-                    onMoved: settingController.autoWrapThreshold = Math.round(value)
-
-                    background: Rectangle {
-                        x: wrapSlider.leftPadding
-                        y: wrapSlider.topPadding + wrapSlider.availableHeight / 2 - height / 2
-                        implicitWidth: 200; implicitHeight: 3
-                        width: wrapSlider.availableWidth; height: implicitHeight
-                        radius: 2; color: "#3c3c3c"
-                        Rectangle {
-                            width: wrapSlider.visualPosition * parent.width
-                            height: parent.height; radius: 2; color: "#007acc"
-                        }
-                    }
-                    handle: Rectangle {
-                        x: wrapSlider.leftPadding + wrapSlider.visualPosition * (wrapSlider.availableWidth - width)
-                        y: wrapSlider.topPadding + wrapSlider.availableHeight / 2 - height / 2
-                        implicitWidth: 12; implicitHeight: 12; radius: 6
-                        color: wrapSlider.pressed ? "#ffffff" : "#cccccc"
-                        border.width: 1; border.color: "#007acc"
-                    }
-                }
-            }
-        }
-
-        // 分隔线
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8; Layout.rightMargin: 8
-            Layout.preferredHeight: 1; color: "#1e1e1e"
-        }
-
-        // 设置项列表标题
-        Text {
-            Layout.leftMargin: 8
-            text: qsTr("所有设置项")
-            color: "#cccccc"; font.pixelSize: 13; font.bold: true
-        }
-
         // 阶段 6.2：设置项列表（按 type 渲染可编辑控件，对应 IBR_Setting.cpp:86-93）
         Repeater {
             model: root._settingTypes
             delegate: Rectangle {
                 Layout.fillWidth: true
                 Layout.leftMargin: 8; Layout.rightMargin: 8
-                // Bool/Int 类型高度更大，其余紧凑
-                Layout.preferredHeight: modelData.type === 3 ? 36 : (modelData.type === 1 || modelData.type === 2 ? 52 : 40)
+                // 紧凑单行高度（项内不显示说明小字，对应 ImGui 原版每项一行）
+                Layout.preferredHeight: modelData.type === 3 ? 36 : 40
                 color: "#2d2d2d"; radius: 3
 
                 // hover 时更新底部 DescLong（对应 IBR_Setting.cpp:90-91 DescLong = Li.DescLong）
@@ -337,34 +76,39 @@ ScrollView {
                         // 阶段 6.2：按 type 渲染编辑控件
                         // type: 0=None, 1=IntA, 2=IntB, 3=Bool, 4=Lang
 
-                        // Bool 类型：Switch
-                        Switch {
+                        // Bool 类型：CheckBox（对应 ImGui Checkbox）
+                        CheckBox {
                             visible: modelData.type === 3
                             checked: modelData.value || false
                             onToggled: settingController.setSettingValue(modelData.name, checked)
 
                             indicator: Rectangle {
-                                implicitWidth: 32; implicitHeight: 16
+                                implicitWidth: 16; implicitHeight: 16
                                 x: parent.leftPadding
-                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                                radius: 8
+                                y: parent.topPadding + (parent.availableHeight - height) / 2
+                                radius: 2
                                 color: parent.checked ? "#007acc" : "#3c3c3c"
-                                border.color: "#1e1e1e"
+                                border.color: parent.checked ? "#007acc" : "#1e1e1e"
+                                border.width: 1
                                 Rectangle {
-                                    x: parent.checked ? parent.width - width - 2 : 2
-                                    y: parent.height / 2 - height / 2
-                                    width: 10; height: 10; radius: 5
+                                    x: 4; y: 4; width: 6; height: 6; radius: 1
+                                    visible: parent.parent.checked
                                     color: "#ffffff"
                                 }
                             }
                         }
 
-                        // Int 类型：SpinBox（对应 ImGui InputInt）
+                        // IntA 类型：SpinBox（对应 ImGui InputInt，可手输，支持 -1 特殊值）
+                        // Limit 布局：IntA = {Def, Min, Max, SpV?, ...}
+                        // 有 SpV（如帧率/自动换行的 -1）时 from 取 SpV，否则取 Min
                         SpinBox {
-                            visible: modelData.type === 1 || modelData.type === 2
+                            visible: modelData.type === 1
                             value: modelData.value || 0
-                            from: (modelData.limits && modelData.limits.length >= 1) ? modelData.limits[0] : -9999
-                            to: (modelData.limits && modelData.limits.length >= 2) ? modelData.limits[1] : 9999
+                            from: (modelData.limits && modelData.limits.length >= 2)
+                                ? ((modelData.limits.length >= 4 && modelData.limits[3] < modelData.limits[1])
+                                    ? modelData.limits[3] : modelData.limits[1])
+                                : -9999
+                            to: (modelData.limits && modelData.limits.length >= 3) ? modelData.limits[2] : 9999
                             onValueModified: settingController.setSettingValue(modelData.name, value)
                             editable: true
 
@@ -411,6 +155,38 @@ ScrollView {
                                 implicitWidth: 80; implicitHeight: 24
                                 color: "#1e1e1e"
                                 border.color: "#3c3c3c"; border.width: 1; radius: 2
+                            }
+                        }
+
+                        // IntB 类型：Slider（对应 ImGui SliderInt）
+                        // Limit 布局：IntB = {Min, Max, Format}
+                        Slider {
+                            visible: modelData.type === 2
+                            from: (modelData.limits && modelData.limits.length >= 1) ? modelData.limits[0] : 0
+                            to: (modelData.limits && modelData.limits.length >= 2) ? modelData.limits[1] : 100
+                            stepSize: 1
+                            value: modelData.value || 0
+                            implicitWidth: 140
+                            onMoved: settingController.setSettingValue(modelData.name, Math.round(value))
+
+                            background: Rectangle {
+                                x: parent.leftPadding
+                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                implicitWidth: 140; implicitHeight: 4
+                                width: parent.availableWidth; height: implicitHeight
+                                radius: 2; color: "#3c3c3c"
+                                Rectangle {
+                                    width: parent.parent.visualPosition * parent.width
+                                    height: parent.height; radius: 2
+                                    color: "#007acc"
+                                }
+                            }
+                            handle: Rectangle {
+                                x: parent.leftPadding + parent.visualPosition * (parent.availableWidth - width)
+                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                implicitWidth: 14; implicitHeight: 14; radius: 7
+                                color: parent.pressed ? "#ffffff" : "#cccccc"
+                                border.width: 1; border.color: "#007acc"
                             }
                         }
 
@@ -494,31 +270,15 @@ ScrollView {
                             }
                         }
 
-                        // None 类型：无编辑控件
+                        // None 类型：无编辑控件，灰字显示（对应 ImGui TextDisabled）
                         Text {
                             visible: modelData.type === 0
-                            text: qsTr("(只读)")
+                            text: modelData.descShort
                             color: "#5a5a5a"; font.pixelSize: 11
                         }
                     }
-
-                    // DescLong（Int 类型在第二行显示）
-                    Text {
-                        visible: (modelData.type === 1 || modelData.type === 2) && modelData.descLong
-                        text: modelData.descLong
-                        color: "#858585"; font.pixelSize: 11
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
                 }
             }
-        }
-
-        // 分隔线
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8; Layout.rightMargin: 8
-            Layout.preferredHeight: 1; color: "#1e1e1e"
         }
 
         // 阶段 6.2：底部 DescLong 显示区（对应 IBR_Setting.cpp:112-114 BeginChildFrame(113003)）

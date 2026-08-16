@@ -53,6 +53,7 @@ ScrollView {
         }
 
         // 第二行：关闭项目 / 打开项目（各占 1/2）
+        // 关闭项目=关闭后新建（对应 ImGui IBR_Panel.cpp:88 "关闭项目"按钮 = ProjOpen_CreateAction）
         RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 8
@@ -64,14 +65,6 @@ ScrollView {
                 Layout.preferredHeight: 48
                 text: qsTr("关闭项目")
                 enabled: projectController.isOpen
-                font.pixelSize: 13
-                onClicked: projectController.requestClose()
-            }
-
-            StyledButton {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 48
-                text: qsTr("新建项目")
                 font.pixelSize: 13
                 onClicked: projectController.newProject()
             }

@@ -26,7 +26,8 @@ Item {
     }
     Shortcut {
         sequence: "Ctrl+W"
-        onActivated: projectController.closeProject()
+        // 关闭项目=关闭后新建（对应 ImGui ProjActionByKey Close = ProjOpen_CreateAction）
+        onActivated: projectController.newProject()
     }
     Shortcut {
         sequence: "Ctrl+E"

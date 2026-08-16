@@ -1,6 +1,7 @@
 // WorkspaceController.cpp
 // 工作区控制器实现：桥接 IBR_WorkSpace / IBR_FullView / IBR_RealCenter
 #include "WorkspaceController.h"
+#include "WorkspaceSectionModel.h"
 #include "EditPanelController.h"
 #include "MenuController.h"
 #include "Global.h"
@@ -12,12 +13,16 @@
 #include "IBG_UndoTree.h"
 #include "SectionLineModel.h"
 #include "IBR_LinkNode.h"
+#include "IBB_ModuleAlt.h"
 #include "FromEngine/ImGuiDeps.h"
+#include "FromEngine/global_tool_func.h"
 #include <QGuiApplication>
 #include <QFontMetrics>
 #include <QTimer>
 #include <QFile>
 #include <QTextStream>
+#include <QtDebug>
+#include <QCursor>
 #include <unordered_set>
 #include <algorithm>
 #include <functional>
@@ -29,6 +34,11 @@
 bool Acceptor_CheckLinkType(StrPoolID SourceReg, StrPoolID TargetReg, StrPoolID LinkType);
 bool Acceptor_CheckSecType(StrPoolID SourceReg, StrPoolID SecType);
 
+// 前向声明 IBR_WorkSpace.cpp 内 Qt 导出模块函数（该 namespace 无头文件）
+namespace IBR_WorkSpace {
+    void ExportSelectedModuleQt(const std::string &Utf8Name, const std::string &Utf8Desc, const std::string &Utf8Path);
+}
+
 WorkspaceController::WorkspaceController(QObject *parent)
     : QObject(parent)
 {
@@ -37,6 +47,9 @@ WorkspaceController::WorkspaceController(QObject *parent)
                                        std::numeric_limits<qreal>::max());
     // C11：Paste 节流计时器
     m_uptimeTimer.start();
+
+    // 增量 Section 模型（QML Repeater 使用，整表替换会重建全部节点）
+    m_sectionsModel = new WorkspaceSectionModel(this);
 }
 
 float WorkspaceController::ratio() const
@@ -96,13 +109,60 @@ QPointF WorkspaceController::screenToEq(QPointF screenPos) const
     return QPointF(result.x, result.y);
 }
 
+qulonglong WorkspaceController::hitTestSection(qreal screenX, qreal screenY) const
+{
+    // 鼠标屏幕坐标 → eq 坐标（与 updateSelection 框选命中同款换算）
+    QPointF mouseEq = screenToEq(QPointF(screenX, screenY));
+    // 从后向前遍历顶层 sections（后渲染的在上层，命中优先级高），对应 Repeater 绘制顺序
+    // 注意：m_sections 的 eqX/eqY/eqW/eqH 是上次 refreshSections 的快照，reportSectionSize
+    // 更新 EqSize 后不会重建列表 → 尺寸/位置会过期（高度偏大导致"模块下方一段距离也误判"）。
+    // 因此仅用 m_sections 确定顶层 sectionId 集合与 hidden 状态，实际矩形读 IBR_SectionMap 实时值。
+    for (int i = m_sections.size() - 1; i >= 0; --i) {
+        const QVariantMap map = m_sections.at(i).toMap();
+        if (map["hidden"].toBool()) continue;
+        const qulonglong id = map["sectionId"].toULongLong();
+        auto sec = IBR_Inst_Project.GetSectionFromID(static_cast<ModuleID_t>(id));
+        auto data = sec.GetSectionData();
+        if (!data) continue;
+        const qreal x = data->EqPos.x;
+        const qreal y = data->EqPos.y;
+        const qreal w = data->EqSize.x;
+        const qreal h = data->EqSize.y;
+        if (w <= 0 || h <= 0) continue;  // 尺寸未回写时跳过
+        if (mouseEq.x() >= x && mouseEq.x() <= x + w &&
+            mouseEq.y() >= y && mouseEq.y() <= y + h)
+            return id;
+    }
+    return 0;
+}
+
 void WorkspaceController::onMousePress(qreal x, qreal y, int button)
 {
+    // 帧率节流：按下前先应用待处理位置，避免状态切换读到过期坐标
+    applyPendingDrag();
     // 阶段 12.1：完整状态机（对应 IBR_WorkSpace.cpp:822-830 状态迁移图）
     if (button == Qt::LeftButton) {
         if (m_inputState == 0) {
             // v3 批次 2.1：进入 BgDragging 前保存视口前态（对应 MainStage.h:122 UpdatePrev）
             IBR_WorkSpace::UpdatePrev();
+            // 缩放防抖窗口内（zoomPending 未收尾）开始拖动画布：立即终止缩放换算叠加
+            // 并重建端点表。否则平移中连线先按 zoomTransform 的 (C_b-C_c)*r_c 项随
+            // eqCenter 移动一次，再叠加 canvasOffset 又移动一次 → 连线偏移为画布的两倍。
+            // 收尾顺序与 finalizeZoom 一致：先 emit zoomFinalizeRequested（QML callLater
+            // 回写缩放后行圆点，先入队），再 Queued 重建端点表（读到回写后的缩放后坐标）。
+            if (m_zoomPending) {
+                finishZoomTweenNow();
+                m_zoomPending = false;
+                emit zoomBaseChanged();
+                emit zoomFinalizeRequested();
+                QMetaObject::invokeMethod(this, [this]() {
+                    // 平移中重建：与 finalizeZoom 的 Queued 不同，此处主动触发，
+                    // 不因 inputState==1 拦截（缩放换算必须先于 canvasOffset 叠加终止）
+                    m_linkEndpointsDirty = true;
+                    if (!m_suppressLinkRebuild)
+                        rebuildLinkEndpoints();
+                }, Qt::QueuedConnection);
+            }
             // Normal → BgDragging（空白处左键拖拽平移画布）
             updateInputState(1);  // BgDragging
             m_dragStartScreen = QPointF(x, y);
@@ -172,18 +232,11 @@ void WorkspaceController::onMouseMove(qreal x, qreal y)
 {
     if (m_inputState == 1) {
         // BgDragging：拖拽平移（对应 IBR_WorkSpace::ProcessBackgroundOpr 的 IsBgDragging 分支）
-        // C7：加入边界推回 + EqPosFixRange 钳制（对应 IBR_WorkSpace.cpp:247-264 UpdateScroll）
-        QPointF delta = QPointF(x, y) - m_dragStartScreen;
-        IBR_FullView::EqCenter.x -= static_cast<float>(delta.x()) / IBR_FullView::Ratio;
-        IBR_FullView::EqCenter.y -= static_cast<float>(delta.y()) / IBR_FullView::Ratio;
-        m_dragStartScreen = QPointF(x, y);
-        // C7：钳制到有效范围（对应 IBR_WorkSpace.cpp:261 EqPosFixRange）
-        IBR_FullView::EqPosFixRange(IBR_FullView::EqCenter);
-        // 性能优化：拖拽平移时只发信号，QML 根据新 EqCenter 重新计算屏幕坐标
-        // 不调用 refresh()（全量重建 QVariantList 太慢，鼠标移动每秒触发几十次）
-        emit eqCenterChanged();
-        emit edgeFlagsChanged();
-        m_linkEndpointsDirty = true;  // D10：EqCenter 变化导致节点位置变化，需重建端点表
+        // 帧率节流：只记录最新位置，由帧定时器 tick（applyPendingDrag）统一应用。
+        // 若逐事件更新 EqCenter，SceneGraph 会跟随鼠标事件率渲染（拖动画布时模块帧率跑满本机），
+        // 帧率设置对实际渲染帧率失效。延迟到帧定时器后，位置更新频率 = 帧率设置。
+        m_pendingDragPos = QPointF(x, y);
+        m_hasPendingDrag = true;
     } else if (m_inputState == 2) {
         // MassSelecting：更新框选矩形
         updateSelection(x, y);
@@ -201,13 +254,16 @@ void WorkspaceController::onMouseMove(qreal x, qreal y)
             }
         }
     } else if (m_inputState == 3) {
-        // HoldingModules：多节点拖拽中，更新位置
-        updateMassDrag(x, y);
+        // HoldingModules：多节点拖拽中，延迟到帧定时器应用（帧率节流）
+        m_pendingDragPos = QPointF(x, y);
+        m_hasPendingDrag = true;
     }
 }
 
 void WorkspaceController::onMouseRelease(qreal x, qreal y, int button)
 {
+    // 帧率节流：松手前应用最后一次待处理位置，确保最终位置准确提交
+    applyPendingDrag();
     if (button == Qt::LeftButton) {
         if (m_inputState == 1) {
             // v3 批次 2.1：BgDragging 结束时推入 Undo 栈（对应 MainStage.h:218 UpdatePrevII）
@@ -218,8 +274,22 @@ void WorkspaceController::onMouseRelease(qreal x, qreal y, int button)
             // 对应 ImGui IBR_WorkSpace.cpp:1322-1329 BgDragging -> Normal 时 IBR_EditFrame::Clear()
             // 点击空白处（含单击和拖拽平移）取消选中，清空编辑侧边栏，切回 MODULES 菜单
             clearSelection();
+            // 若缩放叠加残留（缩放后立刻拖动画布，finalizeZoom 已推迟收尾）：
+            // 先强制完成补间（清 pending 后 Ratio 不得再变，否则连线与节点错位），再清 pending，
+            // 否则 QML onInputStateChanged 的 callLater 回写会被 zoomPending
+            // 拦截，Queued rebuild 读到缩放前旧坐标 → 连线错位。清完回写照常、重建读到新坐标。
+            finishZoomTweenNow();
+            if (m_zoomPending) m_zoomPending = false;
             // BgDragging → Normal
             updateInputState(0);
+            // 画布平移结束：延迟到事件队列末尾重建端点表（对应之前"一帧回弹"的修复方法）。
+            // QML 端 onInputStateChanged 已用 Qt.callLater 把平移后坐标回写排入事件队列（先入队），
+            // 此 QueuedConnection 后入队 → 重建读到回写后的基准坐标，并清零 canvasDragOffset。
+            // 若不延迟重建：拖模块时源行回写触发重建会读到"画布平移前"的目标行旧坐标
+            // （目标行平移期间回写被跳过）→ pb 少画布平移量错位。
+            QMetaObject::invokeMethod(this, [this]() {
+                rebuildLinkEndpoints();
+            }, Qt::QueuedConnection);
         } else if (m_inputState == 3) {
             // HoldingModules 左键释放 → 确认移动
             // 对应 IBR_WorkSpace.cpp:1073-1090
@@ -245,8 +315,10 @@ void WorkspaceController::onMouseRelease(qreal x, qreal y, int button)
                     updateInputState(4);  // MassAfter
                 }
             } else {
-                // 移动≤2px → 右键单击，弹出右键菜单
-                endSelection();
+                // 移动≤2px → 右键单击空白处：取消选中 + 空白右键菜单（对齐 ImGui OpenRightClick）
+                // 单选模块后 inputState 为 Normal(0)，右键按下进入 MassSelecting；此处直接取消选中，
+                // 避免 endSelection 保留选中导致 QML 侧 massTargetIds 非空误弹多选菜单
+                clearSelection();
                 emit contextMenuRequested(x, y);
                 updateInputState(0);
             }
@@ -257,7 +329,15 @@ void WorkspaceController::onMouseRelease(qreal x, qreal y, int button)
                 // 右键按下后未移动>5px，视为右键单击
                 m_massAfterRightDownPos = QPointF(std::numeric_limits<qreal>::max(),
                                                   std::numeric_limits<qreal>::max());
-                showMassContextMenu(x, y);
+                // 命中模块 → 多选操作菜单（保持选中）；空白处 → 取消选中 + 空白右键菜单
+                // （背景 MouseArea 只能收到空白处右键，命中检测为防御性兜底）
+                if (hitTestSection(x, y) != 0) {
+                    showMassContextMenu(x, y);
+                } else {
+                    clearSelection();
+                    emit contextMenuRequested(x, y);
+                    updateInputState(0);
+                }
             }
         }
     }
@@ -273,29 +353,175 @@ void WorkspaceController::onWheel(qreal x, qreal y, qreal delta)
     float deltaWheel = static_cast<float>(delta) / 120.0f;
     if (std::abs(deltaWheel) < 1e-6f) return;
 
-    float newRatio = std::floor(IBR_FullView::Ratio * std::exp(deltaWheel / 9.0f) * 20.0f) / 20.0f;
+    // 补间进行中：以补间目标为基准累加（连续滚动平滑趋近，而非按中间值重算目标）
+    bool animRunning = m_zoomAnimating;
+    float baseRatio = animRunning ? m_zoomTargetRatio : IBR_FullView::Ratio;
+    float newRatio = std::floor(baseRatio * std::exp(deltaWheel / 9.0f) * 20.0f) / 20.0f;
     if (deltaWheel < 0) newRatio += 0.05f;
-    if (std::abs(newRatio - IBR_FullView::Ratio) < 1e-6f)
+    if (std::abs(newRatio - baseRatio) < 1e-6f)
         newRatio += deltaWheel < 0 ? -0.05f : 0.05f;
     newRatio = std::min(newRatio, IBR_FullView::RatioMax / 100.0f);
     newRatio = std::max(newRatio, IBR_FullView::RatioMin / 100.0f);
+    if (std::abs(newRatio - baseRatio) < 1e-6f) return;  // 已达边界且目标无变化
 
     // v3 批次 2.1：缩放前保存视口前态（对应 MainStage.h:122 UpdatePrev）
     IBR_WorkSpace::UpdatePrev();
-    // 保持鼠标位置对应的 EqPos 不变（对应 UpdateNewRatio 的鼠标锚定）
-    QPointF mouseEqBefore = screenToEq(QPointF(x, y));
+    // 缩放叠加（仿画布平移的 canvasDragOffset）：缩放中端点表保持快照不重建，
+    // 记录端点表对应的基准 ratio/eqCenter，LinkRenderer 据此把快照端点坐标换算到新 ratio 下，
+    // 使连线与节点（QML 绑定即时缩放）同步移动，避免等 tick 全量重建导致的连线滞后。
+    // 缩放停止（防抖 300ms）后重建端点表结束叠加。
+    if (!m_zoomPending) {
+        m_zoomBaseRatio = IBR_FullView::Ratio;
+        m_zoomBaseCenter = QPointF(IBR_FullView::EqCenter.x, IBR_FullView::EqCenter.y);
+        m_zoomPending = true;
+        emit zoomBaseChanged();
+    }
+    if (m_dragSectionId != 0 || m_massDragging) {
+        // 拖拽中滚轮：先应用待处理的拖拽位置（帧率节流下 onPositionChanged 只写
+        // m_pendingDragPos，由 applyPendingDrag 在 tick 统一应用），
+        // 保证拖拽状态与当前鼠标同步后再改 Ratio。
+        m_pendingDragPos = QPointF(x, y);
+        m_hasPendingDrag = true;
+        applyPendingDrag();
+    }
+    // 补间搬 QML 端驱动：C++ 只设定目标 Ratio 与锚点并 emit 请求信号，
+    // QML NumberAnimation 每渲染帧回调 applyZoomRatio —— Ratio/EqCenter 变更、
+    // 拖拽基准修正、dragOffset 重算、预览线重发在同一渲染帧内原子完成。
+    // 动画由 QQuickWindow 动画驱动推进（与渲染帧同步），消除 C++ 定时器驱动的
+    // QVariantAnimation 与渲染循环不同步造成的跳帧/低帧率；UpdatePrevII 收尾
+    // 移至 QML 动画停止回调 zoomTweenFinished。
+    m_zoomTargetRatio = newRatio;
+    emit zoomTargetRatioChanged();
+    m_zoomAnchorScreen = QPointF(x, y);
+    m_zoomAnimating = true;
+    // 关键：每次启动补间都刷新防抖 token，作废上一次缩放遗留的 finalize 定时器。
+    // 否则"上次补间结束后 300ms 内再次滚滚轮"时，旧定时器会在本次补间进行中
+    // 触发 finalizeZoom：清 zoomPending（换算失效）→ 连线以旧端点表无换算渲染错位。
+    // finalizeZoom 内部的 m_zoomAnimating 推迟检查是第二道防线（见 finalizeZoom）。
+    scheduleZoomFinalize();
+    emit zoomTweenRequested();
+}
+
+void WorkspaceController::applyZoomRatio(float newRatio)
+{
+    if (std::abs(newRatio - IBR_FullView::Ratio) < 1e-6f) return;
+    // 锚点由 onWheel 在滚轮事件时更新（连续滚轮取最新位置），动画期间保持不变
+    const QPointF anchorScreen = m_zoomAnchorScreen;
+    bool dragging = (m_dragSectionId != 0 || m_massDragging);
+    // 拖拽连线预览：缩放前把预览线起点（源节点上的固定点，Eq 不变）换算到方程空间，
+    // 缩放后换算回新屏幕坐标重发 —— 预览 Canvas 由 draggingLinkChanged 驱动重绘，
+    // 不重发则端点停留在旧屏幕坐标，缩放时线不随节点变形。
+    bool hasDragLink = m_hasDraggingLink;
+    QPointF dragLinkFromEq;
+    if (hasDragLink)
+        dragLinkFromEq = screenToEq(QPointF(m_dragLinkFromX, m_dragLinkFromY));
+    // 拖拽中的最新鼠标位置：从"虚拟按下点 + 当前 dragOffset"自恢复
+    // （不依赖 pending —— 收尾路径 pending 已被 applyPendingDrag 清空，此时锚点 ≠
+    // 松手鼠标位置，直接用锚点重算 dragOffset 会把模块拉回滚轮处）
+    QPointF dragMouse = anchorScreen;
+    if (dragging)
+        dragMouse = m_dragStartScreenPos + m_dragOffset;
+    // 统一鼠标锚定缩放（差值法保持锚点处 Eq 内容不变），模块屏幕位置随画布缩放移动
+    QPointF anchorEqBefore = screenToEq(anchorScreen);
+    float oldRatio = IBR_FullView::Ratio;
     IBR_FullView::Ratio = newRatio;
-    QPointF mouseEqAfter = screenToEq(QPointF(x, y));
-    IBR_FullView::EqCenter.x += static_cast<float>(mouseEqBefore.x() - mouseEqAfter.x());
-    IBR_FullView::EqCenter.y += static_cast<float>(mouseEqBefore.y() - mouseEqAfter.y());
-    // v3 批次 2.1：缩放后推入 Undo 栈（对应 MainStage.h:218 UpdatePrevII）
-    IBR_WorkSpace::UpdatePrevII();
+    QPointF anchorEqAfter = screenToEq(anchorScreen);
+    IBR_FullView::EqCenter.x += static_cast<float>(anchorEqBefore.x() - anchorEqAfter.x());
+    IBR_FullView::EqCenter.y += static_cast<float>(anchorEqBefore.y() - anchorEqAfter.y());
+    if (dragging) {
+        // 缩放与拖拽同帧原子处理：把"虚拟按下点"围绕锚点同步缩放（k = new/old），
+        // 再以最新鼠标重算 dragOffset —— 抓取点（模块身上按下的点）始终跟手，
+        // 模块随画布同步缩放；松手写回 EqPos = 基准 + dragOffset / Ratio 在缩放
+        // 前后数学等值（Eq 位移不变，模块 Eq 位置不因缩放跳变）。
+        // 先例：updateMassDrag 边界推回同样按视口位移修正 m_dragStartScreenPos。
+        float k = newRatio / oldRatio;
+        m_dragStartScreenPos = anchorScreen
+            + QPointF((m_dragStartScreenPos.x() - anchorScreen.x()) * k,
+                      (m_dragStartScreenPos.y() - anchorScreen.y()) * k);
+        m_dragOffset = QPointF(dragMouse.x() - m_dragStartScreenPos.x(),
+                               dragMouse.y() - m_dragStartScreenPos.y());
+        emit dragOffsetChanged();
+    }
+    if (hasDragLink) {
+        // 终点 = 拖拽连线时跟随的最新鼠标，起点 = 源节点随缩放后的新屏幕位置
+        QPointF newFrom = eqToScreen(dragLinkFromEq);
+        setDraggingLink(newFrom.x(), newFrom.y(), dragMouse.x(), dragMouse.y());
+    }
     // v3 批次 3.1：缩放后更新 EqMax，确保 MiniMap 可见范围正确（对应 IBR_FullView::UpdateCurrentEqMax）
     IBR_FullView::UpdateCurrentEqMax();
     // 性能优化：QML 根据 ratio 和 eqCenter 实时计算屏幕坐标，不需要全量 refresh
     emit ratioChanged();
     emit eqCenterChanged();
-    m_linkEndpointsDirty = true;  // D10：Ratio 变化导致节点位置变化，需重建端点表
+}
+
+void WorkspaceController::zoomTweenFinished()
+{
+    // QML 端动画停止回调（原 QVariantAnimation finished 逻辑，补间搬 QML 后由
+    // NumberAnimation onRunningChanged 调用）：
+    // v3 批次 2.1：补间完成推入 Undo 栈（对应 MainStage.h:218 UpdatePrevII，内部有阈值/merge）
+    m_zoomAnimating = false;
+    IBR_WorkSpace::UpdatePrevII();
+    // v3 批次 3.1：缩放后更新 EqMax（对应 IBR_FullView::UpdateCurrentEqMax）
+    IBR_FullView::UpdateCurrentEqMax();
+    // 缩放中不重建端点表（靠 LinkRenderer 换算叠加），缩放停止防抖后重建一次
+    scheduleZoomFinalize();
+}
+
+void WorkspaceController::finishZoomTweenNow()
+{
+    // 收尾路径（拖拽结束/端点表重建/平移结束）清 zoomPending 前调用：
+    // 先把 Ratio 直接推到目标（含拖拽基准修正，此刻写回 EqPos 用的即最终 Ratio），
+    // 再通知 QML 立即停止动画。否则清 m_zoomPending → zoomTransform 失效后，
+    // QML 动画仍在逐帧改 Ratio，连线（旧端点表 + 无换算）将与节点错位。
+    if (!m_zoomAnimating) return;
+    if (std::abs(m_zoomTargetRatio - IBR_FullView::Ratio) > 1e-6f)
+        applyZoomRatio(m_zoomTargetRatio);
+    emit zoomTweenAbortRequested();
+    m_zoomAnimating = false;
+}
+
+void WorkspaceController::scheduleZoomFinalize()
+{
+    // 缩放结束防抖：每次缩放事件重置定时器，最后一次缩放后 300ms 再收尾。
+    // 期间端点表保持快照，LinkRenderer 按 zoomPending 换算叠加（仿画布平移的 canvasDragOffset）。
+    int token = ++m_zoomFinalizeToken;
+    QTimer::singleShot(300, this, [this, token]() {
+        if (token != m_zoomFinalizeToken) return;  // 期间又发生缩放，旧回调作废
+        finalizeZoom();
+    });
+}
+
+void WorkspaceController::finalizeZoom()
+{
+    // 平移（state=1）/拖拽（state=3）进行中：推迟缩放收尾。
+    // 平移中行圆点回写被跳过，此刻重建端点表会读到旧坐标 → 连线变形；
+    // 且换算+canvasOffset 组合在平移中数学上精确（缩放变换与平移独立），可继续叠加渲染。
+    // 平移/拖拽收尾（onMouseRelease/endDrag）会清 zoomPending 并重建端点表。
+    if (m_inputState == 1 || m_inputState == 3 || m_dragSectionId != 0
+        || m_zoomAnimating) {
+        // 补间进行中同样推迟：此刻收尾会清 zoomPending（换算失效）后 Ratio 仍在动画，
+        // 连线以旧端点表无换算渲染 → 与节点错位；等补间 finished 刷新的防抖再收尾
+        scheduleZoomFinalize();  // 稍后重试（token 防抖）
+        return;
+    }
+    // 缩放叠加结束（对应平移的 onMouseRelease BgDragging→Normal 收尾）：
+    // 1. 清 pending，但【不 emit zoomBaseChanged】：此刻端点表仍是旧快照，若触发 LinkRenderer
+    //    重绘，会画出"换算失效 + 旧端点表"的回弹中间帧；等 Queued 重建完成后由
+    //    rebuildLinkEndpoints 内的 linkEndpointsChanged 触发一次重绘，直接落到新端点表；
+    // 2. emit zoomFinalizeRequested → QML 用 Qt.callLater 回写缩放后的行圆点坐标（先入队）；
+    // 3. QueuedConnection 重建端点表（后入队）→ 读到回写后的基准坐标。
+    // 顺序保证：回写先于重建（同平移 onInputStateChanged 的模式，否则 pb 读到缩放前旧坐标错位）。
+    m_zoomPending = false;
+    emit zoomFinalizeRequested();
+    QMetaObject::invokeMethod(this, [this]() {
+        // 入队期间若开始平移/拖拽（快速操作），放弃本次重建，由对应收尾路径重建
+        if (m_inputState == 1 || m_inputState == 3 || m_dragSectionId != 0) return;
+        m_linkEndpointsDirty = true;
+        if (!m_suppressLinkRebuild) {
+            rebuildLinkEndpoints();
+            m_linkEndpointsDirty = false;
+        }
+    }, Qt::QueuedConnection);
 }
 
 void WorkspaceController::onDrop(qreal x, qreal y, const QString &moduleKey)
@@ -310,15 +536,26 @@ void WorkspaceController::onDrop(qreal x, qreal y, const QString &moduleKey)
 
 void WorkspaceController::zoomTo(float newRatio)
 {
+    // 补间进行中直接跳变缩放：先强制完成补间（Ratio 推目标 + 停 QML 动画），
+    // 否则 QML 动画仍在逐帧 applyZoomRatio，会覆盖这里的跳变值
+    finishZoomTweenNow();
     float clamped = std::clamp(newRatio,
         IBR_FullView::RatioMin / 100.0f,
         IBR_FullView::RatioMax / 100.0f);
+    // 缩放叠加：记录端点表基准（同 onWheel），缩放中不重建端点表，LinkRenderer 换算叠加
+    if (!m_zoomPending) {
+        m_zoomBaseRatio = IBR_FullView::Ratio;
+        m_zoomBaseCenter = QPointF(IBR_FullView::EqCenter.x, IBR_FullView::EqCenter.y);
+        m_zoomPending = true;
+        emit zoomBaseChanged();
+    }
     IBR_FullView::Ratio = clamped;
     // 性能优化：缩放只改变 Ratio，不改变 sections 数据
     // QML 根据 ratio 实时计算节点尺寸/坐标，不需要全量 refresh()（避免 91 个节点重建卡顿）
     emit ratioChanged();
     emit workspaceRectChanged();  // 视口 EqRect 随 Ratio 变化
-    m_linkEndpointsDirty = true;  // Ratio 变化导致节点位置变化，需重建端点表
+    // 缩放中不重建端点表（靠 LinkRenderer 换算叠加），缩放停止防抖后重建一次
+    scheduleZoomFinalize();
 }
 
 void WorkspaceController::centerView()
@@ -446,13 +683,33 @@ void WorkspaceController::clearSelection()
     emit selectedRevisionChanged();
 
     // 对应 ImGui IBR_WorkSpace.cpp:1076-1079 Clear() + ChooseMenu(MenuItemID_MODULES)
-    // 点击空白处取消选中时清空编辑侧边栏，切回 MODULES 菜单
+    // 点击空白处取消选中时清空编辑侧边栏；菜单恢复到选中前的侧边栏（restoreMenuAfterDeselect）
     IBR_EditFrame::CurSection.ID = UINT_MAX;
     if (m_editPanelController) {
         m_editPanelController->clear();
     }
-    if (m_menuController) {
-        m_menuController->setActiveMenu(1);  // MenuItemID_MODULES
+    restoreMenuAfterDeselect();
+}
+
+void WorkspaceController::enterEditMenu()
+{
+    if (!m_menuController) return;
+    // 记录进入编辑侧边栏前的菜单（供取消选中后恢复"选中前的侧边栏"）
+    if (m_menuController->activeMenu() != 4) {
+        m_prevMenuBeforeEdit = m_menuController->activeMenu();
+        m_hasPrevMenuBeforeEdit = true;
+    }
+    m_menuController->setActiveMenu(4);
+}
+
+void WorkspaceController::restoreMenuAfterDeselect()
+{
+    if (!m_menuController) return;
+    // 仅在当前菜单是编辑侧边栏时恢复；否则保持现状（用户可能在编辑态外手动切换过菜单）
+    if (m_menuController->activeMenu() == 4) {
+        // 回到选中前的侧边栏；无记录（异常场景）兜底回 MODULES
+        m_menuController->setActiveMenu(
+            m_hasPrevMenuBeforeEdit ? m_prevMenuBeforeEdit : 1);
     }
 }
 
@@ -471,8 +728,16 @@ void WorkspaceController::setSelectedIDs(const QVariantList &ids)
 
 void WorkspaceController::deleteSelected()
 {
+    // 对应 IBR_WorkSpace.cpp:454-460 DeleteSelected
+    // DeleteSection 经 SendToR 异步执行（下个 tick 的 IBR_AutoProc 中）。
+    // 修复：
+    // 1) 不立即 refresh()——此刻数据未变，同步全量重建是白重建（删除卡顿主因，
+    //    删除实际会触发两次全量重建）；置 m_dirty 让删除执行后仅重建一次。
+    // 2) 置 RefreshLinkList=true——DeleteSection 不清理 LinkList，若不重建，
+    //    已删除模块的连线残留引用导致连线偏移/残留一帧。
     IBR_WorkSpace::DeleteSelected();
-    refresh();
+    m_dirty = true;
+    IBR_Inst_Project.RefreshLinkList = true;
 }
 
 void WorkspaceController::copySelected()
@@ -480,10 +745,27 @@ void WorkspaceController::copySelected()
     IBR_WorkSpace::CopySelected();
 }
 
+void WorkspaceController::copySection(qulonglong sectionId)
+{
+    // 复制指定节点到剪贴板，不改选择状态
+    // 对应 ImGui IBR_SectionData::CopyToClipBoard()（IBR_SectionData.cpp:282-289）
+    // 注意：必须直接查 IBR_SectionMap（key=ModuleID_t/MaxID 递增整数）。
+    // 不能走 IBR_Project::GetSection(ModuleID_t)：它会构造 IBB_SectionID{MaxID} 去查
+    // IBR_Rev_SectionMapII（key 是 IBB_SectionID{Desc} 的 DescToID 哈希，另一套 ID），
+    // 找不到后 ToDesc() 返回空 Desc → GetSection(空Desc) 会创建 Back_GunMu"滚木"占位模块！
+    ModuleID_t id = static_cast<ModuleID_t>(sectionId);
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    it->second.CopyToClipBoard();
+}
+
 void WorkspaceController::cutSelected()
 {
+    // CutSelected 内部 CopySelected（同步生成剪贴板）+ DeleteSelected（SendToR 异步删除）
+    // 同 deleteSelected：去同步白重建，置脏等删除执行后由 tick 一次有效重建
     IBR_WorkSpace::CutSelected();
-    refresh();
+    m_dirty = true;
+    IBR_Inst_Project.RefreshLinkList = true;
 }
 
 void WorkspaceController::paste()
@@ -515,6 +797,37 @@ void WorkspaceController::composeSelected()
 {
     IBR_WorkSpace::ComposeSelected();
     refresh();
+}
+
+bool WorkspaceController::outputSelectedModule(const QString &name, const QString &desc, const QString &path)
+{
+    // 对应 ImGui GUI_ExportModule → OutputSelected → OutputSelectedImpl
+    // QML 导出模块对话框确认后调用：把选中模块保存为自定义模块（.ini）并注册到模块树
+    if (name.trimmed().isEmpty() || path.trimmed().isEmpty()) return false;
+    IBR_WorkSpace::ExportSelectedModuleQt(
+        name.toUtf8().constData(),
+        desc.toUtf8().constData(),
+        path.toUtf8().constData());
+    // 模块树需重新加载新模块
+    return true;
+}
+
+void WorkspaceController::requestOutputModuleDialog()
+{
+    emit outputModuleRequested();
+}
+
+QString WorkspaceController::defaultModuleExportPath() const
+{
+    // 对应 ImGui OutputSelected（IBR_WorkSpace.cpp:752）IBB_ModuleAltDefault::GenerateModulePath()
+    // 生成默认导出路径（含文件名，如 模块目录/DefaultName.ini），供对话框初始化
+    return QString::fromUtf8(UnicodetoUTF8(IBB_ModuleAltDefault::GenerateModulePath()).c_str());
+}
+
+QPointF WorkspaceController::globalMousePos() const
+{
+    // 全局屏幕坐标（多显示器可用），QML 侧用 Overlay.mapFromGlobal 折算
+    return QCursor::pos();
 }
 
 void WorkspaceController::freezeSelected(bool frozen)
@@ -594,7 +907,9 @@ void WorkspaceController::deleteAllSections()
         }
         IBR_Inst_Project.DeleteSection(all);
     } });
-    refresh();
+    // 同 deleteSelected：去同步白重建 + 置 RefreshLinkList（删除后重建连线）
+    m_dirty = true;
+    IBR_Inst_Project.RefreshLinkList = true;
 }
 
 void WorkspaceController::switchDisplayMode()
@@ -678,6 +993,7 @@ void WorkspaceController::showContextMenu(qreal x, qreal y)
 
 void WorkspaceController::beginMoveSection(qulonglong sectionId, qreal startX, qreal startY)
 {
+    m_suppressLinkRebuild = false;  // 新拖拽开始：恢复端点表重建（防上次松手残留抑制）
     m_dragSectionId = static_cast<ModuleID_t>(sectionId);
     m_dragStartScreenPos = QPointF(startX, startY);
     auto it = IBR_Inst_Project.IBR_SectionMap.find(m_dragSectionId);
@@ -717,6 +1033,11 @@ void WorkspaceController::updateMoveSection(qreal curX, qreal curY)
 void WorkspaceController::endMoveSection()
 {
     if (m_inputState != 3) return;
+    // 拖拽收尾前强制完成缩放补间：写回 EqPos = 基准 + dragOffset/Ratio 要求
+    // dragOffset 与 Ratio 为同一时刻配套值（applyZoomStep 同步修正拖拽基准后重算），
+    // 若松手时鼠标已离开滚轮锚点，用补间中间值写回会引入 (鼠标−锚点)·(1/r_mid−1/r_final) 偏差。
+    // 此处 m_dragSectionId 尚未清零，applyZoomStep 的拖拽修正分支仍生效。
+    finishZoomTweenNow();
     // 拖拽结束：把 dragOffset 转换为 EqPos 偏移并写回后端
     ImVec2 newEqPos(
         m_dragStartEqPos.x + static_cast<float>(m_dragOffset.x()) / IBR_FullView::Ratio,
@@ -728,21 +1049,24 @@ void WorkspaceController::endMoveSection()
         it->second.Dragging = false;
     }
     qulonglong changedId = static_cast<qulonglong>(m_dragSectionId);
+    // 同步 MiniMap：快照 eqX/eqY 写回最新 EqPos，emit sectionsChanged 触发迷你地图重绘
+    syncSectionSnapshotPos(m_dragSectionId);
+    emit sectionsChanged();
     // 对应 ImGui IBR_SectionData.cpp:916-918 CurOnRender_Clicked → ActivateAndEdit
     // 拖动单个模块结束后选中该模块（非追加模式）
     // 注意：在 m_dragSectionId 清零之前保存 ID
     ModuleID_t draggedId = m_dragSectionId;
     IBR_WorkSpace::MassSelect({ draggedId });
-    updateInputState(4);  // MassAfter
+    // 用户要求：拖单个模块后回到普通态（不进入 MassAfter 多选操作态），
+    // 模块保持选中（蓝框），右键弹单模块菜单；点空白仍可取消选中（BgDragging → clearSelection）
+    updateInputState(0);  // Normal（原为 4/MassAfter）
     // 先发蓝框更新信号（视觉反馈优先，不阻塞）
     ++m_selectedRevision;
     emit selectedRevisionChanged();
     if (m_editPanelController) {
         m_editPanelController->setActive(changedId);
     }
-    if (m_menuController) {
-        m_menuController->setActiveMenu(4);
-    }
+    enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
     // 性能优化：直接更新 CurSection.ID，不调用 SetActive
     // SetActive 在 50ms tick 的 IBR_AutoProc 中同步执行于 UI 线程，包含：
     //   1. 遍历所有 INI 的所有 section 清除 Selected（ExtendMassSelect 已做，冗余）
@@ -750,22 +1074,42 @@ void WorkspaceController::endMoveSection()
     //   3. ResetEdit 重建 EditLines（Qt 版本 EditPanelController 不读 EditLines，冗余）
     // Qt 版本只需要 CurSection.ID 用于 focusedSectionId（连线高亮）
     IBR_EditFrame::CurSection.ID = draggedId;
-    // 清零 dragOffset，QML 不再应用偏移
-    m_dragOffset = QPointF();
-    emit dragOffsetChanged();
     m_dragSectionId = 0;
-    m_draggingSectionId = INVALID_MODULE_ID;
-    emit draggingSectionIdChanged();
-    // 性能优化：不调全量 refresh()，只通知 QML 更新被拖拽节点的位置
-    emit sectionPositionChanged(changedId);
+    m_lastDraggedId = changedId;  // LinkRenderer 据此在端点表重建前继续叠加 dragOffset（防松手连线弹）
+    // 修复"松手连线弹"（根治）：拖拽中 LinkRenderer 用"旧端点表 + dragOffset"叠加显示连线。
+    // 松手后若立即清 dragOffset/停止叠加，而端点表仍是旧值（拖拽前原位置），连线会弹回起点。
+    // 方案：节点与连线解耦 ——
+    //   节点：立即置 draggingSectionId=INVALID + sectionPositionChanged（localEqX=终点，不再叠加）；
+    //   连线：LinkRenderer 的 buildSectionMap 以"lastDraggedId + dragOffset 非零"独立继续叠加
+    //         dragOffset（见 LinkRenderer.qml），使连线在端点表重建完成前持续跟随鼠标终点；
+    //   随后事件队列末尾：rebuildLinkEndpoints（用 LineRow 已回写的终点坐标）→ 清 dragOffset
+    //         （叠加条件失效，端点表已终点 → 连线无任何中间态跳变）。
+    m_draggingSectionId = INVALID_MODULE_ID;  // 节点立即恢复（不再叠加 dragOffset）
+    // 拖拽结束：终止缩放换算（不 emit zoomBaseChanged 避免中间帧；补间已在函数开头强制完成）。
+    // 否则残留 zoomPending 会拦截下面 isDragging→false 触发的 LineRow 回写，
+    // 收尾 Queued rebuild 读到旧坐标 → 连线错位；换算失效由收尾重建后的 linkEndpointsChanged 统一切换。
+    m_zoomPending = false;
+    emit sectionPositionChanged(changedId);   // localEqX → 终点（节点位置正确）
+    emit draggingSectionIdChanged();          // isDragging → false（LineRow 回写终点坐标）
     // 连线端点表需要重建（节点位置变了）
     m_linkEndpointsDirty = true;
-    // 修复：松手后延迟重建端点表，确保 QML LineRow onIsDraggingChanged 回写 LastCenter 后再用新值重建
-    // 时序：dragOffsetChanged/draggingSectionIdChanged → QML isDragging 变 false → LineRow 回写新 LastCenter
-    //       → QueuedConnection 回调重建端点表（用新 LastCenter）→ emit linkEndpointsChanged → LinkRenderer 重绘
-    // 不加此延迟会导致一帧回弹：旧端点表 pa=原位置 + dragOffset=0 = 原位置
-    QMetaObject::invokeMethod(this, [this]() {
-        rebuildLinkEndpoints();
+    // 抑制 tick 提前重建端点表：松手后 dragOffset 尚未清零时若重建端点表，LinkRenderer
+    // 会叠加残留 dragOffset → 连线偏移一帧。此期间保持"拖拽中渲染"（不重画 = 保持跟随
+    // 鼠标终点的最后一帧），直到收尾（清 dragOffset + 重建端点表）统一切换，无中间态。
+    m_suppressLinkRebuild = true;
+    QMetaObject::invokeMethod(this, [this, changedId]() {
+        emit sectionPositionChanged(changedId);  // 最终一致性兜底（先让节点位置同步）
+        QMetaObject::invokeMethod(this, [this]() {
+            m_suppressLinkRebuild = false;       // 恢复 tick 重建
+            if (m_dragSectionId == 0 && m_inputState != 3) {
+                m_dragOffset = QPointF();        // 叠加条件（lastDraggedId+dragOffset）失效
+                emit dragOffsetChanged();
+                rebuildLinkEndpoints();          // 端点表 → 终点（LineRow 已回写），同回调渲染合并
+                // 过渡期结束：清 lastDraggedId，防止下次拖动其他模块时（dragOffset 非零）
+                // LinkRenderer 的 lastDraggedId+hasOffset 条件仍命中旧模块，把它的连线一起拖走
+                m_lastDraggedId = 0;
+            }
+        }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
 }
 
@@ -773,10 +1117,55 @@ void WorkspaceController::updateDrag(qreal curX, qreal curY)
 {
     // 阶段 12.1：统一拖拽更新入口，根据 m_moveAfterMass 分发
     if (m_inputState != 3) return;
-    if (m_moveAfterMass) {
-        updateMassDrag(curX, curY);
-    } else {
-        updateMoveSection(curX, curY);
+    // 帧率节流：只记录最新位置，由帧定时器 tick（applyPendingDrag）统一应用
+    // 使拖拽模块时的实际渲染帧率与帧率设置一致
+    m_pendingDragPos = QPointF(curX, curY);
+    m_hasPendingDrag = true;
+}
+
+void WorkspaceController::applyPendingDrag()
+{
+    // 帧率节流：把累积的拖拽/平移位置应用到后端并通知 QML
+    // 调用时机：帧定时器 tick（refreshFromTimer）或拖拽结束前（onMouseRelease/endDrag/onMousePress）
+    // 只应用最新一次位置（跳过中间事件），位置不丢失：增量从最后一次应用的屏幕位置累计
+    if (!m_hasPendingDrag) return;
+    m_hasPendingDrag = false;
+    QPointF pos = m_pendingDragPos;
+    if (m_inputState == 1) {
+        // BgDragging：拖拽平移（对应 IBR_WorkSpace.cpp:247-264 UpdateScroll）
+        // C7：累积增量从最后一次应用的屏幕位置计算，等价于原逐事件累加
+        QPointF delta = pos - m_dragStartScreen;
+        float oldCenterX = IBR_FullView::EqCenter.x;
+        float oldCenterY = IBR_FullView::EqCenter.y;
+        IBR_FullView::EqCenter.x -= static_cast<float>(delta.x()) / IBR_FullView::Ratio;
+        IBR_FullView::EqCenter.y -= static_cast<float>(delta.y()) / IBR_FullView::Ratio;
+        m_dragStartScreen = pos;
+        // C7：钳制到有效范围（对应 IBR_WorkSpace.cpp:261 EqPosFixRange）
+        IBR_FullView::EqPosFixRange(IBR_FullView::EqCenter);
+        // 画布平移偏移叠加（对应拖模块的 dragOffset 机制）：
+        // 拖动画布时端点表保持快照不重建、行圆点不回写（QML 端 inputState==1 跳过），
+        // LinkRenderer 渲染时对所有端点叠加此屏幕偏移，与节点移动保持一致。
+        // 省去每帧全量端点表重建（N 条链接 QVariantMap 重建 + LinkRenderer 重绘）→
+        // 拖动画布帧率与拖模块一致（否则拖动画布被重建开销拖垮）。
+        // 偏移用实际钳制后的 EqCenter 变化计算，触边时偏移与节点位移严格一致。
+        QPointF centerDelta(IBR_FullView::EqCenter.x - oldCenterX,
+                            IBR_FullView::EqCenter.y - oldCenterY);
+        m_canvasDragOffset -= QPointF(centerDelta.x() * IBR_FullView::Ratio,
+                                      centerDelta.y() * IBR_FullView::Ratio);
+        emit canvasDragOffsetChanged();
+        // 性能优化：只发信号，QML 根据新 EqCenter 重新计算屏幕坐标
+        // 不调用 refresh()（全量重建 QVariantList 太慢）
+        emit eqCenterChanged();
+        emit edgeFlagsChanged();
+        // 注意：不再设置 m_linkEndpointsDirty —— 拖动画布中端点表不重建，靠偏移叠加。
+        // 下次端点表重建（松手后缩放/拖模块/项目操作触发）时自动清零偏移。
+    } else if (m_inputState == 3) {
+        // HoldingModules：按拖拽来源分发（对应 updateDrag 原逻辑）
+        if (m_moveAfterMass) {
+            updateMassDrag(pos.x(), pos.y());
+        } else {
+            updateMoveSection(pos.x(), pos.y());
+        }
     }
 }
 
@@ -784,6 +1173,8 @@ void WorkspaceController::endDrag()
 {
     // 阶段 12.1：统一拖拽结束入口
     if (m_inputState != 3) return;
+    // 帧率节流：松手前应用最后一次待处理位置，确保 EqPos 写回准确
+    applyPendingDrag();
     if (m_moveAfterMass) {
         endMassDrag();
         m_moveAfterMass = false;
@@ -792,6 +1183,32 @@ void WorkspaceController::endDrag()
     } else {
         endMoveSection();
     }
+}
+
+void WorkspaceController::clearEditSelection()
+{
+    // 清空选中/编辑状态（对应 ImGui IBR_WorkSpace.cpp:1076-1079 Clear() + ChooseMenu(MenuItemID_MODULES)）
+    // 用户要求：取消选中/删除模块后，若仍选中单个有效模块 → 显示该模块的编辑侧边栏；
+    // 无选中 → 清空编辑面板并恢复到选中前的侧边栏（restoreMenuAfterDeselect）
+    if (m_inputState == 4) updateInputState(0);
+    IBR_EditFrame::CurSection.ID = UINT_MAX;
+    // 判断当前是否仍选中单个有效模块（如多选取消/删除后剩余一个）→ 显示编辑侧边栏
+    if (IBR_WorkSpace::MassTarget.size() == 1) {
+        ModuleID_t remainId = IBR_WorkSpace::MassTarget.front();
+        if (IBR_Inst_Project.IBR_SectionMap.find(remainId)
+            != IBR_Inst_Project.IBR_SectionMap.end()) {
+            IBR_EditFrame::CurSection.ID = remainId;
+            if (m_editPanelController) {
+                m_editPanelController->setActive(static_cast<qulonglong>(remainId));
+            }
+            enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
+            return;
+        }
+    }
+    if (m_editPanelController) {
+        m_editPanelController->clear();
+    }
+    restoreMenuAfterDeselect();  // 恢复到选中前的侧边栏
 }
 
 void WorkspaceController::toggleSelectSection(qulonglong sectionId, bool additive)
@@ -824,39 +1241,29 @@ void WorkspaceController::toggleSelectSection(qulonglong sectionId, bool additiv
 
     // 同步 Qt 状态机
     if (current.empty()) {
-        if (m_inputState == 4) updateInputState(0);
-        // 对应 ImGui IBR_WorkSpace.cpp:1076-1079 Clear() + ChooseMenu(MenuItemID_MODULES)
-        // 取消选中最后一个模块时清空编辑侧边栏，切回 MODULES 菜单
-        IBR_EditFrame::CurSection.ID = UINT_MAX;
-        if (m_editPanelController) {
-            m_editPanelController->clear();
-        }
-        if (m_menuController) {
-            m_menuController->setActiveMenu(1);  // MenuItemID_MODULES
-        }
+        clearEditSelection();
     } else {
-        if (!additive && current.size() == 1) {
-            // 非追加单击单选：保持 Normal(0) 状态，切换到 EditPanel
+        if (current.size() == 1) {
+            // 单选（单击替换，或 Ctrl 追加/取消后剩一个）：保持 Normal(0) 状态，切换到 EditPanel
             // 对应 ImGui IBR_EditFrame::ActivateAndEdit → ChooseMenu(MenuItemID_EDIT)
+            // 用户要求：只要选中单个模块就显示编辑侧边栏（含多选逐个取消剩一个的场景）
             // 单选用边框高亮（非 MassAfter），多选才进入 MassAfter 用覆盖层
             if (m_inputState == 4) updateInputState(0);
-            IBR_EditFrame::CurSection.ID = id;
+            ModuleID_t remainId = current[0];  // Ctrl 取消场景下剩余的是未点击的那个模块
+            IBR_EditFrame::CurSection.ID = remainId;
             if (m_editPanelController) {
-                m_editPanelController->setActive(sectionId);
+                m_editPanelController->setActive(static_cast<qulonglong>(remainId));
             }
-            if (m_menuController) {
-                m_menuController->setActiveMenu(4);
-            }
+            enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
         } else {
             // 追加多选（additive=true）或 size>1：进入 MassAfter(4)
             // 对应 ImGui MassAfter 状态，用覆盖层变色，不显示编辑框
+            // 用户要求：Ctrl 多选时不跳侧边栏（原 setActiveMenu(1) 会切到模块列表），
+            // 保持当前面板；编辑面板清空显示空态
             updateInputState(4);
             IBR_EditFrame::CurSection.ID = UINT_MAX;
             if (m_editPanelController) {
                 m_editPanelController->clear();
-            }
-            if (m_menuController) {
-                m_menuController->setActiveMenu(1);  // MenuItemID_MODULES
             }
         }
     }
@@ -873,9 +1280,7 @@ void WorkspaceController::activateAndEdit(qulonglong sectionId)
     if (m_editPanelController) {
         m_editPanelController->setActive(sectionId);
     }
-    if (m_menuController) {
-        m_menuController->setActiveMenu(4);
-    }
+    enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
 }
 
 void WorkspaceController::toggleCollapseSection(qulonglong sectionId, bool collapsed)
@@ -1046,6 +1451,13 @@ void WorkspaceController::clearDraggingLink()
         m_dragInvalidLink = false;
         emit dragInvalidLinkChanged(false);
     }
+    // 拖拽结束同时清拖拽目标预览（拖拽源 onReleased 已执行建链/合并，这里兜底清理）
+    if (m_dragTargetSectionId != 0 || !m_dragTargetColor.isEmpty() || !m_dragTargetText.isEmpty()) {
+        m_dragTargetSectionId = 0;
+        m_dragTargetColor.clear();
+        m_dragTargetText.clear();
+        emit dragTargetChanged();
+    }
 }
 
 // v3 批次 1.4：DropArea 接收 linkLimit=0 拖拽时通知源 LinkNode 显示"无效链接"提示
@@ -1057,12 +1469,36 @@ void WorkspaceController::setDragInvalidLink(bool invalid)
     emit dragInvalidLinkChanged(invalid);
 }
 
+void WorkspaceController::setDragTarget(qulonglong targetId, const QString &color, const QString &text)
+{
+    if (m_dragTargetSectionId == targetId && m_dragTargetColor == color && m_dragTargetText == text)
+        return;
+    m_dragTargetSectionId = targetId;
+    m_dragTargetColor = color;
+    m_dragTargetText = text;
+    emit dragTargetChanged();
+}
+
 void WorkspaceController::refresh()
 {
     // 全量刷新（由 Q_INVOKABLE 修改操作直接调用）
     m_dirty = true;
     m_linkEndpointsDirty = true;  // D10：全量刷新时连带重建端点表
     refreshFromTimer();
+}
+
+void WorkspaceController::refreshLinkIncremental()
+{
+    // 增量刷新链接数据（连线/取消连线后调用）：按后端重建 LinkList/m_links，
+    // 并阻止 refreshFromTimer 因计数变化触发全量 refreshSections
+    //（行模型 resetModel 重建期间坐标未就绪，全量 rebuild 会读到污染值导致连线全跑模块第一个节点）。
+    // 行模型重建完成后正确回写会再次置 dirty，届时全量 rebuild 读到稳定坐标。
+    if (IBR_Inst_Project.RefreshLinkList) {
+        rebuildLinkList();
+        refreshLinks();  // 重建 m_links（LinkRenderer 遍历的链接列表），新增/删除链接才能反映到渲染
+        m_linkEndpointsDirty = false;
+        m_lastLinkCount = IBR_Inst_Project.LinkList.size();
+    }
 }
 
 void WorkspaceController::restoreStateAfterDrag()
@@ -1077,6 +1513,28 @@ void WorkspaceController::restoreStateAfterDrag()
     }
 }
 
+void WorkspaceController::syncSectionSnapshotPos(ModuleID_t id)
+{
+    // 画布节点位置由 QML 实时绑定（localEqX + width/2）驱动，拖拽结束后只 emit
+    // sectionPositionChanged 更新 localEqX/localEqY，不重建 m_sections。而 MiniMap
+    // 的 sections 绑定读取的正是 m_sections 快照 → 快照 eqX/eqY 过期则迷你地图模块
+    // 位置不刷新。这里把 IBR_SectionMap 的最新 EqPos 同步回快照，由调用方 emit
+    // sectionsChanged 触发 MiniMap 重绘。
+    for (auto &item : m_sections) {
+        const QVariantMap map = item.toMap();
+        if (map.value(QStringLiteral("sectionId")).toULongLong() != static_cast<qulonglong>(id))
+            continue;
+        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+        if (it == IBR_Inst_Project.IBR_SectionMap.end())
+            return;
+        QVariantMap updated = map;
+        updated["eqX"] = static_cast<double>(it->second.EqPos.x);
+        updated["eqY"] = static_cast<double>(it->second.EqPos.y);
+        item = updated;
+        return;
+    }
+}
+
 void WorkspaceController::setViewportSize(qreal width, qreal height)
 {
     // 同步视口尺寸到 IBR_RealCenter（对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update）
@@ -1086,8 +1544,25 @@ void WorkspaceController::setViewportSize(qreal width, qreal height)
     IBR_RealCenter::WorkSpaceDR = dImVec2{ static_cast<double>(width), static_cast<double>(height) };
     IBR_RealCenter::Center = ImVec2(static_cast<float>(width) * 0.5f,
                                      static_cast<float>(height) * 0.5f);
-    // 标记脏，下次 refreshFromTimer 时重建（screenX/screenY 依赖 Center）
-    m_dirty = true;
+    // 注意：不能置 m_dirty = true！拖拽侧边栏调整宽度时 QML 连续调用本函数，
+    // 每帧触发 FULL REBUILD（90+ 节点 + 连线全量重建）导致画布卡顿/闪帧。
+    // 视口变化只需 QML 侧实时生效：
+    //   - SectionNode 位置绑定 (eqX-eqCenter)*ratio + width/2 自动跟随视口宽度
+    //   - 连线精确端点由 QML 圆点回写（onXChanged → linkNodeCenterChanged）实时更新
+    //   - m_sections 里的 screenX/screenY 仅作 LinkRenderer 兜底 pb，精确 pb 始终优先
+    // 因此这里只发轻量信号（MiniMap/视口矩形）+ 标记端点表重建；拖拽松手后
+    // QML 调 refresh() 做一次全量同步（补齐兜底坐标）。
+    emit workspaceRectChanged();
+    emit viewCenterChanged();
+    m_linkEndpointsDirty = true;
+
+    // 视口偏移补偿：端点表是"上次 rebuild 时"的快照坐标，而模块已按 (ΔW/2, ΔH/2)
+    // 整体平移（位置公式含 width/2、height/2）。QML LinkRenderer 渲染时叠加本偏移
+    // 使连线端点立即与模块对齐（QTimer tick 的 rebuild 总落后渲染一帧，见 QtMain 帧率节流）。
+    // 端点表重建（rebuildLinkEndpoints）时用当前视口更新基准并归零。
+    m_viewportOffsetX = (width - m_endpointBaseW) * 0.5;
+    m_viewportOffsetY = (height - m_endpointBaseH) * 0.5;
+    emit viewportOffsetChanged();
 }
 
 void WorkspaceController::refreshFromTimer()
@@ -1096,6 +1571,7 @@ void WorkspaceController::refreshFromTimer()
     size_t smapSize = IBR_Inst_Project.IBR_SectionMap.size();
     if (!isOpen) {
         if (!m_sections.isEmpty()) {
+            m_sectionsModel->updateFrom(QVariantList{});  // 同步清空增量模型
             m_sections.clear();
             m_sectionDataRevision++;  // D20：递增版本号
             emit sectionsChanged();
@@ -1116,6 +1592,10 @@ void WorkspaceController::refreshFromTimer()
         m_lastLinkCount = 0;
         return;
     }
+
+    // 帧率节流：每帧 tick 应用一次待处理的拖拽/平移位置
+    //（拖动画布/模块时位置更新频率 = 帧率设置，SceneGraph 实际渲染帧率随之受帧率设置限制）
+    applyPendingDrag();
 
     // D10：连线端点表脏检查
     // 仅在以下情况重建：LinkList 结构变化 / RefreshLinkList 标志 / 端点表为空 / 全量刷新已标记脏
@@ -1141,15 +1621,21 @@ void WorkspaceController::refreshFromTimer()
     size_t curSectionCount = IBR_Inst_Project.IBR_SectionMap.size();
     size_t curLinkCount = IBR_Inst_Project.LinkList.size();
 
+    // 修复：RefreshLinkList=true 时禁止早退。
+    // 行值/链接修改（createLink/deleteAllLinks/拖拽建链等）在 SendToR lambda 中只设此标志，
+    // LinkList 需由 refreshLinks 重建（行值可能已变但 LinkList.size() 未变，计数检查发现不了）。
+    // 若此处早退，refreshLinks 永不执行 → 连线仍从过期 LinkList 重建（取消链接后连线还在）。
     if (!m_dirty &&
         m_lastIsOpen &&
+        !IBR_Inst_Project.RefreshLinkList &&
         m_lastSectionCount == curSectionCount &&
         m_lastLinkCount == curLinkCount)
     {
         // 无变化，跳过全量重建
         // 但端点表可能因 QML LinkNode 布局回写而变脏（m_linkEndpointsDirty）
         // 此时只重建端点表，不重建 sections/links（对应 ImGui 每帧用新 LastCenter 重绘连线）
-        if (m_linkEndpointsDirty) {
+        // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
+        if (m_linkEndpointsDirty && !m_suppressLinkRebuild) {
             rebuildLinkEndpoints();
             m_linkEndpointsDirty = false;
         }
@@ -1160,8 +1646,16 @@ void WorkspaceController::refreshFromTimer()
     bool wasOpen = m_lastIsOpen;
     m_dirty = false;
     m_lastIsOpen = true;
-    m_lastSectionCount = curSectionCount;
-    m_lastLinkCount = curLinkCount;
+
+    // 修复：节点数量变化（新建/删除模块）时强制重建 LinkList。
+    // AddModule/DeleteSection 等业务层操作只 UpdateAll、不置 RefreshLinkList，
+    // 若不重建，增删模块后连线列表仍是旧数据 → 连线偏移/残留（DeleteSection 不清理
+    // LinkList，AddModule 不把新模块连线加入 LinkList）
+    if (m_lastSectionCount != curSectionCount)
+        IBR_Inst_Project.RefreshLinkList = true;
+    // 注意：m_lastSectionCount/m_lastLinkCount 不能在刷新前赋值！
+    // LinkList 由 refreshLinks->rebuildLinkList 重建（0->58），刷新前快照是旧值，
+    // 会导致下一次 QTimer 误判计数变化而重复全量刷新，须在全量末尾重新记录（见下）
 
     // 项目刚打开时自动居中到模块包围盒中心
     // 项目文件保存的 EqCenter 可能为 (0,0)，但模块可能不在原点附近
@@ -1187,11 +1681,25 @@ void WorkspaceController::refreshFromTimer()
         }
     }
 
+    // 模块被删除时关闭编辑侧边栏：
+    // 若当前编辑模块已从 SectionMap 移除（删除/剪切/全删/撤销等），
+    // 与"取消选中"表现一致（清空编辑面板 + 菜单切回 MODULES + 复位状态机）
+    // 全量重建分支仅在项目数据变化时进入（增删必变计数），检查成本一次 map 查找
+    if (m_editPanelController) {
+        qulonglong curId = m_editPanelController->currentSectionId();
+        if (curId != 0
+            && IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(curId))
+                   == IBR_Inst_Project.IBR_SectionMap.end()) {
+            clearEditSelection();
+        }
+    }
+
     { refreshSections(); }
     { refreshLinks(); }
     // 修复：rebuildLinkEndpoints 必须在 refreshSections/refreshLinks 之后执行
     // 因为 rebuildLinkEndpoints 依赖 m_lineModels（在 refreshSections 中创建）和 LinkList（在 refreshLinks→rebuildLinkList 中填充）
-    if (m_linkEndpointsDirty) {
+    // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
+    if (m_linkEndpointsDirty && !m_suppressLinkRebuild) {
         rebuildLinkEndpoints();
         m_linkEndpointsDirty = false;
     }
@@ -1200,6 +1708,10 @@ void WorkspaceController::refreshFromTimer()
     emit eqCenterChanged();
     emit viewCenterChanged();
     emit workspaceRectChanged();
+
+    // 全量刷新结束后记录最终计数（LinkList 已由 refreshLinks 重建）
+    m_lastSectionCount = static_cast<size_t>(IBR_Inst_Project.IBR_SectionMap.size());
+    m_lastLinkCount = static_cast<size_t>(IBR_Inst_Project.LinkList.size());
 }
 
 void WorkspaceController::refreshSections()
@@ -1215,7 +1727,7 @@ void WorkspaceController::refreshSections()
         IBR_WorkSpace::MassTarget.end());
 
     QVariantList list;
-    for (const auto &[id, sd] : IBR_Inst_Project.IBR_SectionMap)
+    for (auto &[id, sd] : IBR_Inst_Project.IBR_SectionMap)
     {
         if (sd.Hidden && !sd.First) continue;
         // 阶段 D：跳过 IsIncluded() 的子模块（由父虚拟块递归渲染）
@@ -1224,7 +1736,14 @@ void WorkspaceController::refreshSections()
         if (sd.IsIncluded()) continue;
 
         list.append(buildSectionItem(id, sd, selectedSet));
+        // 对齐 ImGui RenderUI 首次渲染后清除 First（IBR_SectionData.cpp:887）：
+        // Qt 版不跑 ImGui RenderUI，First 恒为 true，导致上方"Hidden && !First 豁免"
+        // 分支永不跳过 → 隐藏模块始终显示。首次构建后清除，恢复隐藏语义。
+        sd.First = false;
     }
+    // 增量更新 Repeater 模型：只对变化的项发信号（新增/删除只增删对应 delegate），
+    // 避免整表替换重建全部 SectionNode（新建/删除模块卡顿根因）
+    m_sectionsModel->updateFrom(list);
     m_sections = std::move(list);
     m_sectionDataRevision++;  // D20：递增版本号
     emit sectionsChanged();
@@ -1338,6 +1857,8 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
         if (!modelPtr) {
             modelPtr = new SectionLineModel(const_cast<WorkspaceController*>(this));
             modelPtr->setSectionId(static_cast<qulonglong>(id));
+            // 注入控制器：链接修改后同步触发工作区全量刷新（消除 SendToR 队列延迟）
+            modelPtr->setWorkspaceController(const_cast<WorkspaceController*>(this));
             // 画布操作（toggleInputMode/modifyValue/createLink 等）→ 通知侧边栏刷新
             // 双向同步：EditPanel 改值 → refreshSectionLines 刷新画布；画布改值 → 通知 EditPanel
             connect(modelPtr, &SectionLineModel::sectionDataChanged,
@@ -1439,6 +1960,8 @@ void WorkspaceController::rebuildLinkList()
                 IBR_Project::_Plink plink;
                 plink.Dest = lt.ToLoc.Sec;
                 plink.DestKey = lt.ToLoc.Key;
+                plink.FromKey = lt.FromLoc.Key;
+                plink.SrcMult = lt.FromLoc.Mult;
                 plink.LineMult = lt.ToLoc.Mult;
                 plink.SourceID = lt.SessionID;
                 plink.SrcModuleID = id;
@@ -1494,13 +2017,30 @@ void WorkspaceController::refreshLinks()
     QVariantList list;
     for (const auto &link : IBR_Inst_Project.LinkList)
     {
+        // 对齐 ImGui 连线渲染跳过 Hidden（IBR_WorkSpace.cpp:1491 RSD->Hidden continue）：
+        // 源/目标模块任一隐藏则不渲染该连线（隐藏后模块消失，连线不应残留）
+        auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
+        auto srcSD = srcRsec.GetSectionData();
+        if (srcSD && srcSD->Hidden) continue;
+        // 目标端：不能用 GetSection(link.Dest)！反向索引（IBR_Rev_SectionMapII）缺失时
+        // 它会调用 GetSection(ToDesc()) 创建 Back_GunMu 滚木占位模块（IBR_Project.cpp:310），
+        // 占位 Hidden=false → 隐藏过滤失效且每次刷新污染 IBR_SectionMap。
+        // 改用只读的 GetSectionID(Desc→MaxID)，查不到视为残留连线直接跳过。
+        ModuleID_t dstActualId = 0;
+        auto dstIdOpt = IBR_Inst_Project.GetSectionID(link.Dest.ToDesc());
+        if (dstIdOpt)
+        {
+            auto dstRsec = IBR_Inst_Project.GetSectionFromID(*dstIdOpt);
+            auto dstSD = dstRsec.GetSectionData();
+            if (dstSD && dstSD->Hidden) continue;
+            dstActualId = *dstIdOpt;
+        }
+        else
+        {
+            continue;  // 目标模块不存在（残留连线）
+        }
+
         QVariantMap item;
-        // 修复：sourceId/sourceSessionId/destId 用字符串传递
-        // 原因：sessionId 是 uint64（高达 1.6e19），超过 JS Number 精度上限（2^53≈9e15），
-        //       QML 里作为 number 会精度丢失，导致 linkEndpointsMap 查找 key 不匹配
-        // 修复 destId：用 GetSection(link.Dest).ID 获取实际 ID（link.Dest.ID 是旧失效 ID）
-        auto dstRsec = IBR_Inst_Project.GetSection(link.Dest);
-        ModuleID_t dstActualId = dstRsec.ID;
         // 源信息（字符串，避免 QML 大整数精度丢失）
         item["sourceId"] = QString::number(static_cast<qulonglong>(link.SrcModuleID));
         item["sourceSessionId"] = QString::number(static_cast<qulonglong>(link.SourceID));
@@ -1529,6 +2069,13 @@ void WorkspaceController::refreshLinks()
 
 void WorkspaceController::rebuildLinkEndpoints()
 {
+    // 缩放叠加结束：先强制完成补间（重建后 Ratio 不得再变，否则连线与节点错位），
+    // 再终止换算叠加（LinkRenderer 直接用新端点表）
+    finishZoomTweenNow();
+    if (m_zoomPending) {
+        m_zoomPending = false;
+        emit zoomBaseChanged();
+    }
     // 修复时序竞态：QML 节点异步布局，首帧回写尚未到达时 m_sectionAcceptPoint/m_lineModels 均空，
     // 导致所有 pa=(0,0)、pbValid=false，连线画在屏幕原点或不显示。
     // 解决方案：用 IBR_FullView::EqPosToRePos(EqPos) 直接计算兜底坐标（对应 ImGui ReWindowUL），
@@ -1561,18 +2108,37 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 字符串传递，避免 QML 大整数精度丢失
         ep["sessionId"] = QString::number(static_cast<qulonglong>(link.SourceID));
 
-        // ===== 起点 pa（源端 LastCenter）=====
+        // ===== 起点 pa（源端圆点）=====
         qreal paX = 0.0, paY = 0.0;
         bool paValid = false;
 
-        // 优先级 1：QML 回写的 LastCenter（非 0 才用，0 表示尚未回写）
-        if (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f)
+        // 优先级 1：源行圆点（按 FromKey 查行级接受点，与 QML 回写同源）。
+        // 修复：LastCenter 按 SessionID 索引，IIF 行链接的 SessionID 用 Comp=cidx（UpdateAll），
+        // 而 QML 圆点回写用 Comp=0（rebuildEntries），两者不匹配 → LastCenter=0 → pa 回退标题栏（起点错）。
+        // 按源行 key 查询直接取该行圆点坐标，免疫 SessionID 不匹配。
+        if (link.FromKey != EmptyPoolStr)
+        {
+            auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
+            if (itSrcModel != m_lineModels.end() && *itSrcModel)
+            {
+                QPointF srcAc = (*itSrcModel)->acceptCenterByKey(
+                    QString::fromUtf8(PoolStr(link.FromKey)), static_cast<int>(link.SrcMult));
+                if (!srcAc.isNull())
+                {
+                    paX = srcAc.x();
+                    paY = srcAc.y();
+                    paValid = true;
+                }
+            }
+        }
+        // 优先级 2：QML 回写的 LastCenter（非 0 才用，0 表示尚未回写）
+        if (!paValid && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
         {
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
             paValid = true;
         }
-        // 优先级 2：QML 回写的标题栏接受点（折叠态由 setHeadLineRN 回写）
+        // 优先级 3：QML 回写的标题栏接受点（折叠态由 setHeadLineRN 回写）
         if (!paValid)
         {
             auto itSrcAccept = m_sectionAcceptPoint.find(static_cast<qulonglong>(link.SrcModuleID));
@@ -1606,25 +2172,24 @@ void WorkspaceController::rebuildLinkEndpoints()
         ep["x"] = paX;
         ep["y"] = paY;
         ep["isCollapsed"] = sv.Collapsed;
-        // 诊断：pa 来源和 LastCenter 原始值
-        ep["paSource"] = paValid
-            ? (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f ? "LastCenter" : "AcceptPoint")
-            : "EqPos";
-        ep["lastCenterX"] = static_cast<qreal>(sv.LastCenter.x);
-        ep["lastCenterY"] = static_cast<qreal>(sv.LastCenter.y);
 
         // ===== 终点 pb（目标接受点）=====
         qreal pbX = 0.0, pbY = 0.0;
         bool pbValid = false;
 
         // 优先级 1：行级接受点（非折叠态目标，对应 ImGui AcceptCenter[LineMult]）
-        // 修复：用 GetSection(Desc) 按 Desc 查找，而非 GetSectionFromID(Dest.ID)
-        // 因为 Dest.ID 是 Desc 里的旧 ID，项目加载后 ID 重新分配，旧 ID 失效
-        // 对应 ImGui RenderUI_Links 行 1465: auto Rsec = IBR_Inst_Project.GetSection(Link.Dest);
-        auto dstRsec = IBR_Inst_Project.GetSection(link.Dest);
+        // 目标端安全查找：不能用 GetSection(link.Dest)！反向索引（IBR_Rev_SectionMapII）
+        // 缺失时它会调用 GetSection(ToDesc()) 创建 Back_GunMu 滚木占位（IBR_Project.cpp:310），
+        // pb 兜底会用到滚木的坐标（EqPos 默认 (0,0)）→ 连线终点错位到视口中心附近（轻微偏移），
+        // 且每次重建都 ++MaxID 污染 IBR_SectionMap，滚木随后还会被 refreshSections 渲染到画布。
+        // 改用只读的 GetSectionID(Desc→MaxID)，查不到视为残留连线直接跳过。
+        ModuleID_t dstActualId = 0;
+        auto dstIdOpt = IBR_Inst_Project.GetSectionID(link.Dest.ToDesc());
+        if (!dstIdOpt) continue;  // 目标模块不存在（残留连线），跳过该端点
+        dstActualId = *dstIdOpt;
+        auto dstRsec = IBR_Inst_Project.GetSectionFromID(dstActualId);
         auto dstData = dstRsec.GetSectionData();
         auto dstBsec = dstRsec.GetBack_Unsafe();
-        ModuleID_t dstActualId = dstRsec.ID;  // 实际 ID（用于查 m_lineModels/m_sectionAcceptPoint）
 
         if (!sv.Collapsed && link.DestKey != EmptyPoolStr && dstData)
         {
@@ -1682,6 +2247,19 @@ void WorkspaceController::rebuildLinkEndpoints()
     }
     m_linkEndpoints = std::move(endpoints);
     m_linkEndpointsMap = std::move(endpointsMap);
+    // 端点表已按最新行圆点坐标重建，清空画布平移偏移（QML 不再叠加）
+    if (!m_canvasDragOffset.isNull()) {
+        m_canvasDragOffset = QPointF();
+        emit canvasDragOffsetChanged();
+    }
+    // 端点表已重建到当前视口：更新基准尺寸并归零视口偏移（QML 不再叠加）
+    m_endpointBaseW = static_cast<qreal>(IBR_RealCenter::WorkSpaceDR.x);
+    m_endpointBaseH = static_cast<qreal>(IBR_RealCenter::WorkSpaceDR.y);
+    if (m_viewportOffsetX != 0.0 || m_viewportOffsetY != 0.0) {
+        m_viewportOffsetX = 0.0;
+        m_viewportOffsetY = 0.0;
+        emit viewportOffsetChanged();
+    }
     emit linkEndpointsChanged();
 }
 
@@ -1718,6 +2296,7 @@ void WorkspaceController::beginMassDrag(qreal startX, qreal startY)
     if (m_inputState != 4) return;
     if (IBR_WorkSpace::MassTarget.empty()) return;
 
+    m_suppressLinkRebuild = false;  // 新拖拽开始：恢复端点表重建（防上次松手残留抑制）
     m_massDragIds = IBR_WorkSpace::MassTarget;
     m_dragStartScreenPos = QPointF(startX, startY);
     m_moveAfterMass = true;
@@ -1825,6 +2404,9 @@ void WorkspaceController::updateMassDrag(qreal curX, qreal curY)
 
 void WorkspaceController::endMassDrag()
 {
+    // 拖拽收尾前强制完成缩放补间（同 endMoveSection：写回 dragOffset/Ratio 要求配套值，
+    // 此处 m_massDragging 尚未清零，applyZoomStep 的拖拽修正分支仍生效）
+    finishZoomTweenNow();
     // 拖拽结束：把 dragOffset 转换为 EqPos 偏移并写回所有拖拽节点
     float eqDeltaX = static_cast<float>(m_dragOffset.x()) / IBR_FullView::Ratio;
     float eqDeltaY = static_cast<float>(m_dragOffset.y()) / IBR_FullView::Ratio;
@@ -1841,6 +2423,11 @@ void WorkspaceController::endMassDrag()
     }
     // 性能优化：在 clear 前保存 IDs，供后面 emit sectionPositionChanged
     auto draggedIds = m_massDragIds;
+    // 同步 MiniMap：所有拖拽节点快照 eqX/eqY 写回最新 EqPos，emit sectionsChanged 触发迷你地图重绘
+    for (auto id : draggedIds) {
+        syncSectionSnapshotPos(id);
+    }
+    emit sectionsChanged();
     m_massDragIds.clear();
     m_initHolding = false;
     m_hasLeftDownToWait = false;
@@ -1857,24 +2444,45 @@ void WorkspaceController::endMassDrag()
         m_draggingSectionId = INVALID_MODULE_ID;
         emit draggingSectionIdChanged();
     }
-    // 清零 dragOffset，QML 不再应用偏移
-    m_dragOffset = QPointF();
-    emit dragOffsetChanged();
-    // 清除 massDragging，QML 不再对选中节点应用 dragOffset
+    // 静默置 massDragging=false（isDragging → false 触发 LineRow 回写新 LastCenter），
+    // 再 emit sectionPositionChanged（各节点 localEqX=终点）。dragOffset 保持旧值，
+    // 等端点表重建完成后再清（同 endMoveSection：避免 LinkRenderer 用旧端点表+0 弹回起点）。
     m_massDragging = false;
-    emit massDraggingChanged();
+    // 拖拽结束：终止缩放换算（补间已在函数开头强制完成；防止残留 zoomPending 拦截回写）
+    m_zoomPending = false;
+    if (!draggedIds.empty())
+        m_lastDraggedId = static_cast<qulonglong>(draggedIds.front());  // LinkRenderer 据此在端点表重建前继续叠加 dragOffset
+    for (auto id : draggedIds) {
+        emit sectionPositionChanged(static_cast<qulonglong>(id));
+    }
+    emit massDraggingChanged();  // isDragging → false（LineRow 回写新 LastCenter）
     // 性能优化：与 endMoveSection 行为一致
     // - 保持 MassTarget 选中状态（不清除），允许用户连续拖动同一组模块
     // - 回到 MassAfter 状态（而非 Normal），与 endMoveSection 统一
     // - 不调全量 refresh()，改为对每个拖拽节点 emit sectionPositionChanged
     //   避免重建 91 个节点的 QVariantList + SectionLineModel::refresh() 导致卡顿
     restoreStateAfterDrag();
-    // 通知 QML 更新所有被拖拽节点的位置（轻量，只更新坐标）
-    for (auto id : draggedIds) {
-        emit sectionPositionChanged(static_cast<qulonglong>(id));
-    }
     // 连线端点表需要重建（多节点位置变了）
     m_linkEndpointsDirty = true;
+    // 同 endMoveSection：抑制 tick 提前重建（dragOffset 未清时叠加 → 偏移），
+    // 保持拖拽中渲染最后一帧，直到收尾（清 dragOffset + 重建端点表）统一切换
+    m_suppressLinkRebuild = true;
+    auto finalIds = draggedIds;
+    QMetaObject::invokeMethod(this, [this, finalIds]() {
+        for (auto id : finalIds) {
+            emit sectionPositionChanged(static_cast<qulonglong>(id));
+        }
+        QMetaObject::invokeMethod(this, [this]() {
+            m_suppressLinkRebuild = false;       // 恢复 tick 重建
+            if (m_dragSectionId == 0 && m_inputState != 3) {
+                m_dragOffset = QPointF();
+                emit dragOffsetChanged();
+                rebuildLinkEndpoints();
+                // 过渡期结束：清 lastDraggedId（同 endMoveSection，防旧模块连线被下次拖拽拖走）
+                m_lastDraggedId = 0;
+            }
+        }, Qt::QueuedConnection);
+    }, Qt::QueuedConnection);
 }
 
 void WorkspaceController::showMassContextMenu(qreal x, qreal y)
@@ -2174,7 +2782,7 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
     size_t srcLineMult = static_cast<size_t>(sourceLineMult);
     size_t dstMult = static_cast<size_t>(destMult);
 
-    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, finalDstKey, dstMult, dstData]() {
+    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, finalDstKey, dstMult, dstData, sourceKeyName, this]() {
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto dstRsec = IBR_Inst_Project.GetSectionFromID(dstId);
         auto srcBsec = srcRsec.GetBack_Unsafe();
@@ -2239,10 +2847,155 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
         ln->Merge(srcLineMult, str, IBB_IniMergeMode::Replace);
         srcBsec->UpdateAll();
         IBR_Inst_Project.RefreshLinkList = true;
+        // 增量刷新（按后端）：Merge/UpdateAll 已更新后端键值，此处从后端重建 LinkList/m_links，
+        // 只更新本条链接端点。不触发全量 refresh()（行模型 resetModel 重建期间坐标未就绪，
+        // 全量 rebuildLinkEndpoints 会读到污染值导致连线全跑模块第一个节点）。
+        refreshLinkIncremental();
+        refreshLinkEndpoint(srcId, sourceKeyName, static_cast<int>(srcLineMult), dstId);
+        auto it = m_lineModels.find(srcId);
+        if (it != m_lineModels.end() && *it) {
+            (*it)->refresh();
+            emit (*it)->sectionDataChanged(static_cast<qulonglong>(srcId));
+        }
     } });
 
-    refresh();
     return true;
+}
+
+void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &fromKey, int mult,
+                                              qulonglong dstId)
+{
+    // 增量刷新单条链接端点：改变连线状态后只更新该链接的 pa/pb。
+    // 不触发全量 rebuildLinkEndpoints（行模型 resetModel 重建期间坐标未就绪，
+    // 全量重建会读到污染坐标导致连线全跑模块第一个节点）。
+    // 复用 rebuildLinkEndpoints 的 pa/pb 优先级逻辑，仅更新匹配链接的条目。
+    constexpr float FontHeight = 13.0f;
+    const float ratio = IBR_FullView::Ratio;
+    const float fontHeightScaled = FontHeight * ratio;
+    const float halfLine = fontHeightScaled * 0.5f;
+
+    bool updated = false;
+    for (auto &link : IBR_Inst_Project.LinkList)
+    {
+        if (link.SrcModuleID != static_cast<ModuleID_t>(srcId)) continue;
+        // 修复：用字符串比较（NewPoolStr 重新生成的 ID 可能与 link.FromKey 池 ID 不一致导致匹配失败）
+        if (!fromKey.isEmpty() && QString::fromUtf8(PoolStr(link.FromKey)) != fromKey) continue;
+        if (static_cast<int>(link.SrcMult) != mult) continue;
+        // 目标端安全查找：不能用 GetSection(link.Dest)（反向索引缺失时创建滚木占位，见 rebuildLinkEndpoints）
+        auto dstIdOpt = IBR_Inst_Project.GetSectionID(link.Dest.ToDesc());
+        if (!dstIdOpt) continue;
+        if (*dstIdOpt != static_cast<ModuleID_t>(dstId)) continue;
+        auto dstRsec = IBR_Inst_Project.GetSectionFromID(*dstIdOpt);
+
+        const auto &sv = IBR_NodeSession::GetSessionValue(link.SourceID);
+
+        // ===== 起点 pa =====
+        qreal paX = 0.0, paY = 0.0;
+        bool paValid = false;
+        if (link.FromKey != EmptyPoolStr)
+        {
+            auto itSrcModel = m_lineModels.find(srcId);
+            if (itSrcModel != m_lineModels.end() && *itSrcModel)
+            {
+                QPointF srcAc = (*itSrcModel)->acceptCenterByKey(
+                    QString::fromUtf8(PoolStr(link.FromKey)), static_cast<int>(link.SrcMult));
+                if (!srcAc.isNull()) { paX = srcAc.x(); paY = srcAc.y(); paValid = true; }
+            }
+        }
+        if (!paValid && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        {
+            paX = static_cast<qreal>(sv.LastCenter.x);
+            paY = static_cast<qreal>(sv.LastCenter.y);
+            paValid = true;
+        }
+        if (!paValid)
+        {
+            auto itSrcAccept = m_sectionAcceptPoint.find(srcId);
+            if (itSrcAccept != m_sectionAcceptPoint.end() && !itSrcAccept->isNull())
+            {
+                paX = itSrcAccept->x(); paY = itSrcAccept->y(); paValid = true;
+            }
+        }
+        if (!paValid)
+        {
+            auto srcData = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
+            if (srcData)
+            {
+                ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcData->EqPos);
+                paX = static_cast<qreal>(rePos.x + fontHeightScaled * 0.7f);
+                paY = static_cast<qreal>(rePos.y + halfLine);
+                paValid = true;
+            }
+        }
+
+        // ===== 终点 pb =====
+        qreal pbX = 0.0, pbY = 0.0;
+        bool pbValid = false;
+        auto dstData = dstRsec.GetSectionData();
+        auto dstBsec = dstRsec.GetBack_Unsafe();
+        if (!sv.Collapsed && link.DestKey != EmptyPoolStr && dstData)
+        {
+            auto itModel = m_lineModels.find(static_cast<qulonglong>(dstRsec.ID));
+            if (itModel != m_lineModels.end() && *itModel)
+            {
+                QPointF ac = (*itModel)->acceptCenterByKey(
+                    QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
+                if (!ac.isNull()) { pbX = ac.x(); pbY = ac.y(); pbValid = true; }
+            }
+        }
+        if (!pbValid)
+        {
+            auto itAccept = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstRsec.ID));
+            if (itAccept != m_sectionAcceptPoint.end() && !itAccept->isNull())
+            {
+                pbX = itAccept->x(); pbY = itAccept->y(); pbValid = true;
+            }
+        }
+        if (!pbValid && dstData)
+        {
+            ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+            pbX = static_cast<qreal>(rePos.x + fontHeightScaled * 0.7f);
+            pbY = static_cast<qreal>(rePos.y + halfLine);
+            pbValid = true;
+        }
+
+        // ===== 更新端点表 =====
+        QString mapKey = QString::number(static_cast<qulonglong>(link.SourceID))
+                         + QLatin1String(":")
+                         + QString::number(static_cast<qulonglong>(dstRsec.ID));
+        QVariantMap ep;
+        const bool wasPresent = m_linkEndpointsMap.contains(mapKey);
+        if (wasPresent)
+            ep = m_linkEndpointsMap.value(mapKey).toMap();
+        ep["sessionId"] = QString::number(static_cast<qulonglong>(link.SourceID));
+        ep["destId"] = QString::number(static_cast<qulonglong>(dstRsec.ID));
+        ep["x"] = paX; ep["y"] = paY;
+        ep["pbX"] = pbX; ep["pbY"] = pbY; ep["pbValid"] = pbValid;
+        ep["isCollapsed"] = sv.Collapsed;
+        // 修复：map 与 list 必须同步更新（新链接 append 到 list 时也必须 insert map，
+        // 否则 LinkRenderer 查 map 找不到该条导致连线渲染错位/丢失）
+        m_linkEndpointsMap.insert(mapKey, ep);
+        if (!wasPresent)
+            m_linkEndpoints.append(ep);
+        for (int i = 0; i < m_linkEndpoints.size(); ++i)
+        {
+            QVariantMap e2 = m_linkEndpoints[i].toMap();
+            if (e2.value("sessionId").toString() == ep["sessionId"].toString()
+                && e2.value("destId").toString() == ep["destId"].toString())
+            {
+                e2["x"] = paX; e2["y"] = paY;
+                e2["pbX"] = pbX; e2["pbY"] = pbY; e2["pbValid"] = pbValid;
+                m_linkEndpoints[i] = e2;
+                break;
+            }
+        }
+        updated = true;
+    }
+
+    if (updated)
+    {
+        emit linkEndpointsChanged();
+    }
 }
 
 int WorkspaceController::checkMergePreview(qulonglong sourceId, qulonglong destId,
@@ -2317,39 +3070,35 @@ QString WorkspaceController::mergePreviewText(qulonglong sourceId, qulonglong de
 void WorkspaceController::toggleIgnore(qulonglong sectionId)
 {
     // 对应 IBR_SectionData.cpp:629-644 Ignore/NoIgnore 智能互斥
+    // 同步修改：SendToR 延迟到下一 tick 执行，而 refresh() 立即重建会读到旧值
+    // （画布永远不更新）。与 FreezeSelected/SectionListModel::freeze 同风格，GUI 线程直接改。
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
-            it->second.Ignore = !it->second.Ignore;
-        }
-    } });
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
+        it->second.Ignore = !it->second.Ignore;
+    }
     refresh();
 }
 
 void WorkspaceController::toggleFreeze(qulonglong sectionId)
 {
-    // 对应 IBR_SectionData.cpp:645-660 FreezeSec/UnfreezeSec 智能互斥
+    // 对应 IBR_SectionData.cpp:645-660 FreezeSec/UnfreezeSec 智能互斥（同步修改，见 toggleIgnore 注释）
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
-            it->second.Frozen = !it->second.Frozen;
-        }
-    } });
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
+        it->second.Frozen = !it->second.Frozen;
+    }
     refresh();
 }
 
 void WorkspaceController::toggleHide(qulonglong sectionId)
 {
-    // 对应 IBR_SectionData.cpp:661-676 HideSec/ShowSec 智能互斥
+    // 对应 IBR_SectionData.cpp:661-676 HideSec/ShowSec 智能互斥（同步修改，见 toggleIgnore 注释）
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
-            it->second.Hidden = !it->second.Hidden;
-        }
-    } });
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
+        it->second.Hidden = !it->second.Hidden;
+    }
     refresh();
 }
 

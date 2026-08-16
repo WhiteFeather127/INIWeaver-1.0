@@ -4,6 +4,7 @@
 import QtQuick
 import QtQuick.Controls
 import INIWeaver
+import "../components"
 
 Item {
     id: workspaceView
@@ -11,6 +12,38 @@ Item {
     // Layout 会自动设置 x/y/width/height，使用 anchors 会导致 undefined behavior
     // clip: true 防止模块节点溢出到侧边栏/菜单栏之上
     clip: true
+
+    // 拖拽预览框（文件末尾 dragPreview）暴露为属性：
+    // QML 中 id 不能通过 "." 从其他组件文件访问，子组件（LinkNodePoint/SectionNode）
+    // 必须经此属性更新预览框位置（跟随鼠标）
+    property alias dragPreviewItem: dragPreview
+
+    // 缩放补间动画（QML 端驱动，渲染线程与帧同步）
+    // 参考 GraphFlow（Qt/QML 节点图编辑器）：缩放动画放 QML 侧由 QQuickWindow
+    // 动画驱动推进，避免 C++ QVariantAnimation 定时器 tick 与渲染循环不同步
+    // 造成的跳帧/低帧率。C++ onWheel 只设定目标 Ratio 与锚点并 emit zoomTweenRequested，
+    // 本动画每渲染帧更新 zoomAnimRatio 并调 applyZoomRatio 应用到 C++ 全局态。
+    // zoomAnimRatio 故意非绑定：动画期间由 NumberAnimation 独占控制，不受 C++ 回写干扰
+    property real zoomAnimRatio: 1.0
+    // 动画每帧写入 zoomAnimRatio 时应用到 C++ 全局态（NumberAnimation 无 onValueChanged
+    // 信号处理器，用属性变化处理器驱动：Ratio/EqCenter/拖拽基准修正/dragOffset/预览线
+    // 在 C++ applyZoomRatio 内原子完成）
+    onZoomAnimRatioChanged: workspaceController.applyZoomRatio(zoomAnimRatio)
+    // restart/abort 的瞬停抑制：stop() 同步触发 onRunningChanged(false)，此时不应收尾
+    property bool zoomSuppressFinish: false
+
+    NumberAnimation {
+        id: zoomTweenAnim
+        target: workspaceView
+        property: "zoomAnimRatio"
+        duration: 120
+        easing.type: Easing.OutCubic
+        onRunningChanged: {
+            // 正常结束才收尾（restart/abort 的瞬停被 zoomSuppressFinish 抑制）
+            if (!running && !workspaceView.zoomSuppressFinish)
+                workspaceController.zoomTweenFinished()
+        }
+    }
 
     // 同步视口尺寸到 C++ IBR_RealCenter，供 EqPosToRePos 计算屏幕坐标
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
@@ -90,6 +123,23 @@ Item {
         function onDraggingLinkCleared() {
             draggingLinkCanvas.visible = false
         }
+        // 缩放补间启动/续接（C++ 滚轮事件触发）：从当前实际 Ratio 向新目标平滑过渡，
+        // 连续滚轮续接不跳变。restart 的 stop() 瞬停由 zoomSuppressFinish 抑制收尾。
+        function onZoomTweenRequested() {
+            workspaceView.zoomSuppressFinish = true
+            zoomTweenAnim.stop()
+            zoomTweenAnim.from = workspaceController.ratio
+            zoomTweenAnim.to = workspaceController.zoomTargetRatio
+            zoomTweenAnim.start()
+            workspaceView.zoomSuppressFinish = false
+        }
+        // 缩放补间强制中止（C++ 收尾路径清 zoomPending 前调用）：
+        // Ratio 已由 C++ 直接推到目标，这里只停动画，不再逐帧改值
+        function onZoomTweenAbortRequested() {
+            workspaceView.zoomSuppressFinish = true
+            zoomTweenAnim.stop()
+            workspaceView.zoomSuppressFinish = false
+        }
     }
 
     // 工作区背景
@@ -97,33 +147,58 @@ Item {
         anchors.fill: parent
         color: "#1e1e1e"
 
-        // 网格背景（视觉参考）
-        // D23：网格随 ratio 缩放，保持视觉密度一致
+        // 网格背景（视觉参考）——网格固定在 Eq 世界坐标系上：
+        // 网格线与模块保持相对位置，平移画布（EqCenter 变化）/缩放（ratio 变化）时
+        // 网格随世界坐标同步移动（对应 ImGui 原版网格随视口移动的行为，而非固定屏幕网格）。
+        // 参考：QML 无限画布方案（startX = floor(-translate/zoom/grid)*grid 只画可视区域）
         Canvas {
+            id: gridCanvas
             anchors.fill: parent
             property real ratio: workspaceController.ratio
+            property real ecX: workspaceController.eqCenter.x
+            property real ecY: workspaceController.eqCenter.y
             onRatioChanged: requestPaint()
+            onEcXChanged: requestPaint()
+            onEcYChanged: requestPaint()
 
             onPaint: {
                 var ctx = getContext("2d");
                 ctx.reset();
                 ctx.strokeStyle = "#252525";
                 ctx.lineWidth = 1;
-                // D23：网格尺寸随 ratio 缩放（对应 ImGui Style.ScaleAllSizes(Ratio)）
-                var gridSize = 40 * ratio;
-                if (gridSize < 8) gridSize = 8;  // 防止过度缩小
-                for (var x = 0; x < width; x += gridSize) {
-                    ctx.beginPath();
-                    ctx.moveTo(x, 0);
-                    ctx.lineTo(x, height);
-                    ctx.stroke();
+                var vx = width / 2, vy = height / 2;
+                // 世界网格间距（Eq 单位，对应基准 40px @ ratio=1）
+                var gridEq = 40;
+                // 缩放时保持视觉密度：屏幕间距过小（<16px）时倍增世界间距，
+                // 防止 ratio 很小（缩小）时网格线过密导致性能与视觉问题
+                var screenGap = gridEq * ratio;
+                while (screenGap < 16 && gridEq < 2560) {
+                    gridEq *= 2;
+                    screenGap = gridEq * ratio;
                 }
-                for (var y = 0; y < height; y += gridSize) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, y);
-                    ctx.lineTo(width, y);
-                    ctx.stroke();
+                // 可视范围对应的 Eq 区间（只画可视区域，避免全屏过多线条）
+                var leftEq = ecX - vx / ratio;
+                var rightEq = ecX + vx / ratio;
+                var topEq = ecY - vy / ratio;
+                var bottomEq = ecY + vy / ratio;
+                // 从可视区域内第一条网格线开始（floor 到 gridEq 整数倍，参考无限画布方案）
+                var startEqX = Math.floor(leftEq / gridEq) * gridEq;
+                var startEqY = Math.floor(topEq / gridEq) * gridEq;
+                // 单 path 一次 stroke 画全部网格线（原逐线 beginPath+stroke 的状态切换
+                // 在缩放补间每帧重绘时是明显开销，合并后大幅降低 Canvas 重绘成本）
+                // 屏幕坐标 = (eqX - eqCenter) * ratio + 视口中心（与 SectionNode 同公式）
+                ctx.beginPath();
+                for (var ex = startEqX; ex <= rightEq; ex += gridEq) {
+                    var sx = (ex - ecX) * ratio + vx;
+                    ctx.moveTo(sx, 0);
+                    ctx.lineTo(sx, height);
                 }
+                for (var ey = startEqY; ey <= bottomEq; ey += gridEq) {
+                    var sy = (ey - ecY) * ratio + vy;
+                    ctx.moveTo(0, sy);
+                    ctx.lineTo(width, sy);
+                }
+                ctx.stroke();
             }
         }
     }
@@ -140,6 +215,8 @@ Item {
         ratio: workspaceController.ratio
         // 阶段 2：传入 dragOffset，拖拽中实时更新连线端点
         dragOffset: workspaceController.dragOffset
+        // 画布平移偏移：拖动画布时端点表保持快照，渲染叠加此偏移与节点移动保持一致
+        canvasOffset: workspaceController.canvasDragOffset
     }
 
     // 鼠标交互区（空白处）
@@ -207,28 +284,32 @@ Item {
     // 节点拖拽中：根据 dragOffset（屏幕坐标偏移）实时更新位置，避免每帧 refresh
     Repeater {
         id: sectionRepeater
-        model: workspaceController.sections
+        // 增量模型（QAbstractListModel）：新建/删除模块时只增删变化的 delegate，
+        // 避免整表替换重建全部 SectionNode（卡顿根因）
+        model: workspaceController.sectionsModel
 
         SectionNode {
             id: sectionDelegate
-            sectionData: modelData
+            // QAbstractItemModel 的 delegate 中 modelData 不生成（Qt6 实测 undefined），
+            // 改用 role 访问：roleNames 定义了 "sectionData" role
+            sectionData: model.sectionData
             // z 高于背景 MouseArea（z=0），确保节点 MouseArea 优先接收事件
             z: 1
             // 性能优化：本地缓存的 EqPos，拖拽结束时通过 sectionPositionChanged 信号更新
             // 避免全量 refresh() 重建 Repeater 导致连续拖拽卡顿
-            property real localEqX: modelData.eqX
-            property real localEqY: modelData.eqY
+            property real localEqX: sectionData.eqX
+            property real localEqY: sectionData.eqY
             // 根据 EqPos 和当前 EqCenter 实时计算屏幕坐标
             // 拖拽中实时应用 dragOffset，节点跟随鼠标移动
-            // 注意：用 isSelected（动态绑定）而非 modelData.selected（快照值）
-            //   选中状态变化后 sections 列表未重建，modelData.selected 仍是旧值，
+            // 注意：用 isSelected（动态绑定）而非 sectionData.selected（快照值）
+            //   选中状态变化后 sections 列表未重建，sectionData.selected 仍是旧值，
             //   会导致多节点拖拽时不应用 dragOffset（节点不跟随鼠标）
             x: (localEqX - workspaceController.eqCenter.x) * workspaceController.ratio + workspaceView.width / 2
-              + ((modelData.sectionId === workspaceController.draggingSectionId
+              + ((sectionData.sectionId === workspaceController.draggingSectionId
                   || (workspaceController.massDragging && isSelected))
                  ? workspaceController.dragOffset.x : 0)
             y: (localEqY - workspaceController.eqCenter.y) * workspaceController.ratio + workspaceView.height / 2
-              + ((modelData.sectionId === workspaceController.draggingSectionId
+              + ((sectionData.sectionId === workspaceController.draggingSectionId
                   || (workspaceController.massDragging && isSelected))
                  ? workspaceController.dragOffset.y : 0)
             // 尺寸完全由 Qt 内容驱动（不依赖 ImGui 的 EqW/EqH）
@@ -238,13 +319,15 @@ Item {
             height: implicitHeight
             // 渲染后回报实际屏幕尺寸到 C++，同步 sd.EqSize（对应 ImGui 实时更新 EqSize）
             // 框选命中检测依赖准确的 EqSize，否则框选位置和命中模块不一致
-            onWidthChanged: workspaceController.reportSectionSize(modelData.sectionId, width, height)
-            onHeightChanged: workspaceController.reportSectionSize(modelData.sectionId, width, height)
-            Component.onCompleted: workspaceController.reportSectionSize(modelData.sectionId, width, height)
+            // 缩放方案：width/height 为逻辑尺寸（内部已 scale=_r），回报需乘 _r 得视觉尺寸，
+            // 否则 EqSize = 逻辑/ratio 会随缩放漂移。仅在逻辑尺寸变化时触发（缩放不变）→ 天然节流
+            onWidthChanged: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            onHeightChanged: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            Component.onCompleted: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
             isSelected: {
                 // 性能优化：通过 selectedRevision 触发重新评估，不依赖全量 refresh
                 workspaceController.selectedRevision
-                return workspaceController.isSectionSelected(modelData.sectionId)
+                return workspaceController.isSectionSelected(sectionData.sectionId)
             }
             // 性能优化：拖拽结束时只更新被拖拽节点的位置，不重建整个 Repeater
             // 注意：不调用 getSectionData（会触发 buildSectionItem → SectionLineModel::refresh，
@@ -252,8 +335,8 @@ Item {
             Connections {
                 target: workspaceController
                 function onSectionPositionChanged(sid) {
-                    if (sid === modelData.sectionId) {
-                        var pos = workspaceController.getSectionEqPos(modelData.sectionId)
+                    if (sid === sectionData.sectionId) {
+                        var pos = workspaceController.getSectionEqPos(sectionData.sectionId)
                         sectionDelegate.localEqX = pos.x
                         sectionDelegate.localEqY = pos.y
                     }
@@ -274,16 +357,75 @@ Item {
         height: workspaceController.selectionRect.height * workspaceController.ratio
     }
 
-    // 右键菜单
-    ContextMenu {
-        id: contextMenu
+    // ===== 右键菜单（单例统一，host 定义于 Main.qml 根级，此处经动态作用域引用）=====
+    // 所有右键入口统一经 contextMenuHost.show() 提交内容（对齐 ImGui IBR_PopupManager 单例）
+
+    // 多选态菜单内容（对应 ImGui MassAfter 右键，IBR_WorkSpace.cpp:1196-1311）
+    // 顺序：复制 → 剪切 → 粘贴 → 忽略/取消忽略 → 冻结/解冻 → 隐藏/显示 → 缩合 → 导出模块 → 克隆 → 删除
+    function massAfterDescs() {
+        var descs = []
+        if (workspaceController.massTargetIds().length === 0) return descs
+        descs.push({ type: "item", text: qsTr("复制"), action: "copy" })
+        descs.push({ type: "item", text: qsTr("剪切"), action: "cut" })
+        descs.push({ type: "item", text: qsTr("粘贴"), action: "paste" })
+        // 智能互斥：全忽略只显示"取消忽略"，否则只显示"忽略"；冻结/隐藏同理
+        if (workspaceController.selectedAllIgnored())
+            descs.push({ type: "item", text: qsTr("取消忽略"), action: "unignore" })
+        else
+            descs.push({ type: "item", text: qsTr("忽略"), action: "ignore" })
+        if (workspaceController.selectedAllFrozen())
+            descs.push({ type: "item", text: qsTr("解冻"), action: "unfreeze" })
+        else
+            descs.push({ type: "item", text: qsTr("冻结"), action: "freeze" })
+        if (workspaceController.selectedAllHidden())
+            descs.push({ type: "item", text: qsTr("显示"), action: "show" })
+        else
+            descs.push({ type: "item", text: qsTr("隐藏"), action: "hide" })
+        descs.push({ type: "item", text: qsTr("缩合"), action: "compose" })
+        descs.push({ type: "item", text: qsTr("导出模块"), action: "outputModule" })
+        descs.push({ type: "item", text: qsTr("克隆"), action: "duplicate" })
+        descs.push({ type: "item", text: qsTr("删除"), action: "delete" })
+        return descs
+    }
+
+    // 多选态动作分发
+    function dispatchMassAction(action) {
+        switch (action) {
+        case "copy":        workspaceController.copySelected(); break
+        case "cut":         workspaceController.cutSelected(); break
+        case "paste":       workspaceController.paste(); break
+        case "unignore":    workspaceController.ignoreSelected(false); break
+        case "ignore":      workspaceController.ignoreSelected(true); break
+        case "unfreeze":    workspaceController.freezeSelected(false); break
+        case "freeze":      workspaceController.freezeSelected(true); break
+        case "show":        workspaceController.hideSelected(false); break
+        case "hide":        workspaceController.hideSelected(true); break
+        case "compose":     workspaceController.composeSelected(); break
+        case "outputModule": workspaceController.requestOutputModuleDialog(); break
+        case "duplicate":   workspaceController.duplicateSelected(); break
+        case "delete":      workspaceController.deleteSelected(); break
+        }
+    }
+
+    // 空白右键动作分发（模块树项在 host 内部处理，这里只处理操作项）
+    function dispatchEmptyAction(action) {
+        switch (action) {
+        case "selectAll":      workspaceController.selectAll(); break
+        case "paste":          workspaceController.paste(); break
+        case "refreshRegName": projectController.refreshAllRegName(); break
+        }
     }
 
     // 连接右键菜单信号
     Connections {
         target: workspaceController
         function onContextMenuRequested(x, y) {
-            contextMenu.popup(x, y)
+            var g = workspaceView.mapToGlobal(x, y)
+            // 有选中模块 → 多选操作菜单；无选中（空白右键）→ 模块树菜单
+            if (workspaceController.massTargetIds().length > 0)
+                contextMenuHost.show(workspaceView.massAfterDescs(), g.x, g.y, (a) => workspaceView.dispatchMassAction(a))
+            else
+                contextMenuHost.show(contextMenuHost.moduleTreeDescs(), g.x, g.y, (a) => workspaceView.dispatchEmptyAction(a))
         }
     }
 
@@ -303,5 +445,47 @@ Item {
         color: "#5a5a5a"
         font.pixelSize: 14
         text: qsTr("请先打开或新建项目")
+    }
+
+    // 拖拽目标预览（对应 ImGui DrawDragPreviewIcon，IBR_SectionData.cpp:108-129）
+    // ImGui 原版 BeginDragDropSource 内的内容作为拖拽图像跟随鼠标显示（对勾/叉 + "链接到: ..."文本）。
+    // 放在 workspaceView 最上层（z=200 > 节点最高 z=100），确保不被任何块遮挡；
+    // 位置由拖拽源（键行圆点/标题栏圆点）onPositionChanged 更新（workspaceView 坐标）。
+    // 有效（蓝）→ 对勾；无效（红/橙）→ 叉；边框随状态色，使其明显。
+    Item {
+        id: dragPreview
+        x: -1000
+        y: -1000
+        z: 200
+        visible: workspaceController.dragTargetSectionId
+        width: dragPreviewRow.implicitWidth + 6
+        height: dragPreviewRow.implicitHeight + 4
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#e6262626"
+            radius: 3
+            border.color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+            border.width: 1
+        }
+        Row {
+            id: dragPreviewRow
+            anchors.left: parent.left
+            anchors.leftMargin: 3
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            // 对勾 / 叉（对应 DrawCheckmark / DrawCross）
+            Text {
+                text: workspaceController.dragTargetColor === "#4fc3f7" ? "✓" : "✕"
+                color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+                font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+            }
+            // 预览文本（"链接到: Xxx -> Yyy" / "无效链接" / "类型不匹配" 等）
+            Text {
+                text: workspaceController.dragTargetText
+                color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+                font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+            }
+        }
     }
 }
