@@ -258,7 +258,10 @@ ApplicationWindow {
                     sections: workspaceController.sections
                     // 视图窗口不画画布边缘外框（侧边栏内嵌保留，见 ViewPanel）
                     showWorldBorder: false
-                    // 视图窗口画布大小固定，不随视口拖动变化（includeViewportInWorld 默认 false）
+                    // 画布大小与侧边栏同步（含视口，includeViewportInWorld=true）：
+                    // 视图框拖出模块范围时画布随之扩展，保证视图框始终在画布内，
+                    // 拖到迷你地图显示框边缘即停，不会出框被裁剪
+                    includeViewportInWorld: true
                     viewRect: {
                         // 与 ViewPanel 同款：依赖 eqCenter/ratio，viewportEqRect 的 NOTIFY 只有
                         // workspaceRectChanged，平移/缩放后视图框必须跟随更新
