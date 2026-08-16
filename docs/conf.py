@@ -17,8 +17,8 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'INIWeaver'
-copyright = '2025, The INIWeaver Authors'
+project = 'INIBrowser'
+copyright = '2025, Kenosis'
 author = 'ProsperousBeyond'
 
 
