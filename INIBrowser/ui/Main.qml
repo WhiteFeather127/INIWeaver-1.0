@@ -323,44 +323,48 @@ ApplicationWindow {
             }
         }
 
-        // ---- 全方向 resize 热区（判定严格在窗口最外沿边框线 1px 上，不进入画布）----
-        // 四边：左右改宽、上下改高（中间段，避开四角）
+        // ---- 全方向 resize 热区（四边贴窗口最外沿边框线，四角 6x6 在角点，互不重叠）----
+        // 四边：沿窗口最外沿 3px，左右/上下避开 6px 让出四角；主方向 margin=0 贴边
         MouseArea {
             anchors.left: parent.left
+            anchors.leftMargin: 6
             anchors.right: parent.right
+            anchors.rightMargin: 6
             anchors.top: parent.top
-            anchors.topMargin: 6
-            height: 1
+            height: 3
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "t") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
             anchors.left: parent.left
+            anchors.leftMargin: 6
             anchors.right: parent.right
+            anchors.rightMargin: 6
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 6
-            height: 1
+            height: 3
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "b") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
             anchors.top: parent.top
+            anchors.topMargin: 6
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
             anchors.left: parent.left
-            anchors.leftMargin: 6
-            width: 1
+            width: 3
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "l") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
             anchors.top: parent.top
+            anchors.topMargin: 6
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
             anchors.right: parent.right
-            anchors.rightMargin: 6
-            width: 1
+            width: 3
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "r") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
