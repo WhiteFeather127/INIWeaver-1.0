@@ -370,3 +370,6 @@ FodyWeavers.xsd
 
 # CMake-derived solution at source root（由 sync-sln.ps1 从 build\INIWeaver.sln 派生，不进 git）
 /INIWeaver.sln
+
+# CMake binary directory（cmake 自动生成 .vcxproj + Qt6 代码生成 + .obj 中间产物，可随时删除由 cmake+MSBuild 重建）
+/build/
