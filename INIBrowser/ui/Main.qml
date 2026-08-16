@@ -246,6 +246,9 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
+                // 四周留 4px 边框区：窗口边框线（0-1px）+ 深色边框带（1-4px）与画布分离，
+                // resize 热区（0-3px）只在边框区触发，画布（迷你地图）边缘不再误触 resize
+                anchors.margins: 4
                 spacing: 0
 
                 // 无边框窗口的自定义标题条：拖动移动窗口 + 关闭按钮
@@ -368,9 +371,10 @@ ApplicationWindow {
         }
 
         // 四角：同时改宽高（右上与关闭按钮重叠，关闭优先）
+        // 6x6 基本落在边框区（0-4px），仅延伸画布角 2px，误触最小化
         MouseArea {
-            width: 8
-            height: 8
+            width: 6
+            height: 6
             anchors.left: parent.left
             anchors.top: parent.top
             cursorShape: Qt.SizeFDiagCursor
@@ -378,8 +382,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 8
-            height: 8
+            width: 6
+            height: 6
             anchors.right: parent.right
             anchors.top: parent.top
             cursorShape: Qt.SizeBDiagCursor
@@ -387,8 +391,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 8
-            height: 8
+            width: 6
+            height: 6
             anchors.left: parent.left
             anchors.bottom: parent.bottom
             cursorShape: Qt.SizeBDiagCursor
@@ -396,8 +400,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 8
-            height: 8
+            width: 6
+            height: 6
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             cursorShape: Qt.SizeFDiagCursor
