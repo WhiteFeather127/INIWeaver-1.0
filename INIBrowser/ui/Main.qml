@@ -323,14 +323,15 @@ ApplicationWindow {
             }
         }
 
-        // ---- 全方向 resize 热区（边 5px，角 12x12，角优先于边）----
+        // ---- 全方向 resize 热区（紧贴窗口边框外沿，不侵占画布交互区）----
+        // 四边 3px、四角 8x8：只覆盖边框附近的极小区域，迷你地图主体仍可点击定位
         // 四边：左右改宽、上下改高（中间段，避开四角）
         MouseArea {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: 12
-            height: 5
+            anchors.topMargin: 8
+            height: 3
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "t") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -339,8 +340,8 @@ ApplicationWindow {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 12
-            height: 5
+            anchors.bottomMargin: 8
+            height: 3
             cursorShape: Qt.SizeVerCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "b") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -349,8 +350,8 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.left: parent.left
-            anchors.leftMargin: 12
-            width: 5
+            anchors.leftMargin: 8
+            width: 3
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "l") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -359,8 +360,8 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.right: parent.right
-            anchors.rightMargin: 12
-            width: 5
+            anchors.rightMargin: 8
+            width: 3
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsBegin(gp.x, gp.y, "r") }
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
@@ -368,8 +369,8 @@ ApplicationWindow {
 
         // 四角：同时改宽高（右上与关闭按钮重叠，关闭优先）
         MouseArea {
-            width: 12
-            height: 12
+            width: 8
+            height: 8
             anchors.left: parent.left
             anchors.top: parent.top
             cursorShape: Qt.SizeFDiagCursor
@@ -377,8 +378,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 12
-            height: 12
+            width: 8
+            height: 8
             anchors.right: parent.right
             anchors.top: parent.top
             cursorShape: Qt.SizeBDiagCursor
@@ -386,8 +387,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 12
-            height: 12
+            width: 8
+            height: 8
             anchors.left: parent.left
             anchors.bottom: parent.bottom
             cursorShape: Qt.SizeBDiagCursor
@@ -395,8 +396,8 @@ ApplicationWindow {
             onPositionChanged: (mouse) => { if (pressed) { var gp = mapToGlobal(mouse.x, mouse.y); miniMapWindow._rsUpdate(gp.x, gp.y) } }
         }
         MouseArea {
-            width: 12
-            height: 12
+            width: 8
+            height: 8
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             cursorShape: Qt.SizeFDiagCursor
