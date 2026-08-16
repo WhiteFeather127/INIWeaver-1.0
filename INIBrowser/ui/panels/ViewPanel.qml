@@ -128,6 +128,7 @@ Item {
             Layout.fillHeight: true
             Layout.minimumHeight: 200
             sections: workspaceController.sections
+            // 侧边栏保留画布边缘外框（showWorldBorder 默认 true，仅视图窗口关闭）
             viewRect: {
                 // 显式依赖 eqCenter/ratio：viewportEqRect 的 NOTIFY 只有 workspaceRectChanged，
                 // 平移（eqCenterChanged）/缩放（ratioChanged）后视图框必须跟随更新，

@@ -256,6 +256,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     sections: workspaceController.sections
+                    // 视图窗口不画画布边缘外框（侧边栏内嵌保留，见 ViewPanel）
+                    showWorldBorder: false
                     viewRect: {
                         // 与 ViewPanel 同款：依赖 eqCenter/ratio，viewportEqRect 的 NOTIFY 只有
                         // workspaceRectChanged，平移/缩放后视图框必须跟随更新

@@ -15,6 +15,10 @@ Canvas {
     // true 时视图框用 CenterCrossColor，false 时用 ClipFrameLineColor
     property bool isBgDragging: false
 
+    // 画布边缘外框（world bounds 轮廓）显示开关：
+    // 侧边栏内嵌迷你地图保留（默认 true）；独立"视图窗口"不画（Main.qml 设 false）
+    property bool showWorldBorder: true
+
     // 点击定位信号
     signal clicked(variant eqPos)
 
@@ -58,6 +62,16 @@ Canvas {
                 x: (x - minX) * scale + offsetX,
                 y: (y - minY) * scale + offsetY
             };
+        }
+
+        // 画布外框（world bounds 轮廓，仅模块范围）：侧边栏内嵌迷你地图保留，
+        // 视图窗口通过 showWorldBorder=false 关闭（用户要求：侧边栏保留、浮窗不画）
+        if (root.showWorldBorder) {
+            var wUL = eqToMini(minX, minY);
+            var wDR = eqToMini(maxX, maxY);
+            ctx.strokeStyle = "#3c3c3c";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(wUL.x, wUL.y, wDR.x - wUL.x, wDR.y - wUL.y);
         }
 
         // 绘制 Section 矩形
