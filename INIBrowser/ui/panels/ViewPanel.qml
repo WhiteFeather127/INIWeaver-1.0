@@ -129,6 +129,8 @@ Item {
             Layout.minimumHeight: 200
             sections: workspaceController.sections
             // 侧边栏保留画布边缘外框（showWorldBorder 默认 true，仅视图窗口关闭）
+            // 画布大小随视口变化：视图框拖到画布外时画布扩展（对齐 ImGui；视图窗口固定不扩）
+            includeViewportInWorld: true
             viewRect: {
                 // 显式依赖 eqCenter/ratio：viewportEqRect 的 NOTIFY 只有 workspaceRectChanged，
                 // 平移（eqCenterChanged）/缩放（ratioChanged）后视图框必须跟随更新，

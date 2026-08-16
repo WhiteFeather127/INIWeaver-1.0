@@ -19,6 +19,12 @@ Canvas {
     // 侧边栏内嵌迷你地图保留（默认 true）；独立"视图窗口"不画（Main.qml 设 false）
     property bool showWorldBorder: true
 
+    // 画布大小是否随视口变化（world bounds 是否包含 viewRect）：
+    // 侧边栏（ViewPanel）开启 true：视图框拖到模块范围以外时画布随之扩展（对齐 ImGui
+    // UpdateCurrentEqMax 画布随内容扩展的行为）；
+    // 视图窗口（Main.qml）保持 false：画布大小固定，不随拖动位置改变
+    property bool includeViewportInWorld: false
+
     // 点击定位信号
     signal clicked(variant eqPos)
 
@@ -34,8 +40,8 @@ Canvas {
         if (sections.length === 0) return;
 
         // 计算所有 Section 的边界
-        // 注意：world bounds 仅由模块范围决定，不包含视口（用户要求：
-        // 画布大小不随拖动位置到边缘而改变，避免迷你地图随视野缩放跳动）
+        // world bounds 默认仅由模块范围决定；侧边栏（includeViewportInWorld=true）时
+        // 额外包含视口：视图框拖到模块范围以外会撑大画布（对齐 ImGui 画布随内容扩展）
         var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (var i = 0; i < sections.length; i++) {
             var s = sections[i];
@@ -43,6 +49,14 @@ Canvas {
             minY = Math.min(minY, s.eqY);
             maxX = Math.max(maxX, s.eqX + s.eqW);
             maxY = Math.max(maxY, s.eqY + s.eqH);
+        }
+
+        // 侧边栏：画布大小跟随视口（视图框拖出画布外时扩展）
+        if (root.includeViewportInWorld) {
+            minX = Math.min(minX, viewRect.x);
+            minY = Math.min(minY, viewRect.y);
+            maxX = Math.max(maxX, viewRect.x + viewRect.w);
+            maxY = Math.max(maxY, viewRect.y + viewRect.h);
         }
 
         var worldW = maxX - minX;
@@ -129,7 +143,7 @@ Canvas {
     }
 
     // 逆变换：迷你地图坐标 -> Eq 坐标，发出 clicked 信号
-    // 注意：与 onPaint 一致，world bounds 仅由模块范围决定（不包含视口）
+    // 注意：与 onPaint 一致，world bounds 按 includeViewportInWorld 决定是否含视口
     function locateTo(mx, my) {
         if (sections.length === 0) return;
 
@@ -140,6 +154,13 @@ Canvas {
             minY = Math.min(minY, s.eqY);
             maxX = Math.max(maxX, s.eqX + s.eqW);
             maxY = Math.max(maxY, s.eqY + s.eqH);
+        }
+        // 侧边栏：画布大小跟随视口（与 onPaint 一致）
+        if (root.includeViewportInWorld) {
+            minX = Math.min(minX, viewRect.x);
+            minY = Math.min(minY, viewRect.y);
+            maxX = Math.max(maxX, viewRect.x + viewRect.w);
+            maxY = Math.max(maxY, viewRect.y + viewRect.h);
         }
 
         var worldW = maxX - minX;
