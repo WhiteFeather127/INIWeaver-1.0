@@ -4,7 +4,7 @@
 Info<../Info.md>
 ```
 
-```{include} ../README.txt
+```{include} ../README.md
 :relative-docs: docs/
 :relative-images:
 ```
