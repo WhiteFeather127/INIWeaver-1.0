@@ -2,6 +2,10 @@
 
 [English version](README.md) | 简体中文
 
+> 本仓库 fork 自 [ra2diy/INIWeaver-1.0](https://github.com/ra2diy/INIWeaver-1.0)，
+> 在上游 Qt6 + QML 代码基础之上继续开发。上游全部提交历史保留在本仓库 git log 里，
+> 感谢上游社区的贡献者在上游打下的基础。
+
 INI Weaver 是面向《红警 2 / 尤里复仇》modder 的可视化 INI 编辑器。
 不再在记事本里手抄一节节 `<section>` 跨文件拼 flag，而是在无限画布上
 拖出现成的模块，在它们的连接点之间拉线 —— 编辑器帮你把它写成 INI。
@@ -109,7 +113,14 @@ build\                 CMake 构建目录（被 git 忽略）
 
 ## 许可证
 
-[LGPL-2.1-or-later](LICENSE.txt) —— © 2025 Kenosis，作者 ProsperousBeyond。
+[LGPL-2.1-or-later](LICENSE.txt) —— © 2025 The INIWeaver Authors。
+本仓库 fork 自 [ra2diy/INIWeaver-1.0](https://github.com/ra2diy/INIWeaver-1.0)。
+
+贡献者（按项目"关于"面板致谢顺序）：
+- **Ironhammer Std**（钢铁之锤）—— 上游原始作者
+- **Kenosis**
+- **WhiteFeather127**（白羽鸽）—— 本 fork 维护者
+- **九千天华**
 
 INI Weaver 集成了
 [Dear ImGui](https://github.com/ocornut/imgui)、

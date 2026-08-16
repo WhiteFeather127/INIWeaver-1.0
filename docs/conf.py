@@ -1,4 +1,4 @@
-# Configuration file for the Sphinx documentation builder.
+﻿# Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
 # list see the documentation:
@@ -17,9 +17,9 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'INIBrowser'
-copyright = '2025, Kenosis'
-author = 'ProsperousBeyond'
+project = 'INIWeaver'
+copyright = '2025, The INIWeaver Authors'
+author = 'Ironhammer Std, Kenosis, WhiteFeather127, 九千天华'
 
 
 

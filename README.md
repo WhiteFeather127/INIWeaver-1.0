@@ -2,6 +2,11 @@
 
 [中文版本](README.zh-CN.md) | English
 
+> Fork of [ra2diy/INIWeaver-1.0](https://github.com/ra2diy/INIWeaver-1.0), built
+> on top of the upstream Qt6 + QML codebase. The full upstream history is
+> preserved in this repository's git log; many thanks to the upstream
+> contributors who built INIWeaver before this fork.
+
 INI Weaver is a visual INI editor for Red Alert 2 / Yuri's Revenge modders.
 Instead of copy-pasting `<section>` snippets by hand in Notepad and wiring
 flags across many files, you drag pre-made modules onto an infinite canvas
@@ -117,7 +122,14 @@ build\                 CMake binary directory (git-ignored)
 
 ## License
 
-[LGPL-2.1-or-later](LICENSE.txt) — © 2025 Kenosis, author ProsperousBeyond.
+[LGPL-2.1-or-later](LICENSE.txt) — © 2025 The INIWeaver Authors.
+This repository is a fork of [ra2diy/INIWeaver-1.0](https://github.com/ra2diy/INIWeaver-1.0).
+
+Contributors (in the order credited by the project's About panel):
+- **Ironhammer Std** (钢铁之锤) — upstream original author
+- **Kenosis**
+- **WhiteFeather127** (白羽鸽) — this fork's maintainer
+- **九千天华**
 
 INI Weaver incorporates [Dear ImGui](https://github.com/ocornut/imgui),
 [Qt 6](https://www.qt.io/), [GLFW](https://www.glfw.org/),
