@@ -2595,9 +2595,18 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
     if (std::abs(it->second.EqSize.x - newEqSize.x) > 0.5f ||
         std::abs(it->second.EqSize.y - newEqSize.y) > 0.5f) {
         it->second.EqSize = newEqSize;
-        // 节点尺寸变化（OnShow 切换导致高度变、widthFix 变化导致宽度变）后，隐藏行端点
-        // 用 EqSize.x*ratio 算右边缘，必须重建端点表才能用上新尺寸，否则端点落后一帧
-        m_linkEndpointsDirty = true;
+        // 节点尺寸变化（OnShow 切换导致高度变/隐藏宽行导致宽度变）后，隐藏行端点用
+        // EqSize.x*ratio 算右边缘。等 timer tick 重建会落后一帧（tick 可能在 QML 布局
+        // 回写前跑），用旧 EqSize 导致端点指向旧右边缘，隐藏长键名行时偏移明显。
+        // 此处 EqSize 已是新值且 QML Repeater 已重建完（onHeightChanged 在布局后触发），
+        // 同步重建端点表立即用新尺寸；拖拽/缩放/平移中跳过（由对应收尾路径重建）。
+        if (!m_suppressLinkRebuild && m_inputState != 1 && m_dragSectionId == 0
+            && !m_massDragging && !m_zoomPending) {
+            rebuildLinkEndpoints();
+            m_linkEndpointsDirty = false;
+        } else {
+            m_linkEndpointsDirty = true;
+        }
     }
 }
 
