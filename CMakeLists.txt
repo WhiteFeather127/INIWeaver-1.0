@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21)
 project(INIWeaver VERSION 1.0.9 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -103,6 +103,9 @@ target_compile_definitions(INIWeaver PRIVATE
     UNICODE
     _UNICODE
     NOMINMAX
+    # 诊断模式：开启后编译 [ONSHOW-DIAG]/[LINK-DIAG] 日志，QML diagLogEnabled() 返回 true
+    # 定位完 bug 后注释掉此行重新配置 cmake，所有诊断日志编译不进去
+    INIWEAVER_DIAG
 )
 
 # 匹配原 vcxproj AdditionalOptions：禁用 C++20 distinct char8_t 类型

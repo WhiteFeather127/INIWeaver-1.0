@@ -321,8 +321,14 @@ Item {
             // 框选命中检测依赖准确的 EqSize，否则框选位置和命中模块不一致
             // 缩放方案：width/height 为逻辑尺寸（内部已 scale=_r），回报需乘 _r 得视觉尺寸，
             // 否则 EqSize = 逻辑/ratio 会随缩放漂移。仅在逻辑尺寸变化时触发（缩放不变）→ 天然节流
-            onWidthChanged: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
-            onHeightChanged: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            onWidthChanged: {
+                if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onWidthChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
+                workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            }
+            onHeightChanged: {
+                if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onHeightChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
+                workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            }
             Component.onCompleted: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
             isSelected: {
                 // 性能优化：通过 selectedRevision 触发重新评估，不依赖全量 refresh

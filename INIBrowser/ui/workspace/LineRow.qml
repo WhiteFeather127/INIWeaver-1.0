@@ -423,6 +423,7 @@ Item {
         // 松手后：dragOffset=0，不减，LastCenter=新位置 → 无回弹
         var dx = root.isDragging ? workspaceController.dragOffset.x : 0
         var dy = root.isDragging ? workspaceController.dragOffset.y : 0
+        if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] LineRow doUpdate sid=" + root.sectionId + " row=" + root.rowIndex + " key=" + root.keyName + " cx=" + (cx-dx) + " cy=" + (cy-dy) + " isDragging=" + root.isDragging)
         root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
         // 阶段 3：同一 RadioButton 位置也作为行级接受点回写（对应 ImGui AcceptCenter）
         // 该坐标作为连线终点 pb 的行精确值

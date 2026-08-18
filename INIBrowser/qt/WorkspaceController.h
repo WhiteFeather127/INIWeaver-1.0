@@ -363,6 +363,15 @@ public:
     // 哨兵值为 INVALID_MODULE_ID（非 0，避免与合法 sectionId 0 冲突），QML 侧用 hasLastDragged 守卫
     Q_INVOKABLE qulonglong lastDraggedId() const { return m_lastDraggedId; }
     Q_INVOKABLE bool hasLastDragged() const { return m_lastDraggedId != INVALID_MODULE_ID; }
+    // 诊断模式开关：编译时由 INIWEAVER_DIAG 宏决定，QML 用它门控 console.log
+    Q_INVOKABLE bool diagLogEnabled() const
+    {
+#ifdef INIWEAVER_DIAG
+        return true;
+#else
+        return false;
+#endif
+    }
 
 signals:
     void ratioChanged();
@@ -579,6 +588,7 @@ private:
     // 由坐标回写方法（setHeadLineRN/setSectionAcceptPoint）和视口变化（onMouseMove/onWheel）设置
     // refreshFromTimer 检测到此标志才调 rebuildLinkEndpoints，避免静止时无谓重建
     bool m_linkEndpointsDirty{true};
+    bool m_pendingSizeRebuild{false};  // reportSectionSize 延迟重建已排队标志，防 onWidth/onHeight 都触发时重复排队
     // 松手过渡期抑制 tick 的端点表重建：
     // 松手后 dragOffset 尚未清零时，若 tick 提前重建端点表，LinkRenderer 会叠加残留
     // dragOffset 显示连线（偏移一帧）。此标志抑制 tick 重建，仅允许松手收尾的最终重建。

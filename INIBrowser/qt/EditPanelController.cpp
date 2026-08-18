@@ -12,6 +12,7 @@
 #include "FromEngine/global_tool_func.h"
 #include <QString>
 #include <QTimer>
+#include <QDebug>
 #include <unordered_map>
 
 // IBR_EditFrame 命名空间的成员声明（定义在 IBR_Misc.cpp:587-594）
@@ -303,6 +304,10 @@ void EditPanelController::toggleOnShow(const QString &key)
     StrPoolID K = NewPoolStr(keyStr);
     auto pbk = IBR_EditFrame::CurSection.GetBack();
     if (!pbk) return;
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[ONSHOW-DIAG] toggleOnShow sectionId=" << m_currentSectionId
+             << "key=" << key << "beforeShow=" << pbk->IsOnShow(K);
+#endif
 
     // 先把变量取否
     IBG_Undo.SomethingShouldBeHere();

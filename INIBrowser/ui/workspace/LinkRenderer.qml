@@ -115,6 +115,12 @@ Canvas {
                 || s.sectionId === dragId
                 || (hasLastDragged && s.sectionId === lastDragId && hasOffset)
                 || (massDrag && (s.selected || false));
+            if (workspaceController.diagLogEnabled() && isDragging && hasLastDragged && s.sectionId === lastDragId && hasOffset && lastDragId !== dragId) {
+                console.log("[DRAG-DIAG] buildSectionMap: section", s.sectionId,
+                            "marked dragging via lastDragId+hasOffset (dragId=" + dragId
+                            + ", lastDragId=" + lastDragId
+                            + ", dragOffset=" + JSON.stringify(workspaceController.dragOffset) + ")")
+            }
             map[s.sectionId] = {
                 screenX: s.screenX || 0,
                 screenY: s.screenY || 0,
@@ -224,6 +230,8 @@ Canvas {
 
             // 分支 1：IsSelfLinked && Collapsed → 不画（对应 ImGui line 1511）
             if (link.isSelfLinked && srcEp.isCollapsed) continue;
+
+            if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] onPaint link[" + i + "] srcSess=" + link.sourceSessionId + " destId=" + link.destId + " destKey=" + link.destKey + " pbPrecise=" + pbPrecise + " pa=" + pa.x + "," + pa.y + " pb=" + (pb ? (pb.x + "," + pb.y) : "null") + " dstDragging=" + (dstSec ? dstSec.dragging : "noSec") + " pbEp=" + (ep ? (ep.pbX + "," + ep.pbY + ",valid=" + ep.pbValid) : "noEp"))
 
             // 颜色（对应 ImGui line 1474-1487）
             var col = link.color;

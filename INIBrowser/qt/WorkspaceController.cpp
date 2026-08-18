@@ -993,6 +993,13 @@ void WorkspaceController::showContextMenu(qreal x, qreal y)
 
 void WorkspaceController::beginMoveSection(qulonglong sectionId, qreal startX, qreal startY)
 {
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[DRAG-DIAG] beginMoveSection id=" << sectionId
+             << "prevState=" << m_inputState
+             << "lastDraggedId=" << m_lastDraggedId
+             << "dragOffset=" << m_dragOffset
+             << "dragSectionId(before)=" << m_dragSectionId;
+#endif
     m_suppressLinkRebuild = false;  // 新拖拽开始：恢复端点表重建（防上次松手残留抑制）
     m_dragSectionId = static_cast<ModuleID_t>(sectionId);
     m_dragStartScreenPos = QPointF(startX, startY);
@@ -1076,6 +1083,10 @@ void WorkspaceController::endMoveSection()
     IBR_EditFrame::CurSection.ID = draggedId;
     m_dragSectionId = 0;
     m_lastDraggedId = changedId;  // LinkRenderer 据此在端点表重建前继续叠加 dragOffset（防松手连线弹）
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[DRAG-DIAG] endMoveSection set lastDraggedId=" << m_lastDraggedId
+             << "dragOffset=" << m_dragOffset;
+#endif
     // 修复"松手连线弹"（根治）：拖拽中 LinkRenderer 用"旧端点表 + dragOffset"叠加显示连线。
     // 松手后若立即清 dragOffset/停止叠加，而端点表仍是旧值（拖拽前原位置），连线会弹回起点。
     // 方案：节点与连线解耦 ——
@@ -1101,6 +1112,11 @@ void WorkspaceController::endMoveSection()
         emit sectionPositionChanged(changedId);  // 最终一致性兜底（先让节点位置同步）
         QMetaObject::invokeMethod(this, [this]() {
             m_suppressLinkRebuild = false;       // 恢复 tick 重建
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[DRAG-DIAG] cleanup check: dragSectionId=" << m_dragSectionId
+                     << "inputState=" << m_inputState
+                     << "cond(dragSec==0 && state!=3)=" << (m_dragSectionId == 0 && m_inputState != 3);
+#endif
             if (m_dragSectionId == 0 && m_inputState != 3) {
                 m_dragOffset = QPointF();        // 叠加条件（lastDraggedId+dragOffset）失效
                 emit dragOffsetChanged();
@@ -1108,6 +1124,13 @@ void WorkspaceController::endMoveSection()
                 // 过渡期结束：清 lastDraggedId，防止下次拖动其他模块时（dragOffset 非零）
                 // LinkRenderer 的 lastDraggedId+hasOffset 条件仍命中旧模块，把它的连线一起拖走
                 m_lastDraggedId = INVALID_MODULE_ID;
+#ifdef INIWEAVER_DIAG
+                qDebug() << "[DRAG-DIAG] cleanup PASSED, cleared lastDraggedId + dragOffset";
+#endif
+            } else {
+#ifdef INIWEAVER_DIAG
+                qDebug() << "[DRAG-DIAG] cleanup SKIPPED, lastDraggedId stays=" << m_lastDraggedId;
+#endif
             }
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
@@ -1756,6 +1779,9 @@ void WorkspaceController::refreshSections()
 void WorkspaceController::refreshSectionLines(qulonglong sectionId)
 {
     if (sectionId == 0) return;
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[ONSHOW-DIAG] refreshSectionLines sectionId=" << sectionId;
+#endif
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
     auto it = m_lineModels.find(id);
     if (it != m_lineModels.end() && *it) {
@@ -2594,17 +2620,40 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
     // 仅在尺寸变化时更新（避免每帧刷新）
     if (std::abs(it->second.EqSize.x - newEqSize.x) > 0.5f ||
         std::abs(it->second.EqSize.y - newEqSize.y) > 0.5f) {
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[ONSHOW-DIAG] reportSectionSize sectionId=" << sectionId
+                 << "oldEqSize=" << it->second.EqSize.x << it->second.EqSize.y
+                 << "newEqSize=" << newEqSize.x << newEqSize.y;
+#endif
         it->second.EqSize = newEqSize;
-        // 节点尺寸变化（OnShow 切换导致高度变/隐藏宽行导致宽度变）后，隐藏行端点用
-        // EqSize.x*ratio 算右边缘。等 timer tick 重建会落后一帧（tick 可能在 QML 布局
-        // 回写前跑），用旧 EqSize 导致端点指向旧右边缘，隐藏长键名行时偏移明显。
-        // 此处 EqSize 已是新值且 QML Repeater 已重建完（onHeightChanged 在布局后触发），
-        // 同步重建端点表立即用新尺寸；拖拽/缩放/平移中跳过（由对应收尾路径重建）。
+        // 节点尺寸变化（OnShow 切换导致高度变/隐藏宽行导致宽度变）后端点表需重建。
+        // 关键时序：onHeightChanged 在 QML 父节点高度变化时触发，此时子项 LineRow 的
+        // onYChanged（行往上移）还没回写新 acceptCenter——QML 布局是先父 height 变、
+        // 后子项 y 重新布局。若同步 rebuild 会读到旧 acceptCenter → 端点偏一帧。
+        // 改用 QueuedConnection：入队事件循环末尾，此时 QML polish/布局阶段完成、
+        // 子项 onYChanged 已回写新 acceptCenter，rebuild 能读到新 EqSize + 新 acceptCenter。
+        // 拖拽/缩放/平移中跳过（由对应收尾路径重建）。m_pendingSizeRebuild 防止
+        // onWidthChanged/onHeightChanged 都触发时重复排队。
         if (!m_suppressLinkRebuild && m_inputState != 1 && m_dragSectionId == 0
             && !m_massDragging && !m_zoomPending) {
-            rebuildLinkEndpoints();
-            m_linkEndpointsDirty = false;
+            if (!m_pendingSizeRebuild) {
+                m_pendingSizeRebuild = true;
+#ifdef INIWEAVER_DIAG
+                qDebug() << "[ONSHOW-DIAG] reportSectionSize QUEUED rebuild sectionId=" << sectionId;
+#endif
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_pendingSizeRebuild = false;
+                    rebuildLinkEndpoints();
+                    m_linkEndpointsDirty = false;
+                }, Qt::QueuedConnection);
+            }
         } else {
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[ONSHOW-DIAG] reportSectionSize DEFER (guarded) sectionId=" << sectionId
+                     << "suppress=" << m_suppressLinkRebuild << "state=" << m_inputState
+                     << "dragSec=" << m_dragSectionId << "massDrag=" << m_massDragging
+                     << "zoomPending=" << m_zoomPending;
+#endif
             m_linkEndpointsDirty = true;
         }
     }
