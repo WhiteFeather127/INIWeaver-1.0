@@ -2149,7 +2149,9 @@ void WorkspaceController::rebuildLinkEndpoints()
         }
         // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端。
         // EqSize 由 QML reportSectionSize 回写，EqSize.x*ratio = 节点实际屏幕宽度，
-        // 故 rePos.x + EqSize.x*ratio = 标题栏右边缘；y 取标题栏 RadioButton 垂直中线。
+        // 故 rePos.x + EqSize.x*ratio = 标题栏右边缘。
+        // y 与头节点 RadioButton 水平对齐：优先用 m_sectionAcceptPoint 回写的头节点实际中心 y
+        // （非折叠态由 updateRNCenter→setSectionAcceptPoint 回写），兜底 halfLine。
         // 折叠态（sv.Collapsed=true）不进此分支，仍由优先级 3 走头部 RadioButton。
         if (!paValid && !srcLineVisible && !sv.Collapsed)
         {
@@ -2158,7 +2160,10 @@ void WorkspaceController::rebuildLinkEndpoints()
             {
                 ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcDataH->EqPos);
                 paX = static_cast<qreal>(rePos.x + srcDataH->EqSize.x * ratio);
-                paY = static_cast<qreal>(rePos.y + halfLine);
+                auto itH = m_sectionAcceptPoint.find(static_cast<qulonglong>(link.SrcModuleID));
+                paY = (itH != m_sectionAcceptPoint.end() && !itH->isNull())
+                    ? itH->y()
+                    : static_cast<qreal>(rePos.y + halfLine);
                 paValid = true;
             }
         }
@@ -2237,14 +2242,18 @@ void WorkspaceController::rebuildLinkEndpoints()
             }
         }
         // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端。
-        // 折叠态（sv.Collapsed=true）不进此分支，仍由优先级 2 走标题栏 RadioButton。
+        // y 与头节点 RadioButton 水平对齐：优先用 m_sectionAcceptPoint 回写的头节点实际中心 y，
+        // 兜底 halfLine。折叠态（sv.Collapsed=true）不进此分支，仍由优先级 2 走标题栏 RadioButton。
         if (!pbValid && !dstLineVisible && !sv.Collapsed)
         {
             if (dstData)
             {
                 ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
                 pbX = static_cast<qreal>(rePos.x + dstData->EqSize.x * ratio);
-                pbY = static_cast<qreal>(rePos.y + halfLine);
+                auto itH = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstActualId));
+                pbY = (itH != m_sectionAcceptPoint.end() && !itH->isNull())
+                    ? itH->y()
+                    : static_cast<qreal>(rePos.y + halfLine);
                 pbValid = true;
             }
         }
@@ -2586,6 +2595,9 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
     if (std::abs(it->second.EqSize.x - newEqSize.x) > 0.5f ||
         std::abs(it->second.EqSize.y - newEqSize.y) > 0.5f) {
         it->second.EqSize = newEqSize;
+        // 节点尺寸变化（OnShow 切换导致高度变、widthFix 变化导致宽度变）后，隐藏行端点
+        // 用 EqSize.x*ratio 算右边缘，必须重建端点表才能用上新尺寸，否则端点落后一帧
+        m_linkEndpointsDirty = true;
     }
 }
 
@@ -2955,6 +2967,7 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
             paValid = true;
         }
         // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端（同 rebuildLinkEndpoints）
+        // y 与头节点水平对齐：优先 m_sectionAcceptPoint.y()，兜底 halfLine
         if (!paValid && !srcLineVisible && !sv.Collapsed)
         {
             auto srcDataH = srcRsec.GetSectionData();
@@ -2962,7 +2975,10 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
             {
                 ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcDataH->EqPos);
                 paX = static_cast<qreal>(rePos.x + srcDataH->EqSize.x * ratio);
-                paY = static_cast<qreal>(rePos.y + halfLine);
+                auto itH = m_sectionAcceptPoint.find(srcId);
+                paY = (itH != m_sectionAcceptPoint.end() && !itH->isNull())
+                    ? itH->y()
+                    : static_cast<qreal>(rePos.y + halfLine);
                 paValid = true;
             }
         }
@@ -3004,13 +3020,17 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
             }
         }
         // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端（同 rebuildLinkEndpoints）
+        // y 与头节点水平对齐：优先 m_sectionAcceptPoint.y()，兜底 halfLine
         if (!pbValid && !dstLineVisible && !sv.Collapsed)
         {
             if (dstData)
             {
                 ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
                 pbX = static_cast<qreal>(rePos.x + dstData->EqSize.x * ratio);
-                pbY = static_cast<qreal>(rePos.y + halfLine);
+                auto itH = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstRsec.ID));
+                pbY = (itH != m_sectionAcceptPoint.end() && !itH->isNull())
+                    ? itH->y()
+                    : static_cast<qreal>(rePos.y + halfLine);
                 pbValid = true;
             }
         }
