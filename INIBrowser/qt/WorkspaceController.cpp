@@ -2114,7 +2114,8 @@ void WorkspaceController::rebuildLinkEndpoints()
 
         // 源行可见性：OnShow=false 的行不在 m_entries 中，其 acceptCenter/LastCenter
         // 是隐藏前的残留坐标，直接使用会让连线起点指向空白处。
-        // 对齐 ImGui RenderUI_Links：隐藏行回退到标题栏端点（优先级 3/兜底）。
+        // 隐藏行（非折叠态）回退到标题栏最右端；折叠态（sv.Collapsed=true）仍走优先级 3
+        // （头部 RadioButton，对应 setHeadLineRN 语义）。
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
         auto srcBsec = srcRsec.GetBack_Unsafe();
         bool srcLineVisible = (link.FromKey == EmptyPoolStr) || !srcBsec
@@ -2145,6 +2146,21 @@ void WorkspaceController::rebuildLinkEndpoints()
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
             paValid = true;
+        }
+        // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端。
+        // EqSize 由 QML reportSectionSize 回写，EqSize.x*ratio = 节点实际屏幕宽度，
+        // 故 rePos.x + EqSize.x*ratio = 标题栏右边缘；y 取标题栏 RadioButton 垂直中线。
+        // 折叠态（sv.Collapsed=true）不进此分支，仍由优先级 3 走头部 RadioButton。
+        if (!paValid && !srcLineVisible && !sv.Collapsed)
+        {
+            auto srcDataH = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
+            if (srcDataH)
+            {
+                ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcDataH->EqPos);
+                paX = static_cast<qreal>(rePos.x + srcDataH->EqSize.x * ratio);
+                paY = static_cast<qreal>(rePos.y + halfLine);
+                paValid = true;
+            }
         }
         // 优先级 3：QML 回写的标题栏接受点（折叠态由 setHeadLineRN 回写）
         if (!paValid)
@@ -2200,8 +2216,8 @@ void WorkspaceController::rebuildLinkEndpoints()
         auto dstBsec = dstRsec.GetBack_Unsafe();
 
         // 目标行可见性：OnShow=false 的行其 acceptCenter 是隐藏前残留坐标，
-        // 直接使用会让连线终点指向空白处。对齐 ImGui RenderUI_Links：
-        // it->second.Collapsed（即 !IsOnShow）时 pb 回退默认标题栏（ReWindowUL + ReOffset）。
+        // 直接使用会让连线终点指向空白处。隐藏行（非折叠态）回退到标题栏最右端；
+        // 折叠态（sv.Collapsed=true）仍走优先级 2（标题栏 RadioButton）。
         bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
                               || dstBsec->IsOnShow(link.DestKey);
 
@@ -2218,6 +2234,18 @@ void WorkspaceController::rebuildLinkEndpoints()
                     pbY = ac.y();
                     pbValid = true;
                 }
+            }
+        }
+        // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端。
+        // 折叠态（sv.Collapsed=true）不进此分支，仍由优先级 2 走标题栏 RadioButton。
+        if (!pbValid && !dstLineVisible && !sv.Collapsed)
+        {
+            if (dstData)
+            {
+                ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+                pbX = static_cast<qreal>(rePos.x + dstData->EqSize.x * ratio);
+                pbY = static_cast<qreal>(rePos.y + halfLine);
+                pbValid = true;
             }
         }
         // 优先级 2：QML 回写的标题栏接受点（对应 ImGui RSD->ReWindowUL + RSD->ReOffset）
@@ -2906,7 +2934,11 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         // ===== 起点 pa =====
         qreal paX = 0.0, paY = 0.0;
         bool paValid = false;
-        if (link.FromKey != EmptyPoolStr)
+        auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
+        auto srcBsec = srcRsec.GetBack_Unsafe();
+        bool srcLineVisible = (link.FromKey == EmptyPoolStr) || !srcBsec
+                              || srcBsec->IsOnShow(link.FromKey);
+        if (srcLineVisible && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(srcId);
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -2916,11 +2948,23 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
                 if (!srcAc.isNull()) { paX = srcAc.x(); paY = srcAc.y(); paValid = true; }
             }
         }
-        if (!paValid && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        if (!paValid && srcLineVisible && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
         {
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
             paValid = true;
+        }
+        // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端（同 rebuildLinkEndpoints）
+        if (!paValid && !srcLineVisible && !sv.Collapsed)
+        {
+            auto srcDataH = srcRsec.GetSectionData();
+            if (srcDataH)
+            {
+                ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcDataH->EqPos);
+                paX = static_cast<qreal>(rePos.x + srcDataH->EqSize.x * ratio);
+                paY = static_cast<qreal>(rePos.y + halfLine);
+                paValid = true;
+            }
         }
         if (!paValid)
         {
@@ -2947,7 +2991,9 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         bool pbValid = false;
         auto dstData = dstRsec.GetSectionData();
         auto dstBsec = dstRsec.GetBack_Unsafe();
-        if (!sv.Collapsed && link.DestKey != EmptyPoolStr && dstData)
+        bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
+                              || dstBsec->IsOnShow(link.DestKey);
+        if (!sv.Collapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
         {
             auto itModel = m_lineModels.find(static_cast<qulonglong>(dstRsec.ID));
             if (itModel != m_lineModels.end() && *itModel)
@@ -2955,6 +3001,17 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
                 QPointF ac = (*itModel)->acceptCenterByKey(
                     QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
                 if (!ac.isNull()) { pbX = ac.x(); pbY = ac.y(); pbValid = true; }
+            }
+        }
+        // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端（同 rebuildLinkEndpoints）
+        if (!pbValid && !dstLineVisible && !sv.Collapsed)
+        {
+            if (dstData)
+            {
+                ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+                pbX = static_cast<qreal>(rePos.x + dstData->EqSize.x * ratio);
+                pbY = static_cast<qreal>(rePos.y + halfLine);
+                pbValid = true;
             }
         }
         if (!pbValid)
