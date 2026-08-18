@@ -1,4 +1,4 @@
-// WorkspaceController.cpp
+﻿// WorkspaceController.cpp
 // 工作区控制器实现：桥接 IBR_WorkSpace / IBR_FullView / IBR_RealCenter
 #include "WorkspaceController.h"
 #include "WorkspaceSectionModel.h"
@@ -2112,11 +2112,19 @@ void WorkspaceController::rebuildLinkEndpoints()
         qreal paX = 0.0, paY = 0.0;
         bool paValid = false;
 
+        // 源行可见性：OnShow=false 的行不在 m_entries 中，其 acceptCenter/LastCenter
+        // 是隐藏前的残留坐标，直接使用会让连线起点指向空白处。
+        // 对齐 ImGui RenderUI_Links：隐藏行回退到标题栏端点（优先级 3/兜底）。
+        auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
+        auto srcBsec = srcRsec.GetBack_Unsafe();
+        bool srcLineVisible = (link.FromKey == EmptyPoolStr) || !srcBsec
+                              || srcBsec->IsOnShow(link.FromKey);
+
         // 优先级 1：源行圆点（按 FromKey 查行级接受点，与 QML 回写同源）。
         // 修复：LastCenter 按 SessionID 索引，IIF 行链接的 SessionID 用 Comp=cidx（UpdateAll），
         // 而 QML 圆点回写用 Comp=0（rebuildEntries），两者不匹配 → LastCenter=0 → pa 回退标题栏（起点错）。
         // 按源行 key 查询直接取该行圆点坐标，免疫 SessionID 不匹配。
-        if (link.FromKey != EmptyPoolStr)
+        if (srcLineVisible && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -2131,8 +2139,8 @@ void WorkspaceController::rebuildLinkEndpoints()
                 }
             }
         }
-        // 优先级 2：QML 回写的 LastCenter（非 0 才用，0 表示尚未回写）
-        if (!paValid && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        // 优先级 2：QML 回写的 LastCenter（非 0 才用，0 表示尚未回写；源行隐藏时跳过）
+        if (!paValid && srcLineVisible && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
         {
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
@@ -2191,7 +2199,13 @@ void WorkspaceController::rebuildLinkEndpoints()
         auto dstData = dstRsec.GetSectionData();
         auto dstBsec = dstRsec.GetBack_Unsafe();
 
-        if (!sv.Collapsed && link.DestKey != EmptyPoolStr && dstData)
+        // 目标行可见性：OnShow=false 的行其 acceptCenter 是隐藏前残留坐标，
+        // 直接使用会让连线终点指向空白处。对齐 ImGui RenderUI_Links：
+        // it->second.Collapsed（即 !IsOnShow）时 pb 回退默认标题栏（ReWindowUL + ReOffset）。
+        bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
+                              || dstBsec->IsOnShow(link.DestKey);
+
+        if (!sv.Collapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
         {
             auto itModel = m_lineModels.find(dstActualId);
             if (itModel != m_lineModels.end() && *itModel)
