@@ -103,6 +103,9 @@ Canvas {
         var massDrag = workspaceController.massDragging;
         // 修复"松手连线弹"：刚结束拖拽的节点（lastDraggedId，dragOffset 尚未清零）继续叠加
         // dragOffset，使连线在端点表重建完成前持续跟随鼠标终点，不弹回拖拽前位置
+        // 哨兵值用 INVALID_MODULE_ID（非 0）：0 同时是"无最近拖拽"与"块 0 合法 ID"会导致
+        // 会话首次拖动任意模块时块 0 被误判为刚拖过、其连线端点跟着 dragOffset 串动
+        var hasLastDragged = workspaceController.hasLastDragged();
         var lastDragId = workspaceController.lastDraggedId();
         var hasOffset = (workspaceController.dragOffset.x !== 0
                          || workspaceController.dragOffset.y !== 0);
@@ -110,7 +113,7 @@ Canvas {
             var s = sections[i];
             var isDragging = (s.dragging || false)
                 || s.sectionId === dragId
-                || (s.sectionId === lastDragId && hasOffset)
+                || (hasLastDragged && s.sectionId === lastDragId && hasOffset)
                 || (massDrag && (s.selected || false));
             map[s.sectionId] = {
                 screenX: s.screenX || 0,

@@ -1107,7 +1107,7 @@ void WorkspaceController::endMoveSection()
                 rebuildLinkEndpoints();          // 端点表 → 终点（LineRow 已回写），同回调渲染合并
                 // 过渡期结束：清 lastDraggedId，防止下次拖动其他模块时（dragOffset 非零）
                 // LinkRenderer 的 lastDraggedId+hasOffset 条件仍命中旧模块，把它的连线一起拖走
-                m_lastDraggedId = 0;
+                m_lastDraggedId = INVALID_MODULE_ID;
             }
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
@@ -2493,7 +2493,7 @@ void WorkspaceController::endMassDrag()
                 emit dragOffsetChanged();
                 rebuildLinkEndpoints();
                 // 过渡期结束：清 lastDraggedId（同 endMoveSection，防旧模块连线被下次拖拽拖走）
-                m_lastDraggedId = 0;
+                m_lastDraggedId = INVALID_MODULE_ID;
             }
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);

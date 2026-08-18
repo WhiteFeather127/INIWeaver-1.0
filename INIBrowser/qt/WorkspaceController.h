@@ -360,7 +360,9 @@ public:
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
     Q_INVOKABLE void setViewportSize(qreal width, qreal height);
     // 最近拖拽结束的节点 ID（LinkRenderer buildSectionMap 据此在端点表重建前继续叠加 dragOffset）
+    // 哨兵值为 INVALID_MODULE_ID（非 0，避免与合法 sectionId 0 冲突），QML 侧用 hasLastDragged 守卫
     Q_INVOKABLE qulonglong lastDraggedId() const { return m_lastDraggedId; }
+    Q_INVOKABLE bool hasLastDragged() const { return m_lastDraggedId != INVALID_MODULE_ID; }
 
 signals:
     void ratioChanged();
@@ -499,7 +501,9 @@ private:
     bool m_hasPrevMenuBeforeEdit{false};
 
     // 最近一次拖拽结束的节点 ID（LinkRenderer 据此继续叠加 dragOffset，防松手连线弹）
-    qulonglong m_lastDraggedId{0};
+    // 哨兵值用 INVALID_MODULE_ID（非 0）：0 是合法 sectionId，会与"无最近拖拽"语义冲突，
+    // 导致块 0 被误判为"刚拖过"，其连线端点跟着其他模块的 dragOffset 串动
+    qulonglong m_lastDraggedId{INVALID_MODULE_ID};
 
     // ===== 阶段 12.1：MassAfter / 多节点拖拽状态 =====
     // 对应 IBR_WorkSpace.cpp:186-211 的状态变量

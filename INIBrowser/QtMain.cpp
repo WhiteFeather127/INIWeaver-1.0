@@ -1,4 +1,4 @@
-// QtMain.cpp
+﻿// QtMain.cpp
 // Qt6 + QML 入口点（替代 INIBrowser.cpp 的 wWinMain）
 // 阶段 2：建立 Qt 骨架；阶段 4.1：注册 Controller 为 context property
 // 阶段 6.1：QTimer 驱动主循环（替代 ShellLoop）
