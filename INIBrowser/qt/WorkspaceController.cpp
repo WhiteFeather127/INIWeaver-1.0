@@ -1658,7 +1658,7 @@ void WorkspaceController::refreshFromTimer()
         // 但端点表可能因 QML LinkNode 布局回写而变脏（m_linkEndpointsDirty）
         // 此时只重建端点表，不重建 sections/links（对应 ImGui 每帧用新 LastCenter 重绘连线）
         // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
-        if (m_linkEndpointsDirty && !m_suppressLinkRebuild) {
+        if (m_linkEndpointsDirty && !m_suppressLinkRebuild && !m_pendingRebuild) {
             rebuildLinkEndpoints();
             m_linkEndpointsDirty = false;
         }
@@ -1722,7 +1722,7 @@ void WorkspaceController::refreshFromTimer()
     // 修复：rebuildLinkEndpoints 必须在 refreshSections/refreshLinks 之后执行
     // 因为 rebuildLinkEndpoints 依赖 m_lineModels（在 refreshSections 中创建）和 LinkList（在 refreshLinks→rebuildLinkList 中填充）
     // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
-    if (m_linkEndpointsDirty && !m_suppressLinkRebuild) {
+    if (m_linkEndpointsDirty && !m_suppressLinkRebuild && !m_pendingRebuild) {
         rebuildLinkEndpoints();
         m_linkEndpointsDirty = false;
     }
@@ -1789,6 +1789,29 @@ void WorkspaceController::refreshSectionLines(qulonglong sectionId)
     }
     // 行值/OnShow 变化可能影响连线，标记端点脏
     m_linkEndpointsDirty = true;
+    // 根治偶发一帧偏移：refresh() 触发 QML Repeater 重建 delegate（beginResetModel），
+    // 新 delegate layoutDone=false，行重建期间 onYChanged 被门控拦截不回写 acceptCenter，
+    // 只有 Component.onCompleted 的 Qt.callLater 回调回写一次。
+    // 问题：50ms tick 可能在 Qt.callLater 回写之前的窗口期跑，此时 m_linkEndpointsDirty=true，
+    // tick rebuild 读到旧 acceptCenter → 偏一帧（Qt.callLater 与 tick 时序非确定 → 偶发）。
+    // 修复：refresh() 同步触发 delegate 创建 → onCompleted → Qt.callLater post（=QueuedConnection），
+    // 此处 post 的 rebuild 排在所有 callLater 之后（同 posted event 队列，按 post 顺序处理），
+    // 能读到全部新 acceptCenter。m_pendingRebuild 抑制 tick 在窗口期 rebuild（tick 检查此标志跳过）。
+    // 拖拽/缩放/平移/松手过渡中跳过（由对应收尾路径重建）。
+    if (!m_suppressLinkRebuild && m_inputState != 1 && m_dragSectionId == 0
+        && !m_massDragging && !m_zoomPending) {
+        if (!m_pendingRebuild) {
+            m_pendingRebuild = true;
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[ONSHOW-DIAG] refreshSectionLines QUEUED rebuild sectionId=" << sectionId;
+#endif
+            QMetaObject::invokeMethod(this, [this]() {
+                m_pendingRebuild = false;
+                rebuildLinkEndpoints();
+                m_linkEndpointsDirty = false;
+            }, Qt::QueuedConnection);
+        }
+    }
 }
 
 // 阶段 D2：构建单个 Section 的 QVariantMap（refreshSections 与 getSectionData 共用）
@@ -1893,12 +1916,38 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
                     m_editPanelController->refreshLines();
                 }
             });
-            // LinkNode 位置回写 → 标记端点表脏，由 refreshFromTimer 统一重建
-            // 对应 ImGui 每帧 UpdateLink → SetSessionStatus 后下帧用新 LastCenter 绘制连线
+            // LinkNode 位置回写 → 延迟重建端点表（根治 OnShow 切换/拖动偶发一帧偏移）。
+            // 关键时序：LineRow.onYChanged 在 QML Column/ColumnLayout 的 polish event 中同步触发，
+            // emit 本信号时 polish event 正在处理，QueuedConnection 入队的 rebuild 排在 polish 之后，
+            // 此时所有子项 onYChanged 都已回写新 LastCenter → rebuild 读到新值。
+            // 把 rebuild 时机从"父节点 height 变化"(reportSectionSize)挪到"子项 y 回写后"，
+            // 时序确定，不再依赖 QML 布局同步/异步的非确定性。
+            // 拖拽/缩放/平移/松手过渡中跳过 rebuild（由对应收尾路径重建），只标脏。
+            // m_pendingRebuild 防止多行 onYChanged 连续 emit 时重复排队。
             connect(modelPtr, &SectionLineModel::linkNodeCenterChanged,
                     this, [this]() {
-                        const_cast<WorkspaceController*>(this)->m_linkEndpointsDirty = true;
-                    });
+                auto *self = const_cast<WorkspaceController*>(this);
+#ifdef INIWEAVER_DIAG
+                qDebug() << "[ONSHOW-DIAG] linkNodeCenterChanged suppress=" << self->m_suppressLinkRebuild
+                         << "state=" << self->m_inputState << "dragSec=" << self->m_dragSectionId
+                         << "massDrag=" << self->m_massDragging << "zoomPending=" << self->m_zoomPending
+                         << "pendingRebuild=" << self->m_pendingRebuild;
+#endif
+                if (self->m_suppressLinkRebuild || self->m_inputState == 1
+                    || self->m_dragSectionId != 0 || self->m_massDragging
+                    || self->m_zoomPending) {
+                    self->m_linkEndpointsDirty = true;
+                    return;
+                }
+                if (!self->m_pendingRebuild) {
+                    self->m_pendingRebuild = true;
+                    QMetaObject::invokeMethod(self, [self]() {
+                        self->m_pendingRebuild = false;
+                        self->rebuildLinkEndpoints();
+                        self->m_linkEndpointsDirty = false;
+                    }, Qt::QueuedConnection);
+                }
+            });
         }
         modelPtr->setShowRegName(IBR_WorkSpace::ShowRegName);
         modelPtr->refresh();
@@ -2627,35 +2676,21 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
 #endif
         it->second.EqSize = newEqSize;
         // 节点尺寸变化（OnShow 切换导致高度变/隐藏宽行导致宽度变）后端点表需重建。
-        // 关键时序：onHeightChanged 在 QML 父节点高度变化时触发，此时子项 LineRow 的
-        // onYChanged（行往上移）还没回写新 acceptCenter——QML 布局是先父 height 变、
-        // 后子项 y 重新布局。若同步 rebuild 会读到旧 acceptCenter → 端点偏一帧。
-        // 改用 QueuedConnection：入队事件循环末尾，此时 QML polish/布局阶段完成、
-        // 子项 onYChanged 已回写新 acceptCenter，rebuild 能读到新 EqSize + 新 acceptCenter。
-        // 拖拽/缩放/平移中跳过（由对应收尾路径重建）。m_pendingSizeRebuild 防止
-        // onWidthChanged/onHeightChanged 都触发时重复排队。
-        if (!m_suppressLinkRebuild && m_inputState != 1 && m_dragSectionId == 0
-            && !m_massDragging && !m_zoomPending) {
-            if (!m_pendingSizeRebuild) {
-                m_pendingSizeRebuild = true;
+        // 关键时序：onHeightChanged 在 QML 父节点高度变化时同步触发，此时子项 LineRow 的
+        // onYChanged（行往上移）尚未回写新 acceptCenter——QML Column/ColumnLayout 的子项重布局
+        // 是异步 polish event。若此处同步/QueuedConnection rebuild，rebuild 会排在 polish 之前
+        // （posted event 按 post 顺序处理），读到旧 LastCenter → 端点偏一帧（偶发：QML 布局
+        // 时序非确定，子项 y 重布局有时同步有时异步 polish）。
+        // 改为只标脏：由 LineRow.onYChanged 回写后 emit linkNodeCenterChanged 触发的延迟 rebuild
+        // 来重建（该 rebuild 排在 polish event 之后，读到所有行新 LastCenter）。无行 y 变化时
+        // 由 refreshFromTimer(50ms) 兜底重建。拖拽/缩放/平移/松手过渡中同样只标脏，由收尾路径重建。
 #ifdef INIWEAVER_DIAG
-                qDebug() << "[ONSHOW-DIAG] reportSectionSize QUEUED rebuild sectionId=" << sectionId;
+        qDebug() << "[ONSHOW-DIAG] reportSectionSize MARK dirty sectionId=" << sectionId
+                 << "suppress=" << m_suppressLinkRebuild << "state=" << m_inputState
+                 << "dragSec=" << m_dragSectionId << "massDrag=" << m_massDragging
+                 << "zoomPending=" << m_zoomPending;
 #endif
-                QMetaObject::invokeMethod(this, [this]() {
-                    m_pendingSizeRebuild = false;
-                    rebuildLinkEndpoints();
-                    m_linkEndpointsDirty = false;
-                }, Qt::QueuedConnection);
-            }
-        } else {
-#ifdef INIWEAVER_DIAG
-            qDebug() << "[ONSHOW-DIAG] reportSectionSize DEFER (guarded) sectionId=" << sectionId
-                     << "suppress=" << m_suppressLinkRebuild << "state=" << m_inputState
-                     << "dragSec=" << m_dragSectionId << "massDrag=" << m_massDragging
-                     << "zoomPending=" << m_zoomPending;
-#endif
-            m_linkEndpointsDirty = true;
-        }
+        m_linkEndpointsDirty = true;
     }
 }
 
