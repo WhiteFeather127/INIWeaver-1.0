@@ -448,7 +448,8 @@ private:
     QPointF m_dragStartEq;
 
     // 节点拖拽状态（单节点拖拽，对应 HoldingModules 的简化版）
-    ModuleID_t m_dragSectionId{0};
+    // 哨兵值用 INVALID_MODULE_ID（非 0，避免与合法 sectionId 0 冲突，与 m_draggingSectionId 一致）
+    ModuleID_t m_dragSectionId{INVALID_MODULE_ID};
     ImVec2 m_dragStartEqPos{0, 0};
     QPointF m_dragStartScreenPos;
     // 性能优化：拖拽偏移量（屏幕坐标），拖拽中实时更新，QML 端用它计算临时位置

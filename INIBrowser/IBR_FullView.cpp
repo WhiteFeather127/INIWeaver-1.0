@@ -1,4 +1,4 @@
-﻿#include "IBR_Project.h"
+#include "IBR_Project.h"
 #include "IBFront.h"
 #include "Global.h"
 #include "FromEngine/RFBump.h"
@@ -20,7 +20,10 @@ namespace IBR_FullView
 
     void UpdateCurrentEqMax()
     {
-        auto EqMax = GetDefaultEqMax();
+        // Qt 版：边界 = 内容范围 + 固定增量，不再叠加默认视口范围（GetDefaultEqMax）。
+        // 这样有模块/没模块时模块外可拖空白一致（固定 1000 Eq），只随缩放变化
+        //（屏幕距离 = 1000 × Ratio）。原 ImGui 行为是边界贴合模块/默认视口，拖到边界即止。
+        ImVec2 EqMax{ 0.0f, 0.0f };
         for (auto& sp : IBR_Inst_Project.IBR_SectionMap)
         {
             if (!IBR_Inst_Project.GetSectionFromID(sp.first).HasBack())continue;
@@ -29,6 +32,9 @@ namespace IBR_FullView
             EqMax.x = std::max({ EqMax.x, fabsf(sd.EqPos.x), fabsf(sd.EqPos.x + sd.EqSize.x) });
             EqMax.y = std::max({ EqMax.y, fabsf(sd.EqPos.y), fabsf(sd.EqPos.y + sd.EqSize.y) });
         }
+        // 固定预留约半个模块大的 Eq 空白（模块默认约 234×78 Eq，100 ≈ 0.4 个模块宽）
+        EqMax.x += 100.0f;
+        EqMax.y += 100.0f;
         CurrentEqMax = EqMax;
     }
 

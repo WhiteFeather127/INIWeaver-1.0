@@ -172,6 +172,10 @@ void EditPanelController::rebuildEditLines()
         entry["keyName"] = QString::fromUtf8(PoolCStr(K));
         entry["keyId"] = static_cast<qulonglong>(K);
         entry["onShow"] = pbk->IsOnShow(K);
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[ONSHOW-DIAG] rebuildEditLines sid=" << m_currentSectionId
+                 << "key=" << PoolCStr(K) << "onShow=" << pbk->IsOnShow(K);
+#endif
         std::string onShowDesc = pbk->GetOnShow(K);
         if (onShowDesc == EmptyOnShowDesc) onShowDesc.clear();
         entry["onShowDesc"] = QString::fromUtf8(onShowDesc.c_str());
@@ -213,9 +217,13 @@ void EditPanelController::rebuildEditLines()
 void EditPanelController::addLine(const QString &key, const QString &value)
 {
     // 对应 RenderUI_NewLine 的 "＋" 按钮逻辑（IBR_Misc.cpp:701-727）
+    // 用 IBR_SectionMap[m_currentSectionId] 取 pbk（与 rebuildEditLines 一致，避免 CurSection 错位）
     std::string keyStr = key.toUtf8().toStdString();
     std::string valStr = value.toUtf8().toStdString();
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
     IBRF_CoreBump.SendToR({ [keyStr, valStr, pbk]() {
@@ -277,9 +285,13 @@ QString EditPanelController::getInitialValue(const QString &key) const
 void EditPanelController::removeLine(const QString &key)
 {
     // 对应 RenderUI_OnShow 的 "移除行" 按钮（IBR_Misc.cpp:858-864）
+    // 用 IBR_SectionMap[m_currentSectionId] 取 pbk（与 rebuildEditLines 一致，避免 CurSection 错位）
     std::string keyStr = key.toUtf8().toStdString();
     StrPoolID K = NewPoolStr(keyStr);
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
     IBRF_CoreBump.SendToR({ [pbk, K]() {
@@ -300,9 +312,16 @@ void EditPanelController::toggleOnShow(const QString &key)
     // 对应 RenderUI_OnShow 的 RadioButton（IBR_Misc.cpp:827-832）
     // 按用户要求：按钮和是否显示键都用 OnShow 变量判断，按下按钮时先把变量取否，然后刷新渲染
     // 同步修改 OnShow 状态（对应 ImGui RenderUI_OnShow 直接操作 pbk->OnShow[K]）
+    // 修复：必须用 IBR_SectionMap[m_currentSectionId].GetBack_Inl() 取 pbk（与 rebuildEditLines 一致），
+    // 不能用 IBR_EditFrame::CurSection.GetBack()。后者在关闭项目后残留旧指针/错位，
+    // 导致 toggleOnShow 改的是 CurSection 指向的模块，rebuildEditLines 读的是 m_currentSectionId
+    // 对应的模块，两者不一致 → CheckBox 点了没反应（改了 A，UI 读 B 弹回旧状态）。
     std::string keyStr = key.toUtf8().toStdString();
     StrPoolID K = NewPoolStr(keyStr);
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 #ifdef INIWEAVER_DIAG
     qDebug() << "[ONSHOW-DIAG] toggleOnShow sectionId=" << m_currentSectionId
@@ -323,10 +342,14 @@ void EditPanelController::toggleOnShow(const QString &key)
 void EditPanelController::setOnShowDesc(const QString &key, const QString &desc)
 {
     // 对应 RenderUI_OnShow 的描述编辑框（IBR_Misc.cpp:849-856）
+    // 用 IBR_SectionMap[m_currentSectionId] 取 pbk（与 rebuildEditLines 一致，避免 CurSection 错位）
     std::string keyStr = key.toUtf8().toStdString();
     std::string descStr = desc.toUtf8().toStdString();
     StrPoolID K = NewPoolStr(keyStr);
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
     IBRF_CoreBump.SendToR({ [pbk, K, descStr]() {
@@ -345,10 +368,14 @@ void EditPanelController::setOnShowDesc(const QString &key, const QString &desc)
 void EditPanelController::setLineValue(const QString &key, const QString &value)
 {
     // 对应 SidebarLine::RenderUI → IBB_IniLine::Merge 的值编辑
+    // 用 IBR_SectionMap[m_currentSectionId] 取 pbk（与 rebuildEditLines 一致，避免 CurSection 错位）
     std::string keyStr = key.toUtf8().toStdString();
     std::string valStr = value.toUtf8().toStdString();
     StrPoolID K = NewPoolStr(keyStr);
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
     IBRF_CoreBump.SendToR({ [pbk, K, valStr]() {
@@ -407,7 +434,11 @@ void EditPanelController::exitTextEdit(bool save)
 void EditPanelController::toggleUseOwnName()
 {
     // 对应 RenderUI_UseOwnName（IBR_Misc.cpp:771-793）
-    auto pbk = IBR_EditFrame::CurSection.GetBack();
+    // 用 IBR_SectionMap[m_currentSectionId] 取 pbk（与 rebuildEditLines 一致，避免 CurSection 错位）
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
     bool N = IBR_EditFrame::NeedtoMangle(pbk);

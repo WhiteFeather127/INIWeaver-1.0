@@ -108,7 +108,14 @@ QVariant SectionLineModel::data(const QModelIndex &index, int role) const
 
 void SectionLineModel::setSectionId(qulonglong id)
 {
-    if (m_sectionId == id) return;
+    // 修复：不能用 m_sectionId==id 跳过。m_sectionId 初始为 0，合法模块 ID 也可能是 0，
+    // 若 lineModel 创建时即绑定 ID=0 的模块，setSectionId(0) 会命中此 return 不 refresh，
+    // 导致 ID=0 模块画布无行。改为：值相同且已构建过（m_sectionId 在 map 中）才跳过。
+    if (m_sectionId == id) {
+        auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(id));
+        if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;  // 真正无激活，无需刷新
+        // id 在 map 中（合法），即使值相同也继续 refresh（首次构建场景）
+    }
     m_sectionId = id;
     emit sectionIdChanged();
     refresh();
@@ -127,6 +134,10 @@ void SectionLineModel::refresh()
     const int oldCount = static_cast<int>(m_entries.size());
     rebuildEntries();
 
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[ONSHOW-DIAG] SectionLineModel::refresh sid=" << m_sectionId
+             << "oldCount=" << oldCount << "newCount=" << m_entries.size();
+#endif
     // 性能优化：行内容未变时跳过信号。
     // 删除/新建模块等触发全量 refreshSections 时，无关节点的行数据不变，
     // 不发 dataChanged/resetModel 可避免 QML 行绑定重新求值（全量重建卡顿主因）
@@ -135,6 +146,9 @@ void SectionLineModel::refresh()
     {
         // 内容相同：快照同步（新 entries 与旧等价），直接返回
         m_entriesSnapshot = m_entries;
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[ONSHOW-DIAG] SectionLineModel::refresh sid=" << m_sectionId << "SKIP (content same)";
+#endif
         return;
     }
     m_entriesSnapshot = m_entries;
@@ -159,8 +173,13 @@ void SectionLineModel::rebuildEntries()
     std::vector<LineEntry> newEntries;
 
     if (m_sectionId == 0) {
-        m_entries = std::move(newEntries);
-        return;
+        // 修复：0 既是无激活标记也是合法模块 ID。用 IBR_SectionMap.find 区分：
+        // 0 不在 map（真正无激活）→ 清空；0 在 map（合法模块 ID=0）→ 继续构建行。
+        auto it0 = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_sectionId));
+        if (it0 == IBR_Inst_Project.IBR_SectionMap.end()) {
+            m_entries = std::move(newEntries);
+            return;
+        }
     }
 
     ModuleID_t sid = static_cast<ModuleID_t>(m_sectionId);

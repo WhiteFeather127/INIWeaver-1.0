@@ -33,7 +33,21 @@ Canvas {
     // 点击定位信号
     signal clicked(variant eqPos)
 
-    onSectionsChanged: requestPaint()
+    onSectionsChanged: {
+        if (workspaceController.diagLogEnabled()) {
+            var desc = "none"
+            if (sections.length > 0) {
+                var parts = []
+                for (var i = 0; i < sections.length; i++) {
+                    var s = sections[i]
+                    parts.push("[" + s.sectionId + ":" + s.eqX + "," + s.eqY + "," + s.eqW + "," + s.eqH + "]")
+                }
+                desc = parts.join(" ")
+            }
+            console.log("[REFRESH-DIAG] MiniMap onSectionsChanged count=" + sections.length + " " + desc)
+        }
+        requestPaint()
+    }
     onViewRectChanged: requestPaint()
     onEqCenterChanged: requestPaint()
     onIsBgDraggingChanged: requestPaint()
@@ -41,6 +55,9 @@ Canvas {
     onPaint: {
         var ctx = getContext("2d");
         ctx.reset();
+
+        if (workspaceController.diagLogEnabled())
+            console.log("[REFRESH-DIAG] MiniMap onPaint sections=" + sections.length + " w=" + width + " h=" + height)
 
         if (sections.length === 0) return;
 
@@ -182,6 +199,12 @@ Canvas {
 
         var eqX = (mx - offsetX) / scale + minX;
         var eqY = (my - offsetY) / scale + minY;
+
+        if (workspaceController.diagLogEnabled())
+            console.log("[REFRESH-DIAG] MiniMap locateTo mx=" + mx + " my=" + my
+                        + " worldW=" + worldW + " worldH=" + worldH
+                        + " scale=" + scale + " eqX=" + eqX + " eqY=" + eqY
+                        + " viewRect=" + viewRect.x + "," + viewRect.y + "," + viewRect.w + "," + viewRect.h)
 
         // 视图框限制在画布内（参考 GitHub nodify Minimap.MaxViewportOffset 思路）：
         // includeViewportInWorld=false（视图窗口）时画布固定为模块范围，不随视口扩展；
