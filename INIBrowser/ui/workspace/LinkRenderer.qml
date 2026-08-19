@@ -64,6 +64,9 @@ Canvas {
     Connections {
         target: workspaceController
         function onZoomBaseChanged() { requestPaint() }
+        // 修复：多选拖动开始/结束时 massDragging 翻转，sectionMap 的 dragging 标志需重算
+        //（buildSectionMap 改用 isSectionSelected 实时查询，缓存失效后才会重新查询）
+        function onMassDraggingChanged() { cachedSectionMap = null; requestPaint() }
     }
 
     // 缩放换算：把端点表快照坐标（基准 ratio/eqCenter 下的屏幕坐标）换算到当前视图。
@@ -111,10 +114,23 @@ Canvas {
                          || workspaceController.dragOffset.y !== 0);
         for (var i = 0; i < sections.length; i++) {
             var s = sections[i];
+            // 修复：多选拖动时 s.selected 是拖拽前快照（beginMassDrag 不调 refresh 避免
+            // Repeater 销毁 delegate 丢失 mouse grab），selectAll 后快照 selected 全 false →
+            // massDrag && s.selected 永远 false → dstDragging=false → onPaint 不叠加 dragOffset
+            // → 隐藏键行 pbX（旧 EqPos）不动、pbY（m_sectionAcceptPoint 实时回写）动 → 只上下动。
+            // 改用 isSectionSelected 实时查询 MassTarget，拖拽中每帧 dragOffsetChanged 触发
+            // sectionMap 重建（onDragOffsetChanged 置 cachedSectionMap=null），查询结果始终新鲜。
+            // 修复（松手一帧偏移）：多选松手后 massDrag=false，节点已跳终点（sectionPositionChanged
+            // 同步 emit），但端点表 rebuild 是 Queued 异步。单节点靠 lastDraggedId+hasOffset 叠加
+            // dragOffset 让端点=旧基准+dragOffset=终点渡过这几帧；多选有 N 个节点但 lastDraggedId
+            // 只记 front，非 front 节点端点不叠加→旧基准，节点已终点→偏移一个 dragOffset。
+            // 新增 isLastMassDragged 过渡判断：松手后到收尾 rebuild 清 dragOffset 前，对所有被拖
+            // 节点叠加 dragOffset，端点=旧基准+dragOffset=终点，与节点一致，无偏移。
             var isDragging = (s.dragging || false)
                 || s.sectionId === dragId
                 || (hasLastDragged && s.sectionId === lastDragId && hasOffset)
-                || (massDrag && (s.selected || false));
+                || (massDrag && workspaceController.isSectionSelected(s.sectionId))
+                || (hasOffset && workspaceController.isLastMassDragged(s.sectionId));
             if (workspaceController.diagLogEnabled() && isDragging && hasLastDragged && s.sectionId === lastDragId && hasOffset && lastDragId !== dragId) {
                 console.log("[DRAG-DIAG] buildSectionMap: section", s.sectionId,
                             "marked dragging via lastDragId+hasOffset (dragId=" + dragId

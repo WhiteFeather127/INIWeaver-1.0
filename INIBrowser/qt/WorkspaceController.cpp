@@ -803,6 +803,15 @@ void WorkspaceController::duplicateSelected()
 void WorkspaceController::selectAll()
 {
     IBR_WorkSpace::SelectAll();
+    // 修复：全选后切换到 MassAfter(4) 状态，与框选 endSelection + handleMouseButtonReleased
+    // (line 311-316) 的逻辑对齐。后端 SelectAll 已设 IsMassAfter=true，但 QML 端 m_inputState
+    // 未同步，导致 beginMassDrag 的 if(m_inputState!=4) return 拒绝多节点拖动，SectionNode 的
+    // isMassSelectState(inputState===4) 也不显示多选蓝框。空项目 MassTarget 为空时回 Normal。
+    if (IBR_WorkSpace::MassTarget.empty()) {
+        updateInputState(0);  // Normal
+    } else {
+        updateInputState(4);  // MassAfter
+    }
     // 性能优化：全选只改变 MassTarget（选中集合），不改变 sections 数据
     // QML 的 isSelected 绑定到 selectedRevision，递增即可触发蓝框更新
     ++m_selectedRevision;
@@ -1017,6 +1026,7 @@ void WorkspaceController::beginMoveSection(qulonglong sectionId, qreal startX, q
              << "dragSectionId(before)=" << m_dragSectionId;
 #endif
     m_suppressLinkRebuild = false;  // 新拖拽开始：恢复端点表重建（防上次松手残留抑制）
+    m_lastMassDragIds.clear();      // 清多选过渡集合（单节点拖动不用它，防上次多选残留）
     m_dragSectionId = static_cast<ModuleID_t>(sectionId);
     m_dragStartScreenPos = QPointF(startX, startY);
     auto it = IBR_Inst_Project.IBR_SectionMap.find(m_dragSectionId);
@@ -2478,6 +2488,7 @@ void WorkspaceController::beginMassDrag(qreal startX, qreal startY)
     if (IBR_WorkSpace::MassTarget.empty()) return;
 
     m_suppressLinkRebuild = false;  // 新拖拽开始：恢复端点表重建（防上次松手残留抑制）
+    m_lastMassDragIds.clear();      // 清上次多选松手过渡集合（防残留误叠加）
     m_massDragIds = IBR_WorkSpace::MassTarget;
     m_dragStartScreenPos = QPointF(startX, startY);
     m_moveAfterMass = true;
@@ -2628,11 +2639,26 @@ void WorkspaceController::endMassDrag()
     // 静默置 massDragging=false（isDragging → false 触发 LineRow 回写新 LastCenter），
     // 再 emit sectionPositionChanged（各节点 localEqX=终点）。dragOffset 保持旧值，
     // 等端点表重建完成后再清（同 endMoveSection：避免 LinkRenderer 用旧端点表+0 弹回起点）。
+    // 修复（同 endMoveSection line 1134）：suppress 必须前置到下面两个 emit 之前。
+    // emit massDraggingChanged 会同步触发 SectionNode.onIsDraggingChanged → updateAllCenters
+    // → LineRow.updateLinkNodeCenter → linkNodeCenterChanged；若此时 suppress 仍为 false，
+    // 该处理器会排队 Queued 重建 R1（R1 lambda 不检查 suppress），R1 在 dragOffset 未清零时
+    // 用 LineRow 回写的终点坐标重建端点表，而 buildSectionMap 仍按"lastDraggedId + dragOffset
+    // 非零"叠加 dragOffset → 连线终点 = 终点 + dragOffset，比节点多偏移一个 dragOffset → 一帧偏移。
+    // suppress 前置后，回写仅标记 dirty 不排队 R1，端点表保持旧值 + dragOffset 叠加 = 终点
+    //（与节点一致），收尾重建统一切换，无中间态。
+    m_suppressLinkRebuild = true;
     m_massDragging = false;
     // 拖拽结束：终止缩放换算（补间已在函数开头强制完成；防止残留 zoomPending 拦截回写）
     m_zoomPending = false;
     if (!draggedIds.empty())
         m_lastDraggedId = static_cast<qulonglong>(draggedIds.front());  // LinkRenderer 据此在端点表重建前继续叠加 dragOffset
+    // 多选拖拽：记录所有被拖节点，供 buildSectionMap 过渡期对所有被拖节点叠加 dragOffset
+    //（单值 m_lastDraggedId 只覆盖 front，非 front 节点端点会偏移一个 dragOffset）
+    m_lastMassDragIds.clear();
+    for (auto id : draggedIds) {
+        m_lastMassDragIds.insert(static_cast<qulonglong>(id), true);
+    }
     for (auto id : draggedIds) {
         emit sectionPositionChanged(static_cast<qulonglong>(id));
     }
@@ -2645,9 +2671,7 @@ void WorkspaceController::endMassDrag()
     restoreStateAfterDrag();
     // 连线端点表需要重建（多节点位置变了）
     m_linkEndpointsDirty = true;
-    // 同 endMoveSection：抑制 tick 提前重建（dragOffset 未清时叠加 → 偏移），
-    // 保持拖拽中渲染最后一帧，直到收尾（清 dragOffset + 重建端点表）统一切换
-    m_suppressLinkRebuild = true;
+    // suppress 已在 emit massDraggingChanged 前置位（见上方），此处不再重复设置
     auto finalIds = draggedIds;
     QMetaObject::invokeMethod(this, [this, finalIds]() {
         for (auto id : finalIds) {
@@ -2661,6 +2685,7 @@ void WorkspaceController::endMassDrag()
                 rebuildLinkEndpoints();
                 // 过渡期结束：清 lastDraggedId（同 endMoveSection，防旧模块连线被下次拖拽拖走）
                 m_lastDraggedId = INVALID_MODULE_ID;
+                m_lastMassDragIds.clear();  // 多选过渡期集合一并清空
             }
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
@@ -2693,6 +2718,11 @@ bool WorkspaceController::isSectionSelected(qulonglong sectionId) const
     }
     return std::find(IBR_WorkSpace::MassTarget.begin(),
                      IBR_WorkSpace::MassTarget.end(), id) != IBR_WorkSpace::MassTarget.end();
+}
+
+bool WorkspaceController::isLastMassDragged(qulonglong sectionId) const
+{
+    return m_lastMassDragIds.contains(sectionId);
 }
 
 bool WorkspaceController::selectedAllIgnored() const

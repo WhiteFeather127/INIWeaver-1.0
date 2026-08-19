@@ -168,6 +168,9 @@ public:
     // 轻量级选中查询：QML 通过 selectedRevision 触发重新评估
     // MassSelecting 状态下查询 m_massSelectPreview（实时预览），否则查询 MassTarget
     Q_INVOKABLE bool isSectionSelected(qulonglong sectionId) const;
+    // 多选拖拽松手后过渡期查询：松手到收尾 rebuild 完成前，所有被拖节点需继续叠加
+    // dragOffset 防连线弹回（单节点用 m_lastDraggedId，多选用此集合）。详见 buildSectionMap。
+    Q_INVOKABLE bool isLastMassDragged(qulonglong sectionId) const;
     // 多选状态查询（对应 ImGui SelectedAllIgnored/Frozen/Hidden）
     // 用于右键菜单智能互斥显示：全忽略时只显示"取消忽略"，否则只显示"忽略"
     Q_INVOKABLE bool selectedAllIgnored() const;
@@ -514,6 +517,14 @@ private:
     // 哨兵值用 INVALID_MODULE_ID（非 0）：0 是合法 sectionId，会与"无最近拖拽"语义冲突，
     // 导致块 0 被误判为"刚拖过"，其连线端点跟着其他模块的 dragOffset 串动
     qulonglong m_lastDraggedId{INVALID_MODULE_ID};
+
+    // 多选拖拽松手后的被拖节点集合（过渡期防弹回）
+    // 单节点拖动用 m_lastDraggedId（单值）即可；多选拖动有 N 个节点，松手后节点立即跳终点
+    //（sectionPositionChanged 同步 emit），但端点表 rebuild 是 Queued 异步，中间几帧需靠
+    // buildSectionMap 对所有被拖节点叠加 dragOffset 让端点=旧基准+dragOffset=终点与节点一致。
+    // 若只记 front（m_lastDraggedId），非 front 节点端点不叠加 → 用旧基准，节点已终点 → 偏移。
+    // cleanup（收尾 rebuild 完成清 dragOffset）时一并清空。
+    QHash<qulonglong, bool> m_lastMassDragIds;
 
     // ===== 阶段 12.1：MassAfter / 多节点拖拽状态 =====
     // 对应 IBR_WorkSpace.cpp:186-211 的状态变量

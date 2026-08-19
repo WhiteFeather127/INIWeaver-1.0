@@ -19,11 +19,18 @@ Item {
     readonly property bool isIgnored: sectionData.ignored || false
     readonly property bool isComment: sectionData.isComment || false
     // 修复：拖拽视觉状态同时检查 draggingSectionId/massDragging
-    // 因为 beginMoveSection 不再调用 refresh()（避免 Repeater 重建丢失 mouse grab），
-    // sectionData.dragging 在拖拽期间为 false，需通过 draggingSectionId/massDragging 判断
+    // 因为 beginMoveSection/beginMassDrag 不再调用 refresh()（避免 Repeater 重建丢失 mouse grab），
+    // sectionData.dragging/sectionData.selected 在拖拽期间均为快照旧值（false），需通过
+    // draggingSectionId/massDragging + isSelected（动态绑定 isSectionSelected）实时判断。
+    // 多选拖动时若用快照 sectionData.selected（false）→ isDragging=false → updateAllCenters
+    // 不跳过头部回写 → m_sectionAcceptPoint 被实时刷新（y 跟随），而隐藏行 pbX 用旧 EqPos（不动），
+    // onPaint 又因 dstSec.dragging=false 不叠加 dragOffset → 端点只上下动不左右动。
+    // 改用 isSelected（WorkspaceView 已通过 selectedRevision+isSectionSelected 动态绑定）后，
+    // isDragging=true → 头部回写跳过 → m_sectionAcceptPoint 保持旧值 → pbX/pbY 均旧 →
+    // onPaint 叠加 dragOffset → x/y 都正确跟随，且无 y 双重叠加。
     readonly property bool isDragging: (sectionData.dragging || false)
         || (sectionData.sectionId === workspaceController.draggingSectionId)
-        || (workspaceController.massDragging && (sectionData.selected || false))
+        || (workspaceController.massDragging && isSelected)
     readonly property bool isEditing: sectionData.isEditing || false
     readonly property bool isCollapsed: sectionData.collapsed || false
     readonly property bool isVirtualBlock: sectionData.isVirtualBlock || false
