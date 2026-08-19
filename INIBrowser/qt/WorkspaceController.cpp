@@ -818,6 +818,66 @@ void WorkspaceController::selectAll()
     emit selectedRevisionChanged();
 }
 
+void WorkspaceController::selectInvert()
+{
+    // 反选：toggle 所有 section 的 Dynamic.Selected，收集新选中集合同步 MassTarget
+    // 不调 MassSelect（它会设 IsBgDragging=true 污染画布状态机，对齐 ImGui 列表直接改字段）
+    std::vector<ModuleID_t> newTarget;
+    for (auto & [id, data] : IBR_Inst_Project.IBR_SectionMap)
+    {
+        auto sec = IBR_Inst_Project.GetSectionFromID(id);
+        if (sec.HasBack())
+        {
+            auto *back = sec.GetBack_Unsafe();
+            if (back)
+            {
+                back->Dynamic.Selected = !back->Dynamic.Selected;
+                if (back->Dynamic.Selected) newTarget.push_back(id);
+            }
+        }
+    }
+    IBR_WorkSpace::MassTarget = newTarget;
+    if (newTarget.empty()) {
+        updateInputState(0);  // Normal
+    } else {
+        updateInputState(4);  // MassAfter
+    }
+    ++m_selectedRevision;
+    emit selectedRevisionChanged();
+}
+
+void WorkspaceController::toggleSelectSection(qulonglong sectionId)
+{
+    // 列表单行 checkbox toggle：直接改 Dynamic.Selected（对齐 ImGui IBR_ListView.cpp:296
+    // 直接写 sec.Dynamic.Selected），不调 MassSelect 避免 IsBgDragging=true 污染画布状态机
+    ModuleID_t id = static_cast<ModuleID_t>(sectionId);
+    auto sec = IBR_Inst_Project.GetSectionFromID(id);
+    if (sec.HasBack())
+    {
+        auto *back = sec.GetBack_Unsafe();
+        if (back) back->Dynamic.Selected = !back->Dynamic.Selected;
+    }
+    // 收集所有 Dynamic.Selected 同步 MassTarget（画布 isSelected 查 MassTarget 显示选中）
+    std::vector<ModuleID_t> newTarget;
+    for (auto & [sid, data] : IBR_Inst_Project.IBR_SectionMap)
+    {
+        auto s = IBR_Inst_Project.GetSectionFromID(sid);
+        if (s.HasBack())
+        {
+            auto *b = s.GetBack_Unsafe();
+            if (b && b->Dynamic.Selected) newTarget.push_back(sid);
+        }
+    }
+    IBR_WorkSpace::MassTarget = newTarget;
+    if (newTarget.empty()) {
+        updateInputState(0);  // Normal
+    } else {
+        updateInputState(4);  // MassAfter
+    }
+    ++m_selectedRevision;
+    emit selectedRevisionChanged();
+}
+
 void WorkspaceController::composeSelected()
 {
     IBR_WorkSpace::ComposeSelected();

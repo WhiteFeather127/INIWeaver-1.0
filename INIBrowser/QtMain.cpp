@@ -1,4 +1,4 @@
-﻿// QtMain.cpp
+// QtMain.cpp
 // Qt6 + QML 入口点（替代 INIBrowser.cpp 的 wWinMain）
 // 阶段 2：建立 Qt 骨架；阶段 4.1：注册 Controller 为 context property
 // 阶段 6.1：QTimer 驱动主循环（替代 ShellLoop）
@@ -113,6 +113,8 @@ static void debugLog(const char* msg)
 #include "qt/SectionListModel.h"
 #include "qt/MenuController.h"
 #include "qt/SettingController.h"
+
+#include "qt/LocalizationController.h"
 #include "qt/DialogController.h"
 #include "qt/WorkspaceController.h"
 #include "qt/EditPanelController.h"
@@ -263,6 +265,9 @@ int main(int argc, char* argv[])
     SectionListModel sectionListModel;
     MenuController menuController;
     SettingController settingController;
+    // 多语言翻译查询控制器（语言切换复用 SettingController，本控制器只提供 tr + rev 刷新）
+    LocalizationController localizationController;
+    localizationController.connectToLanguageSignal(&settingController);
     DialogController dialogController;
     WorkspaceController workspaceController;
     EditPanelController editPanelController;
@@ -411,6 +416,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty("sectionListModel", &sectionListModel);
     engine.rootContext()->setContextProperty("menuController", &menuController);
     engine.rootContext()->setContextProperty("settingController", &settingController);
+    engine.rootContext()->setContextProperty("i18n", &localizationController);
     engine.rootContext()->setContextProperty("dialogController", &dialogController);
     engine.rootContext()->setContextProperty("workspaceController", &workspaceController);
     engine.rootContext()->setContextProperty("editPanelController", &editPanelController);

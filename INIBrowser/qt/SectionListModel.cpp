@@ -110,6 +110,39 @@ void SectionListModel::refreshFromTimer()
     rebuild();
 }
 
+void SectionListModel::syncSelectionFromWorkspace()
+{
+    // workspace 框选/全选/点击节点后，ExtendMassSelect 已改写 Dynamic.Selected
+    // 列表需同步勾选显示，但不重建行（保留滚动位置/避免闪烁）
+    std::vector<size_t> newSelected;
+    bool anyChanged = false;
+    for (size_t i = 0; i < m_entries.size(); ++i)
+    {
+        bool sel = false;
+        auto sec = IBR_Inst_Project.GetSectionFromID(m_entries[i].sectionId);
+        if (sec.HasBack())
+        {
+            auto *back = sec.GetBack_Unsafe();
+            if (back) sel = back->Dynamic.Selected;
+        }
+        if (sel != m_entries[i].selected)
+        {
+            m_entries[i].selected = sel;
+            anyChanged = true;
+        }
+        if (sel) newSelected.push_back(i);
+    }
+    if (anyChanged)
+    {
+        // 批量通知：全行刷新 SelectedRole（QML delegate 的 selected 绑定更新）
+        QModelIndex first = index(0);
+        QModelIndex last = index(static_cast<int>(m_entries.size()) - 1);
+        emit dataChanged(first, last, {SelectedRole});
+    }
+    m_selectedRows = std::move(newSelected);
+    refreshSelectionStats();
+}
+
 void SectionListModel::select(int row, bool single)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
@@ -276,6 +309,10 @@ void SectionListModel::rebuild()
             auto *back = sec.GetBack_Unsafe();
             if (back)
             {
+                // 读取 Dynamic.Selected（对应 ImGui 每帧重读 sec.Dynamic.Selected）
+                // workspace 框选/全选通过 ExtendMassSelect 改 Dynamic.Selected，
+                // rebuild 时需读取以保持列表与工作区选中状态一致
+                e.selected = back->Dynamic.Selected;
                 auto regName = IBB_Inst_StrPool.GetCStr(back->Register);
                 if (regName && *regName)
                 {
@@ -289,6 +326,8 @@ void SectionListModel::rebuild()
                 }
             }
         }
+        if (e.selected)
+            m_selectedRows.push_back(m_entries.size());
         m_entries.push_back(std::move(e));
     }
     // 应用排序和筛选（对应 IBR_ListView.cpp:317-453）

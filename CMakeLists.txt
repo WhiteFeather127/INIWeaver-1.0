@@ -203,6 +203,8 @@ qt_add_qml_module(INIWeaver
         INIBrowser/qt/MenuController.cpp
         INIBrowser/qt/SettingController.h
         INIBrowser/qt/SettingController.cpp
+        INIBrowser/qt/LocalizationController.h
+        INIBrowser/qt/LocalizationController.cpp
         INIBrowser/qt/DialogController.h
         INIBrowser/qt/DialogController.cpp
         INIBrowser/qt/WorkspaceController.h

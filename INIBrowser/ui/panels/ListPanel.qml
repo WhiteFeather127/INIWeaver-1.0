@@ -26,56 +26,49 @@ Item {
         spacing: 0
         visible: projectController.isOpen
 
-        // ===== 顶部标题栏 + 操作按钮 =====
+        // ===== 顶部操作按钮（Flow 自动换行）=====
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            // 高度自适应：Flow.implicitHeight 为内容高度（1行22 / 2行46），+8 上下 margin
+            Layout.preferredHeight: btnFlow.implicitHeight + 8
             color: "#2d2d2d"
 
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                // 对应 IBR_ListView.cpp:155-157 选中数显示
-                text: qsTr("Section 列表 (") + sectionListModel.selectedCount()
-                      + "/" + sectionListModel.rowCount() + ")"
-                color: "#cccccc"
-                font.pixelSize: 13
-                font.bold: true
-            }
-
             // 操作按钮组（对应 IBR_ListView.cpp:127-152）
-            // 阶段 9.2 新增：Duplicate/Freeze/Hide 三个智能切换按钮
-            Row {
-                anchors.right: parent.right
-                anchors.rightMargin: 4
-                anchors.verticalCenter: parent.verticalCenter
+            // Flow 布局：空间不够时自动换行到下一行
+            // 注意：rowCount 是 QAbstractListModel::rowCount() override（非 Q_PROPERTY），
+            // QML 属性访问返回 undefined → enabled 恒 false（全选一直灰），必须用 rowCount() 函数调用
+            // 而 selectedCount 是 Q_PROPERTY(int)，用属性访问（无括号），加括号会报 not a function
+            Flow {
+                id: btnFlow
+                anchors.fill: parent
+                anchors.margins: 4
                 spacing: 2
 
                 // 全选/取消全选（智能切换文字）
-                // 阶段 9.3：对齐 ImGui IBR_ListView.cpp:127-132 禁用逻辑
-                // FullSelected && SelectN==0（空列表）时显示"全选"但禁用
+                // 对齐 ImGui IBR_ListView.cpp:127-132：
+                //   全选时显示"全不选"(enabled)，未全选显示"全选"(enabled)，空列表显示"全选"(disabled)
                 StyledButton {
-                    width: 48; height: 22
+                    width: 60; height: 22
                     enabled: sectionListModel.rowCount() > 0
                     text: (sectionListModel.rowCount() > 0
-                           && sectionListModel.selectedCount() === sectionListModel.rowCount())
+                           && sectionListModel.selectedCount === sectionListModel.rowCount())
                           ? qsTr("全不选") : qsTr("全选")
                     font.pixelSize: 11
                     onClicked: {
-                        if (sectionListModel.selectedCount() === sectionListModel.rowCount())
-                            sectionListModel.clearSelection()
+                        if (sectionListModel.selectedCount === sectionListModel.rowCount())
+                            workspaceController.clearSelection()
                         else
-                            sectionListModel.selectAll()
+                            workspaceController.selectAll()
                     }
                 }
 
-                // 反选
+                // 反选（走 workspaceController.selectInvert 统一同步）
                 StyledButton {
                     width: 48; height: 22
+                    enabled: sectionListModel.rowCount() > 0
                     text: qsTr("反选")
                     font.pixelSize: 11
-                    onClicked: sectionListModel.selectInvert()
+                    onClicked: workspaceController.selectInvert()
                 }
 
                 // 刷新
@@ -86,57 +79,53 @@ Item {
                     onClicked: sectionListModel.refresh()
                 }
 
-                // 阶段 9.2 新增：Duplicate 按钮（对应 IBR_ListView.cpp:137, 144）
+                // Duplicate 按钮（对应 IBR_ListView.cpp:137, 144）
                 StyledButton {
-                    width: 56; height: 22
-                    enabled: sectionListModel.selectedCount() > 0
+                    width: 64; height: 22
+                    enabled: sectionListModel.selectedCount > 0
                     text: qsTr("复制副本")
                     font.pixelSize: 11
                     onClicked: sectionListModel.duplicate()
                 }
 
-                // 阶段 9.2 新增：Freeze/Unfreeze 智能切换按钮（对应 IBR_ListView.cpp:109, 146-147）
-                // 当所有选中项都已冻结时显示"解冻"，否则显示"冻结"
+                // Freeze/Unfreeze 智能切换按钮（对应 IBR_ListView.cpp:109, 146-147）
                 StyledButton {
                     width: 56; height: 22
-                    enabled: sectionListModel.selectedCount() > 0
-                    // UseUnfreeze = SelectN && (SelAndFrozenN == SelectN)
-                    text: (sectionListModel.selectedCount() > 0
-                           && sectionListModel.selAndFrozenN === sectionListModel.selectedCount())
+                    enabled: sectionListModel.selectedCount > 0
+                    text: (sectionListModel.selectedCount > 0
+                           && sectionListModel.selAndFrozenN === sectionListModel.selectedCount)
                           ? qsTr("解冻") : qsTr("冻结")
                     font.pixelSize: 11
                     onClicked: {
-                        if (sectionListModel.selAndFrozenN === sectionListModel.selectedCount()
-                            && sectionListModel.selectedCount() > 0)
-                            sectionListModel.freezeAll(false)  // 全冻结时解冻
+                        if (sectionListModel.selAndFrozenN === sectionListModel.selectedCount
+                            && sectionListModel.selectedCount > 0)
+                            sectionListModel.freezeAll(false)
                         else
-                            sectionListModel.freezeAll(true)   // 否则冻结所有
+                            sectionListModel.freezeAll(true)
                     }
                 }
 
-                // 阶段 9.2 新增：Hide/Show 智能切换按钮（对应 IBR_ListView.cpp:110, 149-150）
-                // 当所有选中项都已隐藏时显示"显示"，否则显示"隐藏"
+                // Hide/Show 智能切换按钮（对应 IBR_ListView.cpp:110, 149-150）
                 StyledButton {
                     width: 56; height: 22
-                    enabled: sectionListModel.selectedCount() > 0
-                    // UseShow = SelectN && (SelAndHiddenN == SelectN)
-                    text: (sectionListModel.selectedCount() > 0
-                           && sectionListModel.selAndHiddenN === sectionListModel.selectedCount())
+                    enabled: sectionListModel.selectedCount > 0
+                    text: (sectionListModel.selectedCount > 0
+                           && sectionListModel.selAndHiddenN === sectionListModel.selectedCount)
                           ? qsTr("显示") : qsTr("隐藏")
                     font.pixelSize: 11
                     onClicked: {
-                        if (sectionListModel.selAndHiddenN === sectionListModel.selectedCount()
-                            && sectionListModel.selectedCount() > 0)
-                            sectionListModel.hideAll(false)  // 全隐藏时显示
+                        if (sectionListModel.selAndHiddenN === sectionListModel.selectedCount
+                            && sectionListModel.selectedCount > 0)
+                            sectionListModel.hideAll(false)
                         else
-                            sectionListModel.hideAll(true)   // 否则隐藏所有
+                            sectionListModel.hideAll(true)
                     }
                 }
 
                 // 删除
                 StyledButton {
                     width: 48; height: 22
-                    enabled: sectionListModel.selectedCount() > 0
+                    enabled: sectionListModel.selectedCount > 0
                     text: qsTr("删除")
                     font.pixelSize: 11
                     onClicked: sectionListModel.deleteSelected()
@@ -153,13 +142,22 @@ Item {
         // ===== 排序/筛选区 =====
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 116
+            Layout.preferredHeight: 132
             color: "#252525"
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 4
                 spacing: 4
+
+                // 已选计数（对应 IBR_ListView.cpp:155-157 ImGui SelectedCount 显示）
+                // 从顶部标题栏移到此处（按钮下面那行）
+                Text {
+                    text: qsTr("已选 ") + sectionListModel.selectedCount
+                          + "/" + sectionListModel.rowCount()
+                    color: "#cccccc"
+                    font.pixelSize: 11
+                }
 
                 // 第一行：排序 ComboBox + 升降序切换
                 RowLayout {
@@ -338,6 +336,15 @@ Item {
                 }
             }
 
+            // workspace→列表同步：画布框选/全选/点击节点后 selectedRevision 变化，
+            // 列表需同步勾选显示（读 Dynamic.Selected），不重建行避免滚动跳变
+            Connections {
+                target: workspaceController
+                function onSelectedRevisionChanged() {
+                    sectionListModel.syncSelectionFromWorkspace()
+                }
+            }
+
             delegate: Item {
                 width: listView.width
                 height: 32
@@ -349,7 +356,7 @@ Item {
                     // hover/selected 在染色基础上叠加深色覆盖
                     color: {
                         if (selected) return "#37373d"
-                        if (mouseArea.containsMouse) return "#2a2d2e"
+                        if (mouseArea.containsMouse || jumpBtn.hovered) return "#2a2d2e"
                         if (!isComment && registerColor.a > 0) {
                             // registerColor 与背景混合，alpha=0.15
                             return Qt.rgba(registerColor.r, registerColor.g, registerColor.b, 0.15)
@@ -382,7 +389,7 @@ Item {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: sectionListModel.select(index, false)
+                            onClicked: workspaceController.toggleSelectSection(sectionId)
                         }
                     }
 
@@ -449,24 +456,35 @@ Item {
                             font.pixelSize: 10
                             leftPadding: 4; rightPadding: 4
                         }
+                    }
 
-                        // 跳转按钮（对应 IBR_ListView.cpp:303-307 ArrowButton）
-                        Button {
-                            width: 22; height: 22
-                            text: "→"
-                            onClicked: sectionListModel.jumpToSection(index)
-                            background: Rectangle {
-                                color: parent.hovered ? "#3c3c3c" : "transparent"
-                                radius: 2
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                color: parent.hovered ? "#007acc" : "#858585"
-                                font.pixelSize: 12
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
+                    // 跳转按钮（对应 IBR_ListView.cpp:303-307 ArrowButton）
+                    // hover 该行时在最右端显示带边框按钮，点击判定区大（28x26）
+                    // 独立于 statusIcons Row 用 anchors 定位，避免 hover 时布局抖动
+                    Button {
+                        id: jumpBtn
+                        z: 10  // 浮在整行 mouseArea 之上，确保可点击（mouseArea 在其后声明 z 更高）
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 28; height: 26
+                        visible: (mouseArea.containsMouse || jumpBtn.hovered) && !isComment
+                        text: "→"
+                        font.pixelSize: 13
+                        background: Rectangle {
+                            color: jumpBtn.hovered ? "#3c3c3c" : "#2d2d2d"
+                            border.color: jumpBtn.hovered ? "#007acc" : "#3c3c3c"
+                            border.width: 1
+                            radius: 3
                         }
+                        contentItem: Text {
+                            text: jumpBtn.text
+                            color: jumpBtn.hovered ? "#007acc" : "#cccccc"
+                            font: jumpBtn.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: sectionListModel.jumpToSection(index)
                     }
 
                     MouseArea {
@@ -475,11 +493,20 @@ Item {
                         hoverEnabled: true
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: {
+                            // 点跳转按钮区域不触发整行 toggle（按钮 z:10 在上层先处理跳转，
+                            // 但整行 mouseArea 仍会收到事件，需排除按钮区域避免双重触发）
+                            if (jumpBtn.visible
+                                && mouseX >= jumpBtn.x && mouseX <= jumpBtn.x + jumpBtn.width
+                                && mouseY >= jumpBtn.y && mouseY <= jumpBtn.y + jumpBtn.height)
+                                return
                             if (mouse.button === Qt.LeftButton) {
-                                sectionListModel.select(index, true)
+                                // 整行左键单击=toggle 勾选（与 checkbox 一致，对齐 ImGui 多选语义）
+                                workspaceController.toggleSelectSection(sectionId)
                             } else {
-                                // 右键菜单：先选中再弹出（QML 扩展，ImGui 列表无右键）
-                                sectionListModel.select(index, true)
+                                // 右键菜单：未选中则加入选中集合再弹出（QML 扩展，ImGui 列表无右键）
+                                // 用 toggleSelectSection 保持多选语义（已选中则不动，未选中则加入）
+                                if (!selected)
+                                    workspaceController.toggleSelectSection(sectionId)
                                 var gp = mouseArea.mapToGlobal(mouseX, mouseY)
                                 contextMenuHost.show([
                                     { type: "item", text: qsTr("冻结/解冻"), action: "freeze" },
@@ -498,12 +525,6 @@ Item {
                                     // 每帧重读 SectionData 的 Frozen/Hidden/Ignore，两侧天然同步）
                                     workspaceController.refresh()
                                 })
-                            }
-                        }
-                        onDoubleClicked: {
-                            if (mouse.button === Qt.LeftButton) {
-                                // 双击跳转工作区（对应 IBR_ListView.cpp:303-307）
-                                sectionListModel.jumpToSection(index)
                             }
                         }
                     }

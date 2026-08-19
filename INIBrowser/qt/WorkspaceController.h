@@ -268,6 +268,12 @@ public:
     Q_INVOKABLE void paste();
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void selectAll();
+    // 反选：遍历所有 section，取当前未选中的作为新 MassTarget（对应 ImGui 列表 SelectInvert
+    // 直接遍历改 Dynamic.Selected；Qt 版统一走 MassSelect + inputState + selectedRevision）
+    Q_INVOKABLE void selectInvert();
+    // 单行 toggle 勾选：列表 checkbox 点击时调用，toggle 该 id 的选中状态
+    // 单选/多选语义由结果数量决定：0→Normal，1+→MassAfter（蓝框）
+    Q_INVOKABLE void toggleSelectSection(qulonglong sectionId);
     Q_INVOKABLE void composeSelected();
     Q_INVOKABLE void freezeSelected(bool frozen);
     Q_INVOKABLE void hideSelected(bool hidden);

@@ -84,6 +84,10 @@ public:
     Q_INVOKABLE void refresh();
     // QTimer 专用刷新：带脏标记检查，无变化时跳过 rebuild
     void refreshFromTimer();
+    // workspace→列表同步：workspace 框选/全选/点击节点后，ExtendMassSelect 已改写
+    // Dynamic.Selected。列表需同步勾选显示，但不重建行（保留滚动位置/避免闪烁）。
+    // 仅遍历 m_entries 读 back->Dynamic.Selected 更新 e.selected，发 dataChanged。
+    Q_INVOKABLE void syncSelectionFromWorkspace();
     Q_INVOKABLE void select(int row, bool single = true);
     Q_INVOKABLE void freeze(int row, bool frozen);
     Q_INVOKABLE void hide(int row, bool hidden);
