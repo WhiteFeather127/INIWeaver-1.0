@@ -16,7 +16,7 @@ Dialog {
     height: 680
     padding: 0
     closePolicy: Dialog.CloseOnEscape | Dialog.CloseOnPressOutside
-    title: qsTr("导入 INI 预览")
+    title: (i18n.rev, i18n.tr("GUI_ImportIni_Title"))
 
     // 由 onImportPreviewRequested 信号触发后加载
     property variant previewData: ({})
@@ -244,8 +244,9 @@ Dialog {
                 if (!previewData.valid) return ""
                 var s = computeStats()
                 // locc("GUI_ImportIni_Summary") 格式：section 数 / registry 数 / Matched / LinkMatched / Unmatched
-                return qsTr("Section 数: %1  |  注册表列表: %2  |  已匹配: %3  |  链接匹配: %4  |  未匹配: %5")
-                    .arg(s.nonRegistry).arg(s.registry).arg(s.matched).arg(s.linkMatched).arg(s.unmatched)
+                // trF 支持 C 格式串（%zu）与 {} 占位符，按序填 5 个统计值
+                return (i18n.rev, i18n.trF("GUI_ImportIni_Summary",
+                    [s.nonRegistry, s.registry, s.matched, s.linkMatched, s.unmatched]))
             }
             color: "#d4d4d4"
             font.pixelSize: 13
@@ -261,7 +262,7 @@ Dialog {
             CheckBox {
                 checked: isAllSelected()
                 onClicked: toggleSelectAll()
-                text: qsTr("全选")
+                text: (i18n.rev, i18n.tr("GUI_ImportIni_SelectAll"))
 
                 contentItem: Text {
                     text: parent.text
@@ -347,7 +348,7 @@ Dialog {
 
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("以下 Section 与当前项目同名（将覆盖已有数据）：")
+                    text: (i18n.rev, i18n.tr("GUI_ImportIni_ConflictTitle"))
                     color: "#e6a030"
                     font.pixelSize: 12
                     font.bold: true
@@ -408,8 +409,8 @@ Dialog {
                             text: {
                                 var s = computeStats()
                                 if (filterText.length > 0)
-                                    return qsTr("已匹配 (%1/%2)").arg(s.matchedSearch).arg(s.matched)
-                                return qsTr("已匹配 (%1)").arg(s.matched)
+                                    return (i18n.rev, i18n.tr("GUI_ImportIni_Matched") + " (%1/%2)").arg(s.matchedSearch).arg(s.matched)
+                                return (i18n.rev, i18n.tr("GUI_ImportIni_Matched") + " (%1)").arg(s.matched)
                             }
                             color: "#33cc33"
                             font.pixelSize: 13
@@ -473,7 +474,7 @@ Dialog {
 
                                             Text {
                                                 text: "%1  (%2 %3)".arg(modelData.sectionName)
-                                                    .arg(modelData.keyCount).arg(qsTr("个键"))
+                                                    .arg(modelData.keyCount).arg((i18n.rev, i18n.tr("GUI_ImportIni_KeyUnit")))
                                                 color: "#d4d4d4"
                                                 font.pixelSize: 12
                                             }
@@ -556,8 +557,8 @@ Dialog {
                             text: {
                                 var s = computeStats()
                                 if (filterText.length > 0)
-                                    return qsTr("链接匹配 (%1/%2)").arg(s.linkMatchedSearch).arg(s.linkMatched)
-                                return qsTr("链接匹配 (%1)").arg(s.linkMatched)
+                                    return (i18n.rev, i18n.tr("GUI_ImportIni_LinkMatched") + " (%1/%2)").arg(s.linkMatchedSearch).arg(s.linkMatched)
+                                return (i18n.rev, i18n.tr("GUI_ImportIni_LinkMatched") + " (%1)").arg(s.linkMatched)
                             }
                             color: "#0099e6"
                             font.pixelSize: 13
@@ -617,7 +618,7 @@ Dialog {
 
                                             Text {
                                                 text: "%1  (%2 %3)".arg(modelData.sectionName)
-                                                    .arg(modelData.keyCount).arg(qsTr("个键"))
+                                                    .arg(modelData.keyCount).arg((i18n.rev, i18n.tr("GUI_ImportIni_KeyUnit")))
                                                 color: "#d4d4d4"
                                                 font.pixelSize: 12
                                             }
@@ -694,8 +695,8 @@ Dialog {
                             text: {
                                 var s = computeStats()
                                 if (filterText.length > 0)
-                                    return qsTr("未匹配 (%1/%2)").arg(s.unmatchedSearch).arg(s.unmatched)
-                                return qsTr("未匹配 (%1)").arg(s.unmatched)
+                                    return (i18n.rev, i18n.tr("GUI_ImportIni_Unmatched") + " (%1/%2)").arg(s.unmatchedSearch).arg(s.unmatched)
+                                return (i18n.rev, i18n.tr("GUI_ImportIni_Unmatched") + " (%1)").arg(s.unmatched)
                             }
                             color: "#cc3300"
                             font.pixelSize: 13
@@ -732,7 +733,7 @@ Dialog {
 
                                     Text {
                                         text: "%1  (%2 %3)".arg(modelData.sectionName)
-                                            .arg(modelData.keyCount).arg(qsTr("个键"))
+                                            .arg(modelData.keyCount).arg((i18n.rev, i18n.tr("GUI_ImportIni_KeyUnit")))
                                         color: "#d4d4d4"
                                         font.pixelSize: 12
                                     }
@@ -817,7 +818,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("确认导入")
+                text: (i18n.rev, i18n.tr("GUI_ImportIni_Confirm"))
                 enabled: previewData.valid === true
                 onClicked: confirmImport()
 
@@ -839,7 +840,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("取消")
+                text: (i18n.rev, i18n.tr("GUI_Cancel"))
                 onClicked: cancelImport()
 
                 background: Rectangle {

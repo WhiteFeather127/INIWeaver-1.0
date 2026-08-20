@@ -505,7 +505,8 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: qsTr("显示所有内部块 (") + (sectionData.hiddenCount || 0) + ")"
+                text: (i18n.rev, i18n.trF("GUI_ShowAllIncludingBlocks",
+                        [sectionData.hiddenCount || 0]))
                 color: "#4fc3f7"
                 font.pixelSize: root.fontBody
             }
@@ -727,34 +728,34 @@ Item {
     function buildSectionDescs() {
         var descs = []
         // 状态操作（智能互斥：按节点当前状态只显示可执行项）
-        descs.push({ type: "item", text: root.isIgnored ? qsTr("取消忽略") : qsTr("忽略"), action: "ignore" })
+        descs.push({ type: "item", text: root.isIgnored ? (i18n.rev, i18n.tr("GUI_NoIgnore")) : (i18n.rev, i18n.tr("GUI_Ignore")), action: "ignore" })
         if (!root.isComment) {
-            descs.push({ type: "item", text: root.isFrozen ? qsTr("解冻") : qsTr("冻结"), action: "freeze" })
-            descs.push({ type: "item", text: root.isHidden ? qsTr("显示") : qsTr("隐藏"), action: "hide" })
+            descs.push({ type: "item", text: root.isFrozen ? (i18n.rev, i18n.tr("GUI_UnfreezeSec")) : (i18n.rev, i18n.tr("GUI_FreezeSec")), action: "freeze" })
+            descs.push({ type: "item", text: root.isHidden ? (i18n.rev, i18n.tr("GUI_ShowSec")) : (i18n.rev, i18n.tr("GUI_HideSec")), action: "hide" })
         }
         // 虚拟块折叠/展开（对应 IBR_SectionData.cpp:677-695）
         if (root.isVirtualBlock) {
             var allFold = sectionData.isComposedAllFold || false
-            descs.push({ type: "item", text: allFold ? qsTr("展开内部块") : qsTr("折叠内部块"),
+            descs.push({ type: "item", text: allFold ? (i18n.rev, i18n.tr("GUI_UnfoldComposed")) : (i18n.rev, i18n.tr("GUI_FoldComposed")),
                          action: allFold ? "unfold" : "fold" })
         }
         // 编辑操作（对应 IBR_SectionData.cpp:697-706）
-        descs.push({ type: "item", text: qsTr("重命名 (F2)"), action: "rename" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Rename") + " (F2)"), action: "rename" })
         if (!root.isComment) {
-            descs.push({ type: "item", text: qsTr("重命名寄存器名 (F3)"), action: "regRename" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_RegRename") + " (F3)"), action: "regRename" })
         }
         // 复制（对应 IBR_SectionData.cpp:707-711）
-        descs.push({ type: "item", text: qsTr("复制"), action: "copy" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Copy")), action: "copy" })
         // 解散虚拟块（对应 IBR_SectionData.cpp:712-719，Decomposable 时显示）
         if (root.isVirtualBlock) {
-            descs.push({ type: "item", text: qsTr("解散虚拟块"), action: "decompose" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Decompose")), action: "decompose" })
         }
         // 编辑文本（对应 IBR_SectionData.cpp:720-724）
         if (!root.isComment) {
-            descs.push({ type: "item", text: qsTr("编辑文本"), action: "editText" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_SwitchToTextEdit")), action: "editText" })
         }
         // 删除（对应 IBR_SectionData.cpp:725-727）
-        descs.push({ type: "item", text: qsTr("删除"), action: "delete" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Delete")), action: "delete" })
         return descs
     }
 }

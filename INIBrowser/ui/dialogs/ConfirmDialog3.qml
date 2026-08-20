@@ -64,7 +64,7 @@ Dialog {
             // 保存按钮（对应 GUI_AskIfSave_Yes）
             Button {
                 width: 110; height: 32
-                text: qsTr("保存")
+                text: (i18n.rev, i18n.tr("GUI_AskIfSave_Yes"))
                 background: Rectangle {
                     color: parent.hovered ? "#007acc" : "#3c3c3c"
                     border.color: "#007acc"; border.width: 1; radius: 3
@@ -83,7 +83,7 @@ Dialog {
             // 不保存按钮（对应 GUI_AskIfSave_No）
             Button {
                 width: 110; height: 32
-                text: qsTr("不保存")
+                text: (i18n.rev, i18n.tr("GUI_AskIfSave_No"))
                 background: Rectangle {
                     color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
                     border.color: "#3c3c3c"; border.width: 1; radius: 3
@@ -102,7 +102,7 @@ Dialog {
             // 取消按钮（对应 GUI_AskIfSave_Cancel）
             Button {
                 width: 110; height: 32
-                text: qsTr("取消")
+                text: (i18n.rev, i18n.tr("GUI_AskIfSave_Cancel"))
                 background: Rectangle {
                     color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
                     border.color: "#3c3c3c"; border.width: 1; radius: 3

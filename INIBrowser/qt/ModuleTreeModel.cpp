@@ -282,7 +282,8 @@ QVariantList ModuleTreeModel::searchWithConsider(const QString &text,
                                                    bool considerDesc) const
 {
     QVariantList results;
-    if (text.isEmpty()) return results;
+    // 空串不短路：底层 Search("") 的 find 恒匹配（IBB_ModuleAlt.cpp:833），返回所有模块；
+    // 对应 ImGui SearchModuleAlt 空白时显示全部
 
     auto results_raw = IBB_ModuleAltDefault::Search(
         text.toStdString(), considerRegName, considerDescName, considerDesc);

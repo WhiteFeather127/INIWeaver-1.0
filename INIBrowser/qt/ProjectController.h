@@ -92,7 +92,7 @@ public slots:
     // 文件已存在检查（对应 ImGui 版 PathFileExistsW 警告）
     Q_INVOKABLE bool fileExists(const QString &path) const;
     void importIni();
-    // 带参数版本：由 ImportIniDialog 调用，直接使用指定路径
+    // 带参数版本：由系统文件对话框（QFileDialog）选路径后直接导入指定路径
     Q_INVOKABLE void importIni(const QString &path);
     void undo();
     void redo();

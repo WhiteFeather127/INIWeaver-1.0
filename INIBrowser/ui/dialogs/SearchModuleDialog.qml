@@ -14,7 +14,7 @@ Dialog {
     height: 420
     padding: 0
     closePolicy: Dialog.CloseOnEscape | Dialog.CloseOnPressOutside
-    title: qsTr("搜索模块")
+    title: (i18n.rev, i18n.tr("GUI_Search_Title"))
 
     background: Rectangle {
         color: "#252526"
@@ -76,7 +76,7 @@ Dialog {
             CheckBox {
                 id: considerDescName
                 checked: true
-                text: qsTr("名称")
+                text: (i18n.rev, i18n.tr("GUI_Search_Name"))
                 onToggled: doSearch()
 
                 contentItem: Text {
@@ -106,7 +106,7 @@ Dialog {
             CheckBox {
                 id: considerRegName
                 checked: true
-                text: qsTr("寄存器名")
+                text: (i18n.rev, i18n.tr("GUI_Search_RegName"))
                 onToggled: doSearch()
 
                 contentItem: Text {
@@ -136,7 +136,7 @@ Dialog {
             CheckBox {
                 id: considerDesc
                 checked: true
-                text: qsTr("描述")
+                text: (i18n.rev, i18n.tr("GUI_Search_Desc"))
                 onToggled: doSearch()
 
                 contentItem: Text {
@@ -182,7 +182,7 @@ Dialog {
                 id: searchInput
                 Layout.fillWidth: true
                 Layout.preferredHeight: 26
-                placeholderText: qsTr("输入关键字后回车搜索...")
+                placeholderText: (i18n.rev, i18n.tr("GUI_Search_Tip") + "...")
                 color: "#d4d4d4"
                 font.pixelSize: 12
                 selectByMouse: true
@@ -199,10 +199,10 @@ Dialog {
             }
         }
 
-        // 搜索提示（对应 GUI_Search_Tip）
+        // 搜索提示（对齐 ImGui GUI_Search_Tip，值为"按回车搜索"）
         Text {
             Layout.fillWidth: true
-            text: qsTr("点击结果项添加模块到工作区")
+            text: (i18n.rev, i18n.tr("GUI_Search_Tip"))
             color: "#858585"
             font.pixelSize: 11
             wrapMode: Text.Wrap
@@ -268,8 +268,8 @@ Dialog {
             Layout.fillWidth: true
             Layout.preferredHeight: 16
             text: resultModel.count > 0
-                  ? qsTr("共 %1 个结果").arg(resultModel.count)
-                  : qsTr("无结果")
+                  ? (i18n.rev, i18n.trF("GUI_SearchResultCount", [resultModel.count]))
+                  : (i18n.rev, i18n.tr("GUI_SearchNoResult"))
             color: "#858585"
             font.pixelSize: 11
         }
@@ -281,10 +281,10 @@ Dialog {
     }
 
     // 执行搜索（对应 ImGui 中 ToUpdate=true 时调用 Update(Search(...))）
+    // 搜索框为空时也执行搜索：底层 Search("") 的 find 恒匹配，返回所有模块（对应 ImGui）
     function doSearch() {
         var text = searchInput.text.trim()
         resultModel.clear()
-        if (text.length === 0) return
 
         var results = moduleTreeModel.searchWithConsider(
             text, considerRegName.checked, considerDescName.checked, considerDesc.checked)

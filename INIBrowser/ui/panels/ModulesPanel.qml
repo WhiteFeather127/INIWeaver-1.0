@@ -22,7 +22,7 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("模块")
+            text: (i18n.rev, i18n.tr("GUI_MenuItem_Modules"))
             color: "#cccccc"
             font.pixelSize: 13
             font.bold: true
@@ -32,7 +32,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("折叠全部")
+            text: (i18n.rev, i18n.tr("GUI_FoldAllModules"))
             width: 64
             height: 22
             enabled: !moduleTreeModel.isEmpty
@@ -72,7 +72,7 @@ Item {
                 id: searchField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 24
-                placeholderText: qsTr("搜索模块...")
+                placeholderText: (i18n.rev, i18n.tr("GUI_SearchSection") + "...")
                 color: "#d4d4d4"
                 font.pixelSize: 12
                 selectByMouse: true
@@ -105,7 +105,7 @@ Item {
                 StyledCheckBox {
                     checked: moduleTreeModel.includeSpecial
                     onToggled: moduleTreeModel.includeSpecial = checked
-                    text: qsTr("包含特殊模块")
+                    text: (i18n.rev, i18n.tr("GUI_IncludeSpecial"))
                     font.pixelSize: 11
                 }
 
@@ -130,7 +130,7 @@ Item {
         visible: moduleTreeModel.isEmpty
         color: "#5a5a5a"
         font.pixelSize: 13
-        text: qsTr("无可用模块")
+        text: (i18n.rev, i18n.tr("GUI_NoModuleAvailable"))
     }
 
     // 模块树列表

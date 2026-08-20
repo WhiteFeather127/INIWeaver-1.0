@@ -2,6 +2,8 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
+#include <QVariantList>
 
 // LocalizationController：Qt/QML 侧多语言翻译查询桥接层
 // 对接 ImGui 版 IBR_L10n（INI 存储，locc("GUI_key") 查 CurrentMap）
@@ -31,6 +33,12 @@ public:
     // 查询翻译：key 为 GUI_* 前缀的字符串 key（对应 locc("GUI_SelectAll")）
     // 找不到返回 key 本身，开发期可直接看到未翻译项
     Q_INVOKABLE QString tr(const QString &key) const;
+
+    // 带格式的翻译查询：支持 C 风格格式符（%s %d %zu %.1f ...）与 {}（std::vformat）占位符
+    // 内部统一转为 Qt 的 %1 %2 ... 后按顺序填充；数值请由 QML 侧先格式化（如 fps.toFixed(1)）
+    // 用法：i18n.trF("GUI_TopRightHint", [appName, version, fps])
+    // 找不到 key 时返回 key 本身（与 tr 一致）
+    Q_INVOKABLE QString trF(const QString &key, const QVariantList &args) const;
 
     // 连接 SettingController::languagesChanged → 本控制器递增 rev + emit languageChanged
     // 在 QtMain 中创建后立即调用，建立信号链

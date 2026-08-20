@@ -85,7 +85,8 @@ Item {
             var name = showReg ? (lk.destKey || "") : (lk.destDisplayName || "")
             if (name.length > 0) names.push(name)
         }
-        return names.length > 0 ? qsTr("链接到: ") + names.join(", ") : ""
+        return names.length > 0 ? (i18n.rev, i18n.trF("GUI_Preview_LinkTo",
+                                [names.join(", ")])) : ""
     }
 
     // ===== 交互 MouseArea（对应 RadioButton 点击/右键/Hover/DragDropSource） =====
@@ -166,7 +167,7 @@ Item {
                         // LinkLimit=0 无法建链：源端红叉"无效链接" + 目标红色预览
                         // 对应 ImGui DrawDragPreviewIcon_LinkLim0（IBR_SectionData.cpp:96-106）
                         workspaceController.setDragInvalidLink(true)
-                        workspaceController.setDragTarget(targetId, "#d63b3b", qsTr("无效链接"))
+                        workspaceController.setDragTarget(targetId, "#d63b3b", (i18n.rev, i18n.tr("GUI_Preview_InvalidLink")))
                     } else {
                         var code = workspaceController.checkMergePreview(
                             root.sectionData.sectionId, targetId, root.linkType, true)
@@ -203,21 +204,21 @@ Item {
         var descs = []
         if (root.linkLimit === 1) {
             // 单一链接：只显示"解除链接"
-            descs.push({ type: "item", text: qsTr("解除链接"), action: "unlink" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Unlink")), action: "unlink" })
         } else if (root.links.length === 0) {
-            // 空链接：显示禁用的"(无链接)"
-            descs.push({ type: "item", text: qsTr("(无链接)"), action: "none", enabled: false })
+            // 空链接：右键仅在 !isEmpty 时触发（对应 ImGui L479），此兜底分支不显示菜单项
+            return descs
         } else {
             // 列出所有链接：每个链接一个 checkable 项（对应 ImGui RadioButton UseLink）
             for (var j = 0; j < root.links.length; j++) {
                 var lk = root.links[j]
-                var txt = (lk.destDisplayName || lk.destKey || qsTr("(未知)"))
-                         + (lk.isSelfLink ? qsTr(" [自连]") : "")
-                descs.push({ type: "item", text: txt, action: "link:" + j,
-                             checkable: true, checked: true })
+                // 对齐 ImGui L505/L530：显示名或注册名；无对应 GUI_ key，不追加自连标记。
+                // 保留每个索引的 push（即使文本为空），保证 onMenuClosed 的 checkedStates 索引对齐，不误删链接
+                descs.push({ type: "item", text: (lk.destDisplayName || lk.destKey || ""),
+                             action: "link:" + j, checkable: true, checked: true })
             }
             descs.push({ type: "separator" })
-            descs.push({ type: "item", text: qsTr("解除所有链接"), action: "unlinkAll" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_UnlinkAll")), action: "unlinkAll" })
         }
         return descs
     }

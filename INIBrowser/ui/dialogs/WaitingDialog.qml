@@ -34,7 +34,7 @@ Dialog {
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: qsTr("处理中...")
+            text: (i18n.rev, i18n.tr("GUI_WaitingText"))
         }
 
         // 加载动画
@@ -50,7 +50,7 @@ Dialog {
     Connections {
         target: dialogController
         function onWaitingShown(message) {
-            messageText.text = message.length > 0 ? message : qsTr("处理中...")
+            messageText.text = message.length > 0 ? message : (i18n.rev, i18n.tr("GUI_WaitingText"))
             root.open()
         }
         function onWaitingHidden() {

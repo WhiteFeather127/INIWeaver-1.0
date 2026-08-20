@@ -14,7 +14,7 @@ Dialog {
     width: 560
     height: Math.min(620, 250 + iniRows.length * 44)
     padding: 0
-    title: qsTr("导出")
+    title: (i18n.rev, i18n.tr("GUI_Output_Title"))
 
     // 数据行 [{name: INI 类型名, fileName: 默认文件名}]，由 loadData() 拉取
     property var iniRows: []
@@ -64,7 +64,7 @@ Dialog {
                 spacing: 4
 
                 Text {
-                    text: qsTr("输出目录")
+                    text: (i18n.rev, i18n.tr("GUI_Output_Path"))
                     color: "#d4d4d4"
                     font.pixelSize: 12
                 }
@@ -88,7 +88,7 @@ Dialog {
                 Button {
                     Layout.preferredWidth: 72
                     Layout.preferredHeight: 30
-                    text: qsTr("浏览...")
+                    text: (i18n.rev, i18n.tr("GUI_Browse") + "...")
                     onClicked: folderDialog.open()
 
                     background: Rectangle {
@@ -113,8 +113,8 @@ Dialog {
                 visible: dirField.text.length === 0
                          || !projectController.dirExists(dirField.text)
                 text: dirField.text.length === 0
-                      ? qsTr("路径为空")
-                      : qsTr("目录不存在")
+                      ? (i18n.rev, i18n.tr("GUI_Output_Error1"))
+                      : (i18n.rev, i18n.tr("GUI_Output_Error2"))
                 color: "#f48771"
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
@@ -179,21 +179,11 @@ Dialog {
                             visible: dirField.text.length > 0
                                      && nameField.text.length > 0
                                      && projectController.fileExists(dirField.text + "/" + nameField.text)
-                            text: qsTr("文件已存在")
+                            text: (i18n.rev, i18n.tr("GUI_Output_Warning1"))
                             color: "#d7ba7d"
                             font.pixelSize: 11
                         }
                     }
-                }
-
-                // 无可导出 INI 时的提示
-                Text {
-                    Layout.fillWidth: true
-                    visible: root.iniRows.length === 0
-                    text: qsTr("当前项目没有可导出的 INI")
-                    color: "#888888"
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
                 }
             }
         }
@@ -207,7 +197,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("导出")
+                text: (i18n.rev, i18n.tr("GUI_OK"))
                 // 目录有效即可导出（对应 ImGui 版 OK 启用条件：WP 非空且 IsExistingDir）
                 enabled: dirField.text.length > 0
                          && projectController.dirExists(dirField.text)
@@ -242,7 +232,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("取消")
+                text: (i18n.rev, i18n.tr("GUI_Cancel"))
                 onClicked: root.close()
 
                 background: Rectangle {

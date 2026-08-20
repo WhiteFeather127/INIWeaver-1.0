@@ -167,7 +167,6 @@ qt_add_qml_module(INIWeaver
         INIBrowser/ui/dialogs/ConfirmDialog3.qml
         INIBrowser/ui/dialogs/ExportDialog.qml
         INIBrowser/ui/dialogs/ExportModuleDialog.qml
-        INIBrowser/ui/dialogs/ImportIniDialog.qml
         INIBrowser/ui/dialogs/ImportPreviewDialog.qml
         INIBrowser/ui/dialogs/WaitingDialog.qml
         INIBrowser/ui/dialogs/MessageDialog.qml

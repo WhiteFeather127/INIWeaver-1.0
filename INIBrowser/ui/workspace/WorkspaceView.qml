@@ -371,26 +371,26 @@ Item {
     function massAfterDescs() {
         var descs = []
         if (workspaceController.massTargetIds().length === 0) return descs
-        descs.push({ type: "item", text: qsTr("复制"), action: "copy" })
-        descs.push({ type: "item", text: qsTr("剪切"), action: "cut" })
-        descs.push({ type: "item", text: qsTr("粘贴"), action: "paste" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Copy")), action: "copy" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Cut")), action: "cut" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Paste")), action: "paste" })
         // 智能互斥：全忽略只显示"取消忽略"，否则只显示"忽略"；冻结/隐藏同理
         if (workspaceController.selectedAllIgnored())
-            descs.push({ type: "item", text: qsTr("取消忽略"), action: "unignore" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_NoIgnore")), action: "unignore" })
         else
-            descs.push({ type: "item", text: qsTr("忽略"), action: "ignore" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Ignore")), action: "ignore" })
         if (workspaceController.selectedAllFrozen())
-            descs.push({ type: "item", text: qsTr("解冻"), action: "unfreeze" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_UnfreezeSec")), action: "unfreeze" })
         else
-            descs.push({ type: "item", text: qsTr("冻结"), action: "freeze" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_FreezeSec")), action: "freeze" })
         if (workspaceController.selectedAllHidden())
-            descs.push({ type: "item", text: qsTr("显示"), action: "show" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_ShowSec")), action: "show" })
         else
-            descs.push({ type: "item", text: qsTr("隐藏"), action: "hide" })
-        descs.push({ type: "item", text: qsTr("缩合"), action: "compose" })
-        descs.push({ type: "item", text: qsTr("导出模块"), action: "outputModule" })
-        descs.push({ type: "item", text: qsTr("克隆"), action: "duplicate" })
-        descs.push({ type: "item", text: qsTr("删除"), action: "delete" })
+            descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_HideSec")), action: "hide" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Compose")), action: "compose" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_ExportModule")), action: "outputModule" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Duplicate")), action: "duplicate" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Delete")), action: "delete" })
         return descs
     }
 
@@ -441,16 +441,7 @@ Item {
         visible: workspaceController.sections.length === 0 && workspaceController.isProjectOpen
         color: "#5a5a5a"
         font.pixelSize: 14
-        text: qsTr("从左侧模块面板拖入模块开始编辑")
-    }
-
-    // 未打开项目提示
-    Text {
-        anchors.centerIn: parent
-        visible: !workspaceController.isProjectOpen
-        color: "#5a5a5a"
-        font.pixelSize: 14
-        text: qsTr("请先打开或新建项目")
+        text: (i18n.rev, i18n.tr("GUI_WorkspaceEmpty"))
     }
 
     // 拖拽目标预览（对应 ImGui DrawDragPreviewIcon，IBR_SectionData.cpp:108-129）

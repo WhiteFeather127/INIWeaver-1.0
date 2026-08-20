@@ -15,12 +15,13 @@ ScrollView {
         width: root.availableWidth
         spacing: 8
 
-        // 版本信息（对应 ImGui TextWrapped GUI_About1，读取 Version）
+        // 版本信息（对应 ImGui TextWrapped GUI_About1，参数1用 AppName）
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
             Layout.topMargin: 8
-            text: qsTr("INIWeaver 织网者") + " v" + projectController.versionString
+            text: (i18n.rev, i18n.trF("GUI_About1",
+                  [i18n.tr("AppName"), projectController.versionString]))
             color: "#e0e0e0"; font.pixelSize: 16; font.bold: true
             wrapMode: Text.Wrap
         }
@@ -28,7 +29,7 @@ ScrollView {
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            text: qsTr("Copyright © INIWeaver Contributors")
+            text: (i18n.rev, i18n.tr("GUI_About_Copyright"))
             color: "#909090"; font.pixelSize: 12
             wrapMode: Text.Wrap
         }
@@ -37,7 +38,7 @@ ScrollView {
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            text: qsTr("Powered by: Qt6 / GLFW / Dear ImGui / cJSON / FmtLib")
+            text: "Powered by: Qt6 / GLFW / Dear ImGui / cJSON / FmtLib"
             color: "#909090"; font.pixelSize: 12
             wrapMode: Text.Wrap
         }
@@ -49,19 +50,59 @@ ScrollView {
             Layout.preferredHeight: 1; color: "#1e1e1e"
         }
 
-        // 致谢（对应 ImGui TextWrapped GUI_About5/6/8）
+        // 致谢（对应 ImGui TextWrapped GUI_About5/6/8 + 名单裸串）
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            text: qsTr("致谢")
-            color: "#e0e0e0"; font.pixelSize: 13; font.bold: true
+            text: (i18n.rev, i18n.tr("GUI_About5"))
+            color: "#e0e0e0"; font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16; Layout.rightMargin: 8
+            text: "钢铁之锤 / Kenosis / 白羽鸽"
+            color: "#909090"; font.pixelSize: 12
             wrapMode: Text.Wrap
         }
 
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            text: qsTr("钢铁之锤 / Kenosis / 白羽鸽 / 九千天华")
+            text: (i18n.rev, i18n.tr("GUI_About6"))
+            color: "#e0e0e0"; font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16; Layout.rightMargin: 8
+            text: "Kenosis"
+            color: "#909090"; font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8; Layout.rightMargin: 8
+            text: (i18n.rev, i18n.tr("GUI_About8"))
+            color: "#e0e0e0"; font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 16; Layout.rightMargin: 8
+            text: "九千天华"
+            color: "#909090"; font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8; Layout.rightMargin: 8
+            text: (i18n.rev, i18n.tr("GUI_About2"))
             color: "#909090"; font.pixelSize: 12
             wrapMode: Text.Wrap
         }
@@ -78,7 +119,7 @@ ScrollView {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
             Layout.preferredHeight: 36
-            text: qsTr("许可证信息")
+            text: (i18n.rev, i18n.tr("GUI_About_License"))
             font.pixelSize: 13
             onClicked: licenseDialog.open()
         }
@@ -88,7 +129,7 @@ ScrollView {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
             Layout.preferredHeight: 36
-            text: qsTr("鸣谢")
+            text: (i18n.rev, i18n.tr("GUI_About_Acknowledgments"))
             font.pixelSize: 13
             onClicked: ackDialog.open()
         }
@@ -101,39 +142,31 @@ ScrollView {
         }
 
         // 链接区域（对应 URLOpr lambda）
-        Text {
-            Layout.fillWidth: true
-            Layout.leftMargin: 8; Layout.rightMargin: 8
-            text: qsTr("相关链接")
-            color: "#e0e0e0"; font.pixelSize: 13; font.bold: true
-            wrapMode: Text.Wrap
-        }
-
         // 文档链接
         LinkRow {
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            label: qsTr("在线文档")
+            label: (i18n.rev, i18n.tr("GUI_About7"))
             url: "https://inibrowser-02-chinese.readthedocs.io/zh-cn/latest/Info.html"
         }
 
         // BUG 反馈
         LinkRow {
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            label: qsTr("问题反馈")
+            label: (i18n.rev, i18n.tr("GUI_About3"))
             url: "https://docs.qq.com/form/page/DWXdKYUFRV1dHSnNE"
         }
 
         // 仓库链接
         LinkRow {
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            label: qsTr("GitHub 仓库")
+            label: (i18n.rev, i18n.tr("GUI_About4"))
             url: "https://github.com/ra2diy/INIWeaver-1.0"
         }
 
         // 许可证链接
         LinkRow {
             Layout.leftMargin: 8; Layout.rightMargin: 8
-            label: qsTr("LGPL 许可证")
+            label: (i18n.rev, i18n.tr("GUI_About_License"))
             url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"
         }
 
@@ -143,7 +176,7 @@ ScrollView {
     // 许可证弹窗（对应 IBR_PopupManager Popup GUI_About_License）
     Dialog {
         id: licenseDialog
-        title: qsTr("许可证信息")
+        title: (i18n.rev, i18n.tr("GUI_About_License"))
         modal: true
         anchors.centerIn: parent
         width: 480; height: 400
@@ -152,12 +185,38 @@ ScrollView {
 
         contentItem: ScrollView {
             clip: true
-            Text {
+            Column {
+                anchors.margins: 0
                 width: licenseDialog.width - 32
-                color: "#e0e0e0"
-                font.pixelSize: 12
-                wrapMode: Text.Wrap
-                text: qsTr("INIWeaver 基于 LGPL-2.1 许可证发布。\n\n源代码仓库：https://github.com/ra2diy/INIWeaver-1.0\n许可证全文：https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html\n\n本程序使用以下第三方库：\n- Qt6 (LGPLv3)\n- GLFW (zlib License)\n- Dear ImGui (MIT License)\n- cJSON (MIT License)\n- fmtlib (MIT License)")
+                spacing: 8
+                Text {
+                    width: parent.width
+                    color: "#e0e0e0"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_1"))
+                }
+                Text {
+                    width: parent.width
+                    color: "#e0e0e0"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_2"))
+                }
+                Text {
+                    width: parent.width
+                    color: "#e0e0e0"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_3"))
+                }
+                Text {
+                    width: parent.width
+                    color: "#e0e0e0"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_4"))
+                }
             }
         }
 
@@ -167,7 +226,7 @@ ScrollView {
     // 鸣谢弹窗（对应 IBR_PopupManager Popup GUI_About_Acknowledgments）
     Dialog {
         id: ackDialog
-        title: qsTr("鸣谢")
+        title: (i18n.rev, i18n.tr("GUI_About_Acknowledgments"))
         modal: true
         anchors.centerIn: parent
         width: 400; height: 300
@@ -178,7 +237,7 @@ ScrollView {
             color: "#e0e0e0"
             font.pixelSize: 12
             wrapMode: Text.Wrap
-            text: qsTr("感谢所有为 INIWeaver 项目做出贡献的开发者、测试者和翻译者。\n\n特别感谢：\n钢铁之锤 / Kenosis / 白羽鸽 / 九千天华\n\n感谢社区提供的宝贵反馈与支持。")
+            text: (i18n.rev, i18n.tr("GUI_About_AcknowledgmentsInfo"))
         }
 
         standardButtons: Dialog.Close

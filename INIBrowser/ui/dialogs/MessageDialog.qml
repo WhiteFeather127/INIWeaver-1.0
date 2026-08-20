@@ -79,7 +79,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("确定")
+                text: (i18n.rev, i18n.tr("GUI_OK"))
                 enabled: root.canClose
                 onClicked: root.close()
 

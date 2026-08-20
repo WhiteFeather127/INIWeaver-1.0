@@ -30,7 +30,7 @@ Rectangle {
         spacing: 4
 
         Button {
-            text: qsTr("复制")
+            text: (i18n.rev, i18n.tr("GUI_CopyLinkToClipboard"))
             width: 44; height: 22
             onClicked: {
                 // 对应 ImGui LogToClipboard
@@ -47,7 +47,7 @@ Rectangle {
         }
 
         Button {
-            text: qsTr("打开")
+            text: (i18n.rev, i18n.tr("GUI_OpenLink"))
             width: 44; height: 22
             onClicked: {
                 // 对应 ImGui ShellExecuteA

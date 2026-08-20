@@ -25,7 +25,7 @@ ScrollView {
             StyledButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
-                text: qsTr("保存")
+                text: (i18n.rev, i18n.tr("GUI_Save"))
                 enabled: projectController.isOpen
                 font.pixelSize: 13
                 onClicked: projectController.saveProject()
@@ -34,7 +34,7 @@ ScrollView {
             StyledButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
-                text: qsTr("另存为")
+                text: (i18n.rev, i18n.tr("GUI_SaveAs"))
                 enabled: projectController.isOpen
                 font.pixelSize: 13
                 onClicked: projectController.saveAsProject()
@@ -45,7 +45,7 @@ ScrollView {
             StyledButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
-                text: qsTr("导出")
+                text: (i18n.rev, i18n.tr("GUI_Output"))
                 enabled: projectController.canExport
                 font.pixelSize: 13
                 onClicked: dialogController.showExportDialog()
@@ -63,7 +63,7 @@ ScrollView {
             StyledButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
-                text: qsTr("关闭项目")
+                text: (i18n.rev, i18n.tr("GUI_CloseProject"))
                 enabled: projectController.isOpen
                 font.pixelSize: 13
                 onClicked: projectController.newProject()
@@ -72,7 +72,7 @@ ScrollView {
             StyledButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
-                text: qsTr("打开项目")
+                text: (i18n.rev, i18n.tr("GUI_OpenProject"))
                 font.pixelSize: 13
                 onClicked: projectController.openProject()
             }
@@ -84,22 +84,22 @@ ScrollView {
             Layout.leftMargin: 8
             Layout.rightMargin: 8
             Layout.preferredHeight: 36
-            text: qsTr("设置文件关联")
+            text: (i18n.rev, i18n.tr("GUI_SetFileAssoc"))
             font.pixelSize: 13
             onClicked: projectController.setFileAssociation()
         }
 
         // 导入 INI 按钮（占满整行）
-        // 通过 dialogController.showImportDialog() 触发 QML 弹窗（替代原 ImGui 弹窗）
+        // 对齐 ImGui ImportIniAction：直接用系统文件对话框选 .ini，不再有中间 ImportIniDialog
         StyledButton {
             Layout.fillWidth: true
             Layout.leftMargin: 8
             Layout.rightMargin: 8
             Layout.preferredHeight: 36
-            text: qsTr("导入 INI")
+            text: (i18n.rev, i18n.tr("GUI_ImportIni"))
             enabled: projectController.isOpen
             font.pixelSize: 13
-            onClicked: dialogController.showImportDialog("")
+            onClicked: projectController.importIni()
         }
 
         // 分隔线
@@ -115,7 +115,7 @@ ScrollView {
         Text {
             Layout.leftMargin: 8
             Layout.rightMargin: 8
-            text: qsTr("最近文件")
+            text: (i18n.rev, i18n.tr("GUI_Recent"))
             color: "#cccccc"
             font.pixelSize: 13
             font.bold: true
@@ -127,7 +127,7 @@ ScrollView {
             Layout.leftMargin: 8
             Layout.rightMargin: 8
             Layout.preferredHeight: 28
-            text: qsTr("清空最近文件")
+            text: (i18n.rev, i18n.tr("GUI_ClearRecent"))
             enabled: projectController.recentFiles.length > 0
             font.pixelSize: 12
             onClicked: projectController.clearRecentFiles()
@@ -153,7 +153,7 @@ ScrollView {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 48
                     height: 24
-                    text: qsTr("打开")
+                    text: (i18n.rev, i18n.tr("GUI_Open"))
                     font.pixelSize: 12
                     onClicked: projectController.openRecentProject(modelData)
                 }

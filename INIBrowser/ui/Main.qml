@@ -150,13 +150,13 @@ ApplicationWindow {
                     }
                 }
 
-                // 未加载面板时的占位文本
+                // 未加载面板时的占位文本（对应 ImGui 等待框文字 GUI_WaitingText）
                 Text {
                     anchors.centerIn: parent
                     visible: panelLoader.status != Loader.Ready
                     color: "#858585"
                     font.pixelSize: 14
-                    text: qsTr("加载中...")
+                    text: (i18n.rev, i18n.tr("GUI_WaitingText"))
                 }
             }
 
@@ -266,7 +266,7 @@ ApplicationWindow {
                         anchors.left: parent.left
                         anchors.leftMargin: 8
                         anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("视图窗口")
+                        text: (i18n.rev, i18n.tr("GUI_ViewWindowTitle"))
                         color: "#cccccc"
                         font.pixelSize: 12
                     }
@@ -566,25 +566,11 @@ ApplicationWindow {
         }
     }
 
-    // 导入 INI 对话框
-    ImportIniDialog {
-        id: importIniDialog
-        parent: Overlay.overlay
-        // 监听 DialogController.importRequested 信号
-        Connections {
-            target: dialogController
-            function onImportRequested(path) {
-                importIniDialog.initialPath = path
-                importIniDialog.open()
-            }
-        }
-    }
-
     // 阶段 11.1：导入 INI 预览弹窗（对应 IBR_ImportPreview::Open）
     // 由 dialogController.importPreviewRequested 信号触发
-    // 用户在 ImportIniDialog 中选择路径后，C++ 解析 INI 文件，
-    // 通过 IBR_ImportPreview::SetHook 转发到 DialogController.onImportPreviewRequested，
-    // 再发出 importPreviewRequested 信号通知此处打开预览弹窗
+    // 导入入口走 projectController.importIni()（QFileDialog 选 .ini）后，
+    // C++ 侧解析 INI 文件，通过 IBR_ImportPreview::SetHook 转发到
+    // DialogController.onImportPreviewRequested，再发出 importPreviewRequested 信号通知此处打开预览弹窗
     ImportPreviewDialog {
         id: importPreviewDialog
         parent: Overlay.overlay

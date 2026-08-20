@@ -15,7 +15,7 @@ Dialog {
     height: 300
     padding: 0
     closePolicy: Dialog.CloseOnEscape | Dialog.CloseOnPressOutside
-    title: qsTr("导出模块")
+    title: (i18n.rev, i18n.tr("GUI_OutputModule_Title"))
 
     background: Rectangle {
         color: "#252526"
@@ -51,7 +51,7 @@ Dialog {
             spacing: 4
 
             Text {
-                text: qsTr("模块名称")
+                text: (i18n.rev, i18n.tr("GUI_OutputModule_Name"))
                 color: "#cccccc"
                 font.pixelSize: 12
             }
@@ -79,7 +79,7 @@ Dialog {
             spacing: 4
 
             Text {
-                text: qsTr("描述")
+                text: (i18n.rev, i18n.tr("GUI_OutputModule_Desc"))
                 color: "#cccccc"
                 font.pixelSize: 12
             }
@@ -107,7 +107,7 @@ Dialog {
             spacing: 4
 
             Text {
-                text: qsTr("输出路径")
+                text: (i18n.rev, i18n.tr("GUI_OutputModule_OutputPath"))
                 color: "#cccccc"
                 font.pixelSize: 12
             }
@@ -135,7 +135,7 @@ Dialog {
                 Button {
                     Layout.preferredWidth: 72
                     Layout.preferredHeight: 30
-                    text: qsTr("浏览...")
+                    text: (i18n.rev, i18n.tr("GUI_Browse") + "...")
                     onClicked: saveFileDialog.open()
 
                     background: Rectangle {
@@ -158,7 +158,7 @@ Dialog {
         // 校验提示（对应 GUI_OutputModule_Error1：名称必填）
         Text {
             Layout.fillWidth: true
-            text: qsTr("模块名称和输出路径为必填项")
+            text: (i18n.rev, i18n.tr("GUI_OutputModule_Error1"))
             color: "#858585"
             font.pixelSize: 11
             visible: true
@@ -173,7 +173,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("导出")
+                text: (i18n.rev, i18n.tr("GUI_OK"))
                 enabled: nameField.text.trim().length > 0 && pathField.text.trim().length > 0
                 onClicked: {
                     if (workspaceController.outputSelectedModule(
@@ -200,7 +200,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("取消")
+                text: (i18n.rev, i18n.tr("GUI_Cancel"))
                 onClicked: root.close()
 
                 background: Rectangle {
@@ -222,9 +222,9 @@ Dialog {
         // 保存文件对话框（对应 ImGui SelectFileName 保存窗口）
         FileDialog {
             id: saveFileDialog
-            title: qsTr("导出模块")
+            title: (i18n.rev, i18n.tr("GUI_OutputModule_Title"))
             fileMode: FileDialog.SaveFile
-            nameFilters: [qsTr("INI 文件 (*.ini)"), qsTr("所有文件 (*.*)")]
+            nameFilters: [(i18n.rev, i18n.tr("GUI_OutputModule_Type1")), (i18n.rev, i18n.tr("GUI_OutputModule_Type2"))]
             selectedFile: pathField.text.length > 0 ? pathField.text : workspaceController.defaultModuleExportPath()
 
             onAccepted: {

@@ -355,15 +355,15 @@ Item {
     function buildLineDescs() {
         return [
             // 1. 切换输入态（对应 GUI_SwitchIICStatus → CC->SwitchInput = true）
-            { type: "item", text: qsTr("切换输入态"), action: "toggleInput" },
+            { type: "item", text: (i18n.rev, i18n.tr("GUI_SwitchIICStatus")), action: "toggleInput" },
             // 2. SpecialAccept 开关（对应 GUI_SpecialAcceptOff/On）
             // 文本根据当前态切换：已开启显示"关闭特殊接受"，未开启显示"开启特殊接受"
-            { type: "item", text: root.specialAccept ? qsTr("关闭特殊接受") : qsTr("开启特殊接受"),
+            { type: "item", text: root.specialAccept ? (i18n.rev, i18n.tr("GUI_SpecialAcceptOff")) : (i18n.rev, i18n.tr("GUI_SpecialAcceptOn")),
               action: "toggleSpecial" },
             // 3. 删除行（对应 GUI_RemoveLine → pbk->RemoveLine(Key)）
-            { type: "item", text: qsTr("删除行"), action: "removeLine" },
+            { type: "item", text: (i18n.rev, i18n.tr("GUI_RemoveLine")), action: "removeLine" },
             // 4. 编辑描述（对应 GUI_EditDesc → CC->InputOnShow = !CC->InputOnShow）
-            { type: "item", text: qsTr("编辑描述"), action: "editDesc" }
+            { type: "item", text: (i18n.rev, i18n.tr("GUI_EditDesc")), action: "editDesc" }
         ]
     }
 

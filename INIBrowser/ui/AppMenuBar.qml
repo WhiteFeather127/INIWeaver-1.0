@@ -26,14 +26,14 @@ Rectangle {
         Repeater {
             // model 只存静态数据，enabled 在 delegate 中动态绑定
             model: [
-                { menuId: 0, text: qsTr("文件") },
-                { menuId: 1, text: qsTr("模块") },
-                { menuId: 2, text: qsTr("视图") },
-                { menuId: 3, text: qsTr("列表") },
-                { menuId: 4, text: qsTr("编辑") },
-                { menuId: 5, text: qsTr("设置") },
-                { menuId: 6, text: qsTr("关于") },
-                { menuId: 7, text: qsTr("调试") }
+                { menuId: 0, text: (i18n.rev, i18n.tr("GUI_MenuItem_File")) },
+                { menuId: 1, text: (i18n.rev, i18n.tr("GUI_MenuItem_Modules")) },
+                { menuId: 2, text: (i18n.rev, i18n.tr("GUI_MenuItem_View")) },
+                { menuId: 3, text: (i18n.rev, i18n.tr("GUI_MenuItem_List")) },
+                { menuId: 4, text: (i18n.rev, i18n.tr("GUI_MenuItem_Edit")) },
+                { menuId: 5, text: (i18n.rev, i18n.tr("GUI_MenuItem_Setting")) },
+                { menuId: 6, text: (i18n.rev, i18n.tr("GUI_MenuItem_About")) },
+                { menuId: 7, text: (i18n.rev, i18n.tr("GUI_MenuItem_Debug")) }
             ]
 
             delegate: Button {
@@ -65,14 +65,14 @@ Rectangle {
                 // 快捷键 ToolTip（对应 ImGui 菜单按钮的 Alt+X 快捷键提示）
                 ToolTip.text: {
                     switch (modelData.menuId) {
-                        case 0: return qsTr("文件 (Alt+F)")
-                        case 1: return qsTr("模块 (Alt+M)")
-                        case 2: return qsTr("视图 (Alt+V)")
-                        case 3: return qsTr("列表 (Alt+L)")
-                        case 4: return qsTr("编辑 (Alt+E)")
-                        case 5: return qsTr("设置 (Alt+S)")
-                        case 6: return qsTr("关于 (Alt+A)")
-                        case 7: return qsTr("调试 (Alt+D)")
+                        case 0: return (i18n.rev, i18n.tr("GUI_MenuItem_File") + " (Alt+F)")
+                        case 1: return (i18n.rev, i18n.tr("GUI_MenuItem_Modules") + " (Alt+M)")
+                        case 2: return (i18n.rev, i18n.tr("GUI_MenuItem_View") + " (Alt+V)")
+                        case 3: return (i18n.rev, i18n.tr("GUI_MenuItem_List") + " (Alt+L)")
+                        case 4: return (i18n.rev, i18n.tr("GUI_MenuItem_Edit") + " (Alt+E)")
+                        case 5: return (i18n.rev, i18n.tr("GUI_MenuItem_Setting") + " (Alt+S)")
+                        case 6: return (i18n.rev, i18n.tr("GUI_MenuItem_About") + " (Alt+A)")
+                        case 7: return (i18n.rev, i18n.tr("GUI_MenuItem_Debug") + " (Alt+D)")
                         default: return ""
                     }
                 }
@@ -105,8 +105,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        text: projectController.appName + " V" + projectController.versionString
-              + " " + qsTr("平均FPS") + " " + root.fpsValue.toFixed(1)
+        text: (i18n.rev, i18n.trF("GUI_TopRightHint",
+              [projectController.appName, projectController.versionString, root.fpsValue.toFixed(1)]))
         color: "#858585"
         font.pixelSize: 12
     }

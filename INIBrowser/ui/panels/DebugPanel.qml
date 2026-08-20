@@ -18,7 +18,7 @@ ScrollView {
         // 标题（对应 ImGui Text GUI_DebugTitle）
         Text {
             Layout.leftMargin: 8; Layout.topMargin: 8
-            text: qsTr("调试信息")
+            text: (i18n.rev, i18n.tr("GUI_DebugTitle"))
             color: "#cccccc"; font.pixelSize: 13; font.bold: true
         }
 
@@ -37,7 +37,7 @@ ScrollView {
 
                 // DebugOutputExtra / Ext（对应 IBR_Debug.cpp:85-86 static bool Ext）
                 CheckBox {
-                    text: qsTr("输出额外数据 (Ext)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugOutputExtra") + " (Ext)")
                     checked: projectController.debugOutputExtra
                     onClicked: projectController.debugOutputExtra = checked
                     contentItem: Text {
@@ -63,7 +63,7 @@ ScrollView {
 
                 // UseModuleProperties（对应 IBR_Debug.cpp:94）
                 CheckBox {
-                    text: qsTr("模块属性模式 (UseModuleProperties)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugModuleProperties") + " (UseModuleProperties)")
                     checked: projectController.useModuleProperties
                     onClicked: projectController.useModuleProperties = checked
                     contentItem: Text {
@@ -89,7 +89,7 @@ ScrollView {
 
                 // ShowWorkspaceWindowFrame（对应 IBR_Debug.cpp:95）
                 CheckBox {
-                    text: qsTr("显示决策框 (ShowWorkspaceWindowFrame)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugShowDecisionBox") + " (ShowWorkspaceWindowFrame)")
                     checked: projectController.showWorkspaceWindowFrame
                     onClicked: projectController.showWorkspaceWindowFrame = checked
                     contentItem: Text {
@@ -115,7 +115,7 @@ ScrollView {
 
                 // DontGoToEdit（对应 IBR_Debug.cpp:96）
                 CheckBox {
-                    text: qsTr("禁止进入编辑 (DontGoToEdit)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugNoEnterEdit") + " (DontGoToEdit)")
                     checked: projectController.dontGoToEdit
                     onClicked: projectController.dontGoToEdit = checked
                     contentItem: Text {
@@ -141,7 +141,7 @@ ScrollView {
 
                 // DontDrawBg（对应 IBR_Debug.cpp:97）
                 CheckBox {
-                    text: qsTr("禁止绘制背景 (DontDrawBg)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugCrazyRendering") + " (DontDrawBg)")
                     checked: projectController.dontDrawBg
                     onClicked: projectController.dontDrawBg = checked
                     contentItem: Text {
@@ -167,7 +167,7 @@ ScrollView {
 
                 // LinkDebugMode（对应 IBR_Debug.cpp:98）
                 CheckBox {
-                    text: qsTr("连线调试模式 (LinkDebugMode)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugLinkInspect") + " (LinkDebugMode)")
                     checked: projectController.linkDebugMode
                     onClicked: projectController.linkDebugMode = checked
                     contentItem: Text {
@@ -214,7 +214,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
-                        text: qsTr("复制项目输出 (CopyOutput)")
+                        text: (i18n.rev, i18n.tr("GUI_DebugCopyOutput") + " (CopyOutput)")
                         font.pixelSize: 11
                         onClicked: projectController.copyOutput()
                     }
@@ -222,7 +222,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
-                        text: qsTr("剪贴板转 JSON (Clipboard2Json)")
+                        text: (i18n.rev, i18n.tr("GUI_DebugClipboard2Json") + " (Clipboard2Json)")
                         font.pixelSize: 11
                         onClicked: projectController.clipboard2Json()
                     }
@@ -238,7 +238,7 @@ ScrollView {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
                         visible: !projectController.itdFormOpen
-                        text: qsTr("打开输入表单 (ITDOpen)")
+                        text: (i18n.rev, i18n.tr("GUI_ITDOpenInputForm") + " (ITDOpen)")
                         font.pixelSize: 11
                         onClicked: projectController.itdOpenInputForm()
                     }
@@ -247,7 +247,7 @@ ScrollView {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
                         visible: projectController.itdFormOpen
-                        text: qsTr("关闭输入表单 (ITDClose)")
+                        text: (i18n.rev, i18n.tr("GUI_ITDCloseInputForm") + " (ITDClose)")
                         font.pixelSize: 11
                         onClicked: projectController.itdCloseInputForm()
                     }
@@ -261,7 +261,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
-                        text: qsTr("触发刷新连线 (RefreshLink)")
+                        text: (i18n.rev, i18n.tr("GUI_DebugTriggerRefreshLink") + " (RefreshLink)")
                         font.pixelSize: 11
                         onClicked: projectController.triggerRefreshLink()
                     }
@@ -269,7 +269,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 26
-                        text: qsTr("清空一次性信息 (ClearOnce)")
+                        text: (i18n.rev, i18n.tr("GUI_DebugClearOnceInfo") + " (ClearOnce)")
                         font.pixelSize: 11
                         onClicked: projectController.clearOnceInfo()
                     }
@@ -291,7 +291,7 @@ ScrollView {
                 spacing: 4
 
                 Text {
-                    text: qsTr("字符串池查询 (PoolQueryBuf)")
+                    text: (i18n.rev, i18n.tr("GUI_DebugStringPoolQuery") + " (PoolQueryBuf)")
                     color: "#858585"; font.pixelSize: 11
                 }
 
@@ -332,7 +332,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 24
-                        text: qsTr("字符串 → ID")
+                        text: (i18n.rev, i18n.tr("GUI_DebugStringToID"))
                         font.pixelSize: 11
                         onClicked: projectController.queryStringToId()
                     }
@@ -340,7 +340,7 @@ ScrollView {
                     StyledButton {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 24
-                        text: qsTr("ID → 字符串")
+                        text: (i18n.rev, i18n.tr("GUI_DebugIDToString"))
                         font.pixelSize: 11
                         onClicked: projectController.queryIdToString()
                     }
@@ -349,7 +349,7 @@ ScrollView {
                 // 查询结果显示（对应 IBR_Debug.cpp:148 TextWrappedEx LastQueryResult）
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("结果: ") + (projectController.lastQueryResult || qsTr("(无)"))
+                    text: (i18n.rev, i18n.trF("GUI_DebugResult", [projectController.lastQueryResult || (i18n.rev, i18n.tr("GUI_NoResult"))]))
                     color: "#ce9178"; font.pixelSize: 12
                     wrapMode: Text.WrapAnywhere
                     maximumLineCount: 3
@@ -392,7 +392,7 @@ ScrollView {
                 anchors.top: parent.top
                 height: 26
                 flat: true
-                text: (parent.uiStateExpanded ? "▼" : "▶") + " " + qsTr("UI 状态 (GUI_DebugUIState)")
+                text: (parent.uiStateExpanded ? "▼" : "▶") + " " + (i18n.rev, i18n.tr("GUI_DebugUIState"))
                 onClicked: parent.uiStateExpanded = !parent.uiStateExpanded
                 background: Rectangle { color: "transparent" }
                 contentItem: Text {
@@ -415,7 +415,7 @@ ScrollView {
                 StyledButton {
                     Layout.preferredHeight: 22
                     Layout.preferredWidth: 80
-                    text: qsTr("刷新")
+                    text: (i18n.rev, i18n.tr("GUI_Refresh"))
                     font.pixelSize: 11
                     onClicked: {
                         uiStateContent.uiState = projectController.debugUIState()
@@ -480,7 +480,7 @@ ScrollView {
                 anchors.top: parent.top
                 height: 26
                 flat: true
-                text: (parent.rtExpanded ? "▼" : "▶") + " " + qsTr("实时调试信息 (GUI_DebugRealTimeInfo)")
+                text: (parent.rtExpanded ? "▼" : "▶") + " " + (i18n.rev, i18n.tr("GUI_DebugRealTimeInfo"))
                 onClicked: parent.rtExpanded = !parent.rtExpanded
                 background: Rectangle { color: "transparent" }
                 contentItem: Text {
@@ -526,7 +526,7 @@ ScrollView {
                 anchors.top: parent.top
                 height: 26
                 flat: true
-                text: (parent.onceExpanded ? "▼" : "▶") + " " + qsTr("一次性调试信息 (GUI_DebugOnceInfo)")
+                text: (parent.onceExpanded ? "▼" : "▶") + " " + (i18n.rev, i18n.tr("GUI_DebugOnceInfo"))
                 onClicked: parent.onceExpanded = !parent.onceExpanded
                 background: Rectangle { color: "transparent" }
                 contentItem: Text {
@@ -570,12 +570,12 @@ ScrollView {
             spacing: 8
 
             Text {
-                text: qsTr("撤销栈信息")
+                text: (i18n.rev, i18n.tr("GUI_UndoStackInfo"))
                 color: "#cccccc"; font.pixelSize: 13; font.bold: true
             }
             Item { Layout.fillWidth: true }
             Text {
-                text: qsTr("总数: ") + projectController.undoStackCount() + "  游标: " + projectController.undoStackCursor()
+                text: (i18n.rev, i18n.trF("GUI_UndoStackSummary", [projectController.undoStackCount(), projectController.undoStackCursor()]))
                 color: "#858585"; font.pixelSize: 12
             }
         }
@@ -617,7 +617,7 @@ ScrollView {
                 anchors.centerIn: parent
                 visible: undoList.count === 0
                 color: "#5a5a5a"; font.pixelSize: 12
-                text: qsTr("(撤销栈为空)")
+                text: (i18n.rev, i18n.tr("GUI_UndoStackEmpty"))
             }
         }
 
@@ -626,7 +626,7 @@ ScrollView {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
             Layout.preferredHeight: 28
-            text: qsTr("刷新调试信息")
+            text: (i18n.rev, i18n.tr("GUI_RefreshDebug"))
             font.pixelSize: 12
             onClicked: projectController.refreshDebug()
         }

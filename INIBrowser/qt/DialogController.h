@@ -45,8 +45,6 @@ public:
     Q_INVOKABLE void showConfirm3(const QString &title, const QString &message, const QString &actionId);
     // 请求显示导出对话框
     Q_INVOKABLE void showExportDialog();
-    // 请求显示导入对话框
-    Q_INVOKABLE void showImportDialog(const QString &path);
     // 请求显示等待弹窗
     Q_INVOKABLE void showWaiting(const QString &message);
     // 关闭等待弹窗
@@ -134,7 +132,6 @@ signals:
     // 阶段 11.3：三态确认信号
     void confirm3Requested(const QString &title, const QString &message, const QString &actionId);
     void exportRequested();
-    void importRequested(const QString &path);
     void waitingShown(const QString &message);
     void waitingHidden();
     void hintSet(const QString &text);

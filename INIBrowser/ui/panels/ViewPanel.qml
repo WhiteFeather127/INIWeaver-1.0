@@ -21,7 +21,7 @@ Item {
         visible: !projectController.isOpen
         color: "#5a5a5a"
         font.pixelSize: 13
-        text: qsTr("请先打开项目")
+        text: (i18n.rev, i18n.tr("GUI_WaitOpen"))
     }
 
     // 项目打开后显示视图控件
@@ -34,7 +34,7 @@ Item {
         // 缩放比例滑块（对应 ImGui SliderFloat, RatioMin=25, RatioMax=200）
         // 注：实际 Ratio 读写由阶段 5 WorkspaceController 提供，此处为 UI 占位
         Text {
-            text: qsTr("缩放比例")
+            text: (i18n.rev, i18n.tr("GUI_ZoomRatio"))
             color: "#cccccc"
             font.pixelSize: 13
             font.bold: true
@@ -105,7 +105,7 @@ Item {
             spacing: 8
 
             Text {
-                text: qsTr("迷你地图")
+                text: (i18n.rev, i18n.tr("GUI_ViewTitle"))
                 color: "#cccccc"
                 font.pixelSize: 13
                 font.bold: true
@@ -114,7 +114,7 @@ Item {
 
             // 打开独立"视图窗口"（可拖动/调整大小的迷你地图浮窗，见 Main.qml miniMapWindow）
             StyledButton {
-                text: qsTr("视图窗口")
+                text: (i18n.rev, i18n.tr("GUI_ViewWindowTitle"))
                 implicitWidth: 76
                 implicitHeight: 24
                 onClicked: root.openMiniMapWindow()

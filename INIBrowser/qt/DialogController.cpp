@@ -33,11 +33,6 @@ void DialogController::showExportDialog()
     emit exportRequested();
 }
 
-void DialogController::showImportDialog(const QString &path)
-{
-    emit importRequested(path);
-}
-
 void DialogController::showWaiting(const QString &message)
 {
     emit waitingShown(message);

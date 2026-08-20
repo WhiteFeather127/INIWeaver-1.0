@@ -13,15 +13,6 @@ import "../components"
 Item {
     id: editPanel
 
-    // 空状态提示
-    Text {
-        anchors.centerIn: parent
-        visible: editPanelController.isEmpty
-        color: "#5a5a5a"
-        font.pixelSize: 13
-        text: qsTr("未选中模块")
-    }
-
     // 主容器
     ColumnLayout {
         anchors.fill: parent
@@ -42,13 +33,13 @@ Item {
                 spacing: 4
 
                 Text {
-                    text: qsTr("文本编辑模式")
+                    text: (i18n.rev, i18n.tr("GUI_TextEditModeTitle"))
                     color: "#cccccc"
                     font.pixelSize: 13
                 }
                 Item { Layout.fillWidth: true }
                 Button {
-                    text: qsTr("退出并保存")
+                    text: (i18n.rev, i18n.tr("GUI_ExitAndSave"))
                     onClicked: editPanelController.exitTextEdit(true)
                     background: Rectangle {
                         color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
@@ -60,7 +51,7 @@ Item {
                     }
                 }
                 Button {
-                    text: qsTr("退出不保存")
+                    text: (i18n.rev, i18n.tr("GUI_ExitNoSave"))
                     onClicked: editPanelController.exitTextEdit(false)
                     background: Rectangle {
                         color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
@@ -115,7 +106,7 @@ Item {
                 spacing: 4
 
                 Button {
-                    text: qsTr("切换到文本编辑")
+                    text: (i18n.rev, i18n.tr("GUI_SwitchToTextEdit"))
                     onClicked: editPanelController.switchToText()
                     background: Rectangle {
                         color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
@@ -128,7 +119,7 @@ Item {
                 }
                 Item { Layout.fillWidth: true }
                 CheckBox {
-                    text: qsTr("粘贴时刷新注册名")
+                    text: (i18n.rev, i18n.tr("GUI_RefreshRegisterOnPaste"))
                     checked: editPanelController.needtoMangle
                     onToggled: editPanelController.toggleUseOwnName()
                     contentItem: Text {
@@ -187,7 +178,7 @@ Item {
                 visible: newValueField.text.length === 0 && newKeyField.text.length > 0
                 text: {
                     var v = editPanelController.getInitialValue(newKeyField.text)
-                    return v.length > 0 ? qsTr("使用初始值: ") + v : ""
+                    return v.length > 0 ? (i18n.rev, i18n.trF("GUI_UseInitialValue", [v])) : ""
                 }
                 color: "#909090"
                 font.pixelSize: 12
@@ -263,7 +254,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     visible: modelData.missing || false
-                                    text: qsTr("缺失行数据")
+                                    text: (i18n.rev, i18n.tr("GUI_MissingLineData"))
                                     color: "#f48771"
                                     font.pixelSize: 13
                                 }
@@ -299,7 +290,7 @@ Item {
                                 TextField {
                                     Layout.fillWidth: true
                                     text: modelData.onShowDesc || ""
-                                    placeholderText: qsTr("OnShow 描述")
+                                    placeholderText: (i18n.rev, i18n.tr("GUI_EditDesc"))
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
                                     font.pixelSize: 12
@@ -312,7 +303,7 @@ Item {
                                     onEditingFinished: editPanelController.setOnShowDesc(modelData.keyName, text)
                                 }
                                 Button {
-                                    text: qsTr("移除行")
+                                    text: (i18n.rev, i18n.tr("GUI_RemoveLine"))
                                     onClicked: editPanelController.removeLine(modelData.keyName)
                                     background: Rectangle {
                                         color: parent.hovered ? "#3c3c3c" : "#2d2d2d"

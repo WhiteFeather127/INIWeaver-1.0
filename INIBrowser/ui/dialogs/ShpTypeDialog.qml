@@ -14,7 +14,7 @@ Dialog {
     height: Math.min(400, 80 + shpListView.count * 56)
     padding: 0
     closePolicy: Dialog.NoAutoClose  // 必须点确定/取消按钮
-    title: qsTr("加载文件")
+    title: (i18n.rev, i18n.tr("GUI_LoadFile"))
 
     background: Rectangle {
         color: "#252526"
@@ -46,7 +46,7 @@ Dialog {
 
         // 提示文本（对应 ImGui locc("GUI_SHPToLoad")）
         Text {
-            text: qsTr("请选择 SHP 文件的加载类型：")
+            text: (i18n.rev, i18n.tr("GUI_SHPToLoad"))
             color: "#d4d4d4"
             font.pixelSize: 13
             Layout.fillWidth: true
@@ -90,22 +90,22 @@ Dialog {
                         spacing: 8
 
                         RadioButton {
-                            text: qsTr("动画")
+                            text: (i18n.rev, i18n.tr("GUI_LoadImage_Anim"))
                             checked: model.type === 0
                             onToggled: model.type = 0
                         }
                         RadioButton {
-                            text: qsTr("建筑")
+                            text: (i18n.rev, i18n.tr("GUI_LoadImage_Building"))
                             checked: model.type === 1
                             onToggled: model.type = 1
                         }
                         RadioButton {
-                            text: qsTr("步兵")
+                            text: (i18n.rev, i18n.tr("GUI_LoadImage_Infantry"))
                             checked: model.type === 2
                             onToggled: model.type = 2
                         }
                         RadioButton {
-                            text: qsTr("车辆")
+                            text: (i18n.rev, i18n.tr("GUI_LoadImage_Vehicle"))
                             checked: model.type === 3
                             onToggled: model.type = 3
                         }
@@ -130,7 +130,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("确定")
+                text: (i18n.rev, i18n.tr("GUI_OK"))
                 background: Rectangle {
                     color: parent.hovered ? "#007acc" : "#3c3c3c"
                     border.color: "#007acc"; border.width: 1; radius: 3
@@ -152,7 +152,7 @@ Dialog {
 
             Button {
                 width: 96; height: 32
-                text: qsTr("取消")
+                text: (i18n.rev, i18n.tr("GUI_Cancel"))
                 background: Rectangle {
                     color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
                     border.color: "#3c3c3c"; border.width: 1; radius: 3

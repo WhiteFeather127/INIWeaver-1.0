@@ -17,7 +17,7 @@ Item {
         visible: !projectController.isOpen
         color: "#5a5a5a"
         font.pixelSize: 13
-        text: qsTr("请先打开项目")
+        text: (i18n.rev, i18n.tr("GUI_WaitOpen"))
     }
 
     // 项目打开后显示 Section 列表
@@ -52,7 +52,7 @@ Item {
                     enabled: sectionListModel.rowCount() > 0
                     text: (sectionListModel.rowCount() > 0
                            && sectionListModel.selectedCount === sectionListModel.rowCount())
-                          ? qsTr("全不选") : qsTr("全选")
+                          ? (i18n.rev, i18n.tr("GUI_SelectNone")) : (i18n.rev, i18n.tr("GUI_SelectAll"))
                     font.pixelSize: 11
                     onClicked: {
                         if (sectionListModel.selectedCount === sectionListModel.rowCount())
@@ -66,7 +66,7 @@ Item {
                 StyledButton {
                     width: 48; height: 22
                     enabled: sectionListModel.rowCount() > 0
-                    text: qsTr("反选")
+                    text: (i18n.rev, i18n.tr("GUI_InvertSelect"))
                     font.pixelSize: 11
                     onClicked: workspaceController.selectInvert()
                 }
@@ -74,7 +74,7 @@ Item {
                 // 刷新
                 StyledButton {
                     width: 48; height: 22
-                    text: qsTr("刷新")
+                    text: (i18n.rev, i18n.tr("GUI_Refresh"))
                     font.pixelSize: 11
                     onClicked: sectionListModel.refresh()
                 }
@@ -83,7 +83,7 @@ Item {
                 StyledButton {
                     width: 64; height: 22
                     enabled: sectionListModel.selectedCount > 0
-                    text: qsTr("复制副本")
+                    text: (i18n.rev, i18n.tr("GUI_Duplicate"))
                     font.pixelSize: 11
                     onClicked: sectionListModel.duplicate()
                 }
@@ -94,7 +94,7 @@ Item {
                     enabled: sectionListModel.selectedCount > 0
                     text: (sectionListModel.selectedCount > 0
                            && sectionListModel.selAndFrozenN === sectionListModel.selectedCount)
-                          ? qsTr("解冻") : qsTr("冻结")
+                          ? (i18n.rev, i18n.tr("GUI_UnfreezeSec")) : (i18n.rev, i18n.tr("GUI_FreezeSec"))
                     font.pixelSize: 11
                     onClicked: {
                         if (sectionListModel.selAndFrozenN === sectionListModel.selectedCount
@@ -111,7 +111,7 @@ Item {
                     enabled: sectionListModel.selectedCount > 0
                     text: (sectionListModel.selectedCount > 0
                            && sectionListModel.selAndHiddenN === sectionListModel.selectedCount)
-                          ? qsTr("显示") : qsTr("隐藏")
+                          ? (i18n.rev, i18n.tr("GUI_ShowSec")) : (i18n.rev, i18n.tr("GUI_HideSec"))
                     font.pixelSize: 11
                     onClicked: {
                         if (sectionListModel.selAndHiddenN === sectionListModel.selectedCount
@@ -126,7 +126,7 @@ Item {
                 StyledButton {
                     width: 48; height: 22
                     enabled: sectionListModel.selectedCount > 0
-                    text: qsTr("删除")
+                    text: (i18n.rev, i18n.tr("GUI_Delete"))
                     font.pixelSize: 11
                     onClicked: sectionListModel.deleteSelected()
                 }
@@ -153,7 +153,7 @@ Item {
                 // 已选计数（对应 IBR_ListView.cpp:155-157 ImGui SelectedCount 显示）
                 // 从顶部标题栏移到此处（按钮下面那行）
                 Text {
-                    text: qsTr("已选 ") + sectionListModel.selectedCount
+                    text: (i18n.rev, i18n.tr("GUI_SelectedCount")) + " " + sectionListModel.selectedCount
                           + "/" + sectionListModel.rowCount()
                     color: "#cccccc"
                     font.pixelSize: 11
@@ -165,7 +165,7 @@ Item {
                     spacing: 4
 
                     Text {
-                        text: qsTr("排序:")
+                        text: (i18n.rev, i18n.tr("GUI_SortBy")) + ":"
                         color: "#858585"
                         font.pixelSize: 11
                     }
@@ -176,10 +176,10 @@ Item {
                         Layout.preferredWidth: 120
                         Layout.preferredHeight: 22
                         model: [
-                            qsTr("默认"),
-                            qsTr("寄存器名"),
-                            qsTr("显示名"),
-                            qsTr("寄存器类型")
+                            (i18n.rev, i18n.tr("GUI_SortByDefault")),
+                            (i18n.rev, i18n.tr("GUI_SortByRegName")),
+                            (i18n.rev, i18n.tr("GUI_SortByDisplayName")),
+                            (i18n.rev, i18n.tr("GUI_SortByRegType"))
                         ]
                         currentIndex: sectionListModel.sortKey
                         onActivated: sectionListModel.sortKey = index
@@ -218,7 +218,7 @@ Item {
                     StyledButton {
                         Layout.preferredWidth: 92
                         Layout.preferredHeight: 22
-                        text: sectionListModel.showRegName ? qsTr("显示: 寄存器名") : qsTr("显示: 显示名")
+                        text: sectionListModel.showRegName ? (i18n.rev, i18n.tr("GUI_ShowRegMode")) : (i18n.rev, i18n.tr("GUI_ShowNameMode"))
                         accent: sectionListModel.showRegName
                         font.pixelSize: 10
                         onClicked: sectionListModel.showRegName = !sectionListModel.showRegName
@@ -233,7 +233,7 @@ Item {
                     id: searchField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 24
-                    placeholderText: qsTr("搜索 Section...")
+                    placeholderText: (i18n.rev, i18n.tr("GUI_SearchSection") + "...")
                     color: "#d4d4d4"
                     font.pixelSize: 12
                     selectByMouse: true
@@ -278,7 +278,7 @@ Item {
                     StyledButton {
                         Layout.preferredHeight: 22
                         text: sectionListModel.filterByRegistry
-                              ? qsTr("搜索: 寄存器名") : qsTr("搜索: 显示名")
+                              ? (i18n.rev, i18n.tr("GUI_SearchSec_ByRegistry")) : (i18n.rev, i18n.tr("GUI_SearchSec_ByDisplayName"))
                         accent: sectionListModel.filterByRegistry
                         font.pixelSize: 10
                         onClicked: sectionListModel.filterByRegistry = !sectionListModel.filterByRegistry
@@ -286,7 +286,7 @@ Item {
 
                     // Full 全字匹配（对应 IBR_ListView.cpp:188）
                     StyledCheckBox {
-                        text: qsTr("全字匹配")
+                        text: (i18n.rev, i18n.tr("GUI_SearchSec_Full"))
                         checked: sectionListModel.filterFull
                         onToggled: sectionListModel.filterFull = checked
                         font.pixelSize: 11
@@ -294,7 +294,7 @@ Item {
 
                     // CaseSensitive 大小写敏感（对应 IBR_ListView.cpp:191）
                     StyledCheckBox {
-                        text: qsTr("区分大小写")
+                        text: (i18n.rev, i18n.tr("GUI_SearchSec_CaseSensitive"))
                         checked: sectionListModel.filterCaseSensitive
                         onToggled: sectionListModel.filterCaseSensitive = checked
                         font.pixelSize: 11
@@ -302,7 +302,7 @@ Item {
 
                     // Regex 正则匹配（对应 IBR_ListView.cpp:193）
                     StyledCheckBox {
-                        text: qsTr("正则表达式")
+                        text: (i18n.rev, i18n.tr("GUI_SearchSec_Regex"))
                         checked: sectionListModel.filterRegex
                         onToggled: sectionListModel.filterRegex = checked
                         font.pixelSize: 11
@@ -509,11 +509,11 @@ Item {
                                     workspaceController.toggleSelectSection(sectionId)
                                 var gp = mouseArea.mapToGlobal(mouseX, mouseY)
                                 contextMenuHost.show([
-                                    { type: "item", text: qsTr("冻结/解冻"), action: "freeze" },
-                                    { type: "item", text: qsTr("隐藏/显示"), action: "hide" },
-                                    { type: "item", text: qsTr("忽略/取消忽略"), action: "ignore" },
+                                    { type: "item", text: (i18n.rev, i18n.tr("GUI_FreezeSec") + "/" + i18n.tr("GUI_UnfreezeSec")), action: "freeze" },
+                                    { type: "item", text: (i18n.rev, i18n.tr("GUI_HideSec") + "/" + i18n.tr("GUI_ShowSec")), action: "hide" },
+                                    { type: "item", text: (i18n.rev, i18n.tr("GUI_Ignore") + "/" + i18n.tr("GUI_NoIgnore")), action: "ignore" },
                                     { type: "separator" },
-                                    { type: "item", text: qsTr("删除"), action: "delete" }
+                                    { type: "item", text: (i18n.rev, i18n.tr("GUI_Delete")), action: "delete" }
                                 ], gp.x, gp.y, (action) => {
                                     switch (action) {
                                     case "freeze": sectionListModel.freeze(index, !frozen); break

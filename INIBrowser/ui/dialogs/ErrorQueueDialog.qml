@@ -48,7 +48,7 @@ Dialog {
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             visible: dialogController.errorQueueSize > 1
-            text: qsTr("剩余: ") + dialogController.errorQueueSize
+            text: (i18n.rev, i18n.trF("GUI_ErrorQueueRemain", [dialogController.errorQueueSize]))
             color: "#858585"
             font.pixelSize: 11
         }
@@ -93,9 +93,10 @@ Dialog {
                             result += lines[i] + "\n"
                         }
                         if (root.currentError.errorLine > 0) {
-                            result += qsTr("（错误位于第 ") + root.currentError.errorLine + qsTr(" 行）") + "\n"
+                            result += (i18n.rev, i18n.trF("Error_JsonParseErrorLine",
+                                        [root.currentError.errorLine])) + "\n"
                         }
-                        result += qsTr("详见日志")
+                        result += (i18n.rev, i18n.tr("GUI_SeeLogForDetails"))
                         return result
                     }
                     // 非 JsonParse 错误直接显示完整 ErrorStr
@@ -120,7 +121,7 @@ Dialog {
                 width: 110; height: 32
                 // 队列还有下一条时显示"下一条"，否则显示"关闭"
                 // 对应 IBR_ErrorCollector.cpp:58-59 ErrorListShown++ + ShowErrorPopupImpl
-                text: dialogController.errorQueueSize > 1 ? qsTr("下一条") : qsTr("关闭")
+                text: dialogController.errorQueueSize > 1 ? (i18n.rev, i18n.tr("GUI_ErrorQueueNext")) : (i18n.rev, i18n.tr("GUI_ErrorQueueClose"))
                 background: Rectangle {
                     color: parent.hovered ? "#007acc" : "#3c3c3c"
                     border.color: "#007acc"; border.width: 1; radius: 3
@@ -141,7 +142,7 @@ Dialog {
 
             Button {
                 width: 110; height: 32
-                text: qsTr("清空队列")
+                text: (i18n.rev, i18n.tr("GUI_ErrorQueueClear"))
                 // 对应 IBR_ErrorCollector::ClearDelayed
                 visible: dialogController.errorQueueSize > 1
                 background: Rectangle {

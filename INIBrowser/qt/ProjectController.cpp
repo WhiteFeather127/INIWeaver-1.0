@@ -363,7 +363,7 @@ void ProjectController::importIni()
 
 void ProjectController::importIni(const QString &path)
 {
-    // 由 ImportIniDialog 调用：用户已在 QML FileDialog 中选择路径
+    // 由系统文件对话框（QFileDialog）选路径后调用
     // 直接调用 ImportIni(Path) 跳过原 ImportIniAction 中的系统文件选择对话框
     // ImportIni 是 _IN_SAVE_THREAD，通过 IBS_Push 切到 save thread 执行
     // 内部会通过 IBRF_CoreBump.SendToR 弹 ImGui 预览弹窗并处理后续导入流程

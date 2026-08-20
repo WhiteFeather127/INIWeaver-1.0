@@ -213,9 +213,9 @@ Popup {
         var descs = []
         descs = descs.concat(root.treeItemsToDescs(sp))
         var hasSections = workspaceController && workspaceController.sections.length > 0
-        descs.push({ type: "item", text: qsTr("全选"), action: "selectAll", enabled: hasSections })
-        descs.push({ type: "item", text: qsTr("粘贴"), action: "paste" })
-        descs.push({ type: "item", text: qsTr("刷新寄存器名"), action: "refreshRegName" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_SelectAll")), action: "selectAll", enabled: hasSections })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Paste")), action: "paste" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_RefreshAllRegName")), action: "refreshRegName" })
         descs.push({ type: "separator" })
         descs = descs.concat(root.treeItemsToDescs(al))
         return descs
