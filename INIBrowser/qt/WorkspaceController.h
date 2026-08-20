@@ -171,6 +171,10 @@ public:
     // 多选拖拽松手后过渡期查询：松手到收尾 rebuild 完成前，所有被拖节点需继续叠加
     // dragOffset 防连线弹回（单节点用 m_lastDraggedId，多选用此集合）。详见 buildSectionMap。
     Q_INVOKABLE bool isLastMassDragged(qulonglong sectionId) const;
+    // 判断 sectionId 是否在 groupId（虚拟块）的编组内（含自身/任意层级嵌套子块）。
+    // 拖动编组块时整组一起移动，内部子模块连线的 pa/pb 也用同一 dragOffset 跟随，
+    // 否则子模块连线停在原地（子模块不在 sections 快照、dstSec 为 undefined 不叠加偏移）。
+    Q_INVOKABLE bool isInComposedOf(qulonglong groupId, qulonglong sectionId) const;
     // 多选状态查询（对应 ImGui SelectedAllIgnored/Frozen/Hidden）
     // 用于右键菜单智能互斥显示：全忽略时只显示"取消忽略"，否则只显示"忽略"
     Q_INVOKABLE bool selectedAllIgnored() const;
@@ -368,6 +372,13 @@ public:
     // 同步到 IBR_RealCenter::Center/WorkSpaceUL/WorkSpaceDR，供 EqPosToRePos 计算屏幕坐标
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
     Q_INVOKABLE void setViewportSize(qreal width, qreal height);
+    // 记录工作区视口在全局(屏幕)坐标系中的左上角位置（QML WorkspaceView 布局后上报）。
+    // 用于侧边栏模块拖放：把鼠标全局坐标换算成工作区视口局部坐标再放置。
+    Q_INVOKABLE void setViewportGlobal(qreal gx, qreal gy);
+    // 判断某个全局(屏幕)坐标是否落在工作区视口内
+    Q_INVOKABLE bool viewportContainsPoint(qreal gx, qreal gy) const;
+    // 把全局(屏幕)坐标换算为工作区视口局部坐标（WorkSpaceUL 原点）
+    Q_INVOKABLE QPointF globalToViewport(qreal gx, qreal gy) const;
     // 最近拖拽结束的节点 ID（LinkRenderer buildSectionMap 据此在端点表重建前继续叠加 dragOffset）
     // 哨兵值为 INVALID_MODULE_ID（非 0，避免与合法 sectionId 0 冲突），QML 侧用 hasLastDragged 守卫
     Q_INVOKABLE qulonglong lastDraggedId() const { return m_lastDraggedId; }
@@ -478,6 +489,8 @@ private:
     // 端点表重建时的视口基准尺寸（计算 viewportOffset = (当前 - 基准)/2）
     qreal m_endpointBaseW{0};
     qreal m_endpointBaseH{0};
+    // 工作区视口几何（用于侧边栏模块拖放换算：全局坐标 → 视口局部坐标）
+    qreal m_viewportGX{0}, m_viewportGY{0}, m_viewportW{0}, m_viewportH{0};
     // 缩放叠加基准与状态（仿 m_canvasDragOffset）：缩放中端点表保持快照不重建，
     // LinkRenderer 按 m_zoomBaseRatio/m_zoomBaseCenter 基准换算端点坐标（等比+中心偏移）；
     // 缩放停止后由 scheduleZoomFinalize 防抖重建端点表结束叠加

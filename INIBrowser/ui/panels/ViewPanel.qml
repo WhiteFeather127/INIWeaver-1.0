@@ -113,9 +113,10 @@ Item {
             }
 
             // 打开独立"视图窗口"（可拖动/调整大小的迷你地图浮窗，见 Main.qml miniMapWindow）
+            // 宽度不写死：按钮按文字内容自适应（StyledButton 已设 8px 左右 padding），
+            // 语言文本长短切换时不会被裁剪
             StyledButton {
                 text: (i18n.rev, i18n.tr("GUI_ViewWindowTitle"))
-                implicitWidth: 76
                 implicitHeight: 24
                 onClicked: root.openMiniMapWindow()
             }

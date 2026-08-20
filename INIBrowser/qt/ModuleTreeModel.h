@@ -60,6 +60,9 @@ public:
     Q_INVOKABLE void addModule(int row);
     // 通过 moduleKey 添加模块（供 DropArea.onDropped 调用）
     Q_INVOKABLE void addModuleByKey(const QString &key);
+    // 通过 moduleKey 在指定工作区视口坐标处放置模块（供右键菜单/侧边栏拖放调用）
+    // viewX/viewY 为工作区视口局部坐标（WorkSpaceUL 原点），内部换算为 EqPos 后放置
+    Q_INVOKABLE void placeModuleByKey(const QString &key, qreal viewX, qreal viewY);
 
     // 阶段 13.2：SearchModuleAlt 搜索（对应 IBB_ModuleAltDefault::Search）
     // 返回匹配模块列表（每项含 moduleKey/name/descLong）

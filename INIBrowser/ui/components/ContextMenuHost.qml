@@ -26,6 +26,8 @@ Popup {
 
     // ===== 对外接口 =====
     property var itemDescs: []
+    // 模块菜单选中模块时的工作区视口放置坐标（右键/拖放入口设置；非模块菜单为 null）
+    property var placePos: null
     // 勾选状态表（action -> bool），checkable 项实时更新；关闭后供回读（如圆点 UseLink）
     property var checkedStates: ({})
     // 菜单关闭（用户关闭/Esc/点外部/菜单项触发后），供需要回读勾选状态的入口使用
@@ -95,8 +97,13 @@ Popup {
     function dispatchAction(action) {
         if (!action) return
         if (action.indexOf("module:") === 0) {
-            // 模块树：点选模块 → 添加到工作区（对应 ImGui Tree_RenderUISidebar 模块点选）
-            if (moduleTreeModel) moduleTreeModel.addModuleByKey(action.substring(7))
+            // 模块树：点选模块 → 添加到工作区（对应 ImGui Tree_RenderUISidebar 模块点选）。
+            // 若该模块菜单带了工作区视口放置坐标（placePos），放到该位置；否则默认布局位置
+            var key = action.substring(7)
+            if (root.placePos)
+                moduleTreeModel.placeModuleByKey(key, root.placePos.x, root.placePos.y)
+            else
+                moduleTreeModel.addModuleByKey(key)
             root.hide()
             return
         }
@@ -225,6 +232,7 @@ Popup {
     onClosed: {
         root.closeAllLevels()
         root._handler = null
+        root.placePos = null
         root.menuClosed()
     }
 }

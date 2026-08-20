@@ -262,17 +262,68 @@ void ModuleTreeModel::addModule(int row)
     } });
 }
 
+namespace {
+// 递归在完整模块树中按 Name 查找模块。
+// 右键菜单/拖放用 placeModuleByKey 走完整树：m_nodes 只含"当前可见且展开"的扁平节点，
+// 嵌套在收起文件夹里的模块不在其中，故 m_nodes 无命中时需回到完整树（All/Special）递归查找。
+IBB_ModuleAlt* FindModuleInTree(const IBB_ModuleAltDefault::ModuleTree& tree, const std::string& key)
+{
+    for (const auto& name : tree.ModuleOrder)
+    {
+        auto it = tree.Modules.find(name);
+        if (it != tree.Modules.end() && it->second && it->second->Name == key)
+            return it->second;
+    }
+    for (const auto& sub : tree.Sub)
+    {
+        if (auto* r = FindModuleInTree(*sub, key)) return r;
+    }
+    return nullptr;
+}
+
+// 把一条"添加"投递到渲染线程：useCenter=true 时先设 ImGui 鼠标到视图坐标，
+// 使 AddModule(UseMouseCenter=true) 把模块中心落在 (viewX,viewY) 对应的 EqPos。
+// Qt 端未同步 ImGui 鼠标，直接依靠 AddModule 的鼠标定位会得到未初始化的 (0,0)，
+// 故必须在渲染线程内、调用 AddModule 前显式写 ImGui::GetIO().MousePos。
+void PostAddModule(IBB_ModuleAlt* mod, qreal viewX, qreal viewY, bool useCenter)
+{
+    if (!mod) return;
+    qreal x = viewX, y = viewY;
+    IBRF_CoreBump.SendToR({ [mod, useCenter, x, y]() {
+        if (useCenter)
+        {
+            ImGui::GetIO().MousePos.x = static_cast<float>(x);
+            ImGui::GetIO().MousePos.y = static_cast<float>(y);
+        }
+        mod->FullyLoad();
+        IBR_Inst_Project.AddModule(*mod, GenerateModuleTag(), useCenter);
+    } });
+}
+
+// 在完整模块树（All + Special）中按 moduleKey 解析模块指针。
+// 全树本就包含所有可见/嵌套模块，无需依赖 m_nodes 平铺缓存，避免私有 Node 类型的依赖。
+IBB_ModuleAlt* ResolveModule(const QString& key)
+{
+    const auto k = key.toStdString();
+    IBB_ModuleAlt* mod = FindModuleInTree(IBB_ModuleAltDefault::GetAllModulesTree(), k);
+    if (!mod) mod = FindModuleInTree(IBB_ModuleAltDefault::GetSpecialModulesTree(), k);
+    return mod;
+}
+}
+
 void ModuleTreeModel::addModuleByKey(const QString &key)
 {
     if (key.isEmpty()) return;
-    for (int i = 0; i < static_cast<int>(m_nodes.size()); ++i)
-    {
-        if (!m_nodes[i].isFolder && m_nodes[i].moduleKey == key)
-        {
-            addModule(i);
-            return;
-        }
-    }
+    auto* mod = ResolveModule(key);
+    if (mod) PostAddModule(mod, 0.0, 0.0, false);
+}
+
+void ModuleTreeModel::placeModuleByKey(const QString &key, qreal viewX, qreal viewY)
+{
+    if (key.isEmpty()) return;
+    // 在 (viewX, viewY) 视口坐标处放置（右键菜单/侧边栏拖放）
+    auto* mod = ResolveModule(key);
+    if (mod) PostAddModule(mod, viewX, viewY, true);
 }
 
 // 阶段 13.2：SearchModuleAlt 搜索（对应 IBB_ModuleAltDefault::Search）

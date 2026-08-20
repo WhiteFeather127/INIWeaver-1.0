@@ -266,8 +266,11 @@ namespace IBR_L10n
                 if (LineEnd == std::string::npos) S.replace(Pos, std::string::npos, NewLine);
                 else S.replace(Pos, LineEnd - Pos, NewLine);
 
+                // 必须以二进制模式写回（L"wb"）：文件按 "rb" 二进制读入，保留原始 CRLF(\r\n)。
+                // 若用文本模式 L"w" 写回，Windows CRT 会把每个 \n 翻译成 \r\n，
+                // 于是原有的 \r\n 会被写成 \r\r\n，每次切换语言都多累加一个 \r，最终堆出一堆回车。
                 ExtFileClass E;
-                if (E.Open(LanguageININame.c_str(), L"w"))
+                if (E.Open(LanguageININame.c_str(), L"wb"))
                 {
                     E.PutStr(S);
                     E.Close();

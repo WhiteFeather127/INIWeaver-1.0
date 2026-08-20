@@ -221,15 +221,27 @@ Item {
                             dragHelper.dragModuleName = name
                         }
                     }
-                    onReleased: {
-                        dragHelper.Drag.drop()
+                    onReleased: (mouse) => {
+                        // 手动拖放：Qt Drag/DropArea 在此环境不可靠（拖拽源被列表 clip，装配不投递到 DropArea），
+                        // 改在松手时若确认发生拖拽且落点在工作区视口内，则在该坐标放置模块。
+                        if (drag.active && !isFolder) {
+                            var gp = mouseArea.mapToGlobal(mouse.x, mouse.y)
+                            if (workspaceController.viewportContainsPoint(gp.x, gp.y)) {
+                                var vp = workspaceController.globalToViewport(gp.x, gp.y)
+                                moduleTreeModel.placeModuleByKey(moduleKey, vp.x, vp.y)
+                                workspaceController.onDrop(vp.x, vp.y, moduleKey)
+                            }
+                        }
                     }
                 }
 
                 // 拖拽视觉辅助（跟随鼠标的小预览）
                 Item {
                     id: dragHelper
-                    visible: mouseArea.drag.active && !isFolder
+                    // 始终可见：Drag.Automatic 启动真正拖拽要求拖拽源 Item 可见，
+                    // 若初始 visible=false，拖拽不启动、DropArea 收不到投放（此前现象：无预览框、模块未出现）。
+                    // 预览外观拿到内层 Rectangle 上按需显示即可。
+                    visible: true
                     width: 120
                     height: 24
                     x: mouseArea.mouseX - width / 2
@@ -244,6 +256,8 @@ Item {
 
                     Rectangle {
                         anchors.fill: parent
+                        // 仅拖拽激活时显示蓝色预览框
+                        visible: mouseArea.drag.active && !isFolder
                         color: "#007acc"
                         border.color: "#1e1e1e"
                         border.width: 1
