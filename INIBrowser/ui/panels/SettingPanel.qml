@@ -192,6 +192,7 @@ ScrollView {
 
                         // 阶段 13.1：Lang 类型语言切换 ComboBox（对应 IBR_L10n::RenderUI 的 Combo）
                         ComboBox {
+                            id: langComboBox
                             visible: modelData.type === 4
                             // 数据模型：settingController.availableLanguages() 返回 [{key, displayName}]
                             model: settingController.availableLanguages()
@@ -249,9 +250,9 @@ ScrollView {
                                     color: parent.highlighted ? "#007acc" : "transparent"
                                 }
                             }
-                            // 弹出层样式
+                            // 弹出层样式（显式引用 langComboBox 的 model/delegate；此前误用 parent.parent 取到 overlay，导致 model 为 null 下拉无法打开）
                             popup: Popup {
-                                y: parent.height
+                                y: langComboBox.height
                                 width: 160
                                 implicitHeight: contentItem.implicitHeight
                                 padding: 1
@@ -263,9 +264,9 @@ ScrollView {
                                 contentItem: ListView {
                                     clip: true
                                     implicitHeight: contentHeight
-                                    model: parent.parent ? parent.parent.model : null
-                                    currentIndex: parent.parent ? parent.parent.currentIndex : -1
-                                    delegate: parent.parent ? parent.parent.delegate : null
+                                    model: langComboBox.model
+                                    currentIndex: langComboBox.currentIndex
+                                    delegate: langComboBox.delegate
                                 }
                             }
                         }
