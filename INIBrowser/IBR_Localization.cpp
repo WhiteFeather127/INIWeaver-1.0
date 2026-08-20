@@ -254,23 +254,23 @@ namespace IBR_L10n
         if (!LanguageININame.empty())
         {
             auto S = GetStringFromFile(LanguageININame.c_str());
-            auto L = GetLines(std::move(S), false);
-            ExtFileClass E;
-            E.Open(LanguageININame.c_str(), L"w");
-            for (auto& l : L)
+            // 仅替换 [Basic] 段 CurrentLanguage= 行的语言值，其余字节（含原始换行 CRLF/LF）原样保留。
+            // 旧实现用 GetLines(S,false) 会先把每个 \r 与 \n 分别置 0，且 false 不跳过空段，
+            // 导致 CRLF 的每个换行在 \r、\n 位置各产生一个空行，逐行写回后 language.ini 每次切换都膨胀出一堆空行/回车。
+            const std::string Needle = "CurrentLanguage=";
+            auto Pos = S.find(Needle);  // 首处即 [Basic]CurrentLanguage=（Error_LanguageKeyNotFound 值中不含 '='）
+            if (Pos != std::string::npos)
             {
-                auto t = IniToken(l, false);
-                if (!t.IsSection && t.Key == "CurrentLanguage")
+                auto LineEnd = S.find_first_of("\r\n", Pos);
+                auto NewLine = "CurrentLanguage=" + Language;
+                if (LineEnd == std::string::npos) S.replace(Pos, std::string::npos, NewLine);
+                else S.replace(Pos, LineEnd - Pos, NewLine);
+
+                ExtFileClass E;
+                if (E.Open(LanguageININame.c_str(), L"w"))
                 {
-                    std::string dst(l);
-                    subreplace(dst, CurrentLanguage, Language);
-                    E.PutStr(dst);
-                    E.Ln();
-                }
-                else
-                {
-                    E.PutStr(l);
-                    E.Ln();
+                    E.PutStr(S);
+                    E.Close();
                 }
             }
         }
