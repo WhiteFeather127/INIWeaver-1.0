@@ -48,15 +48,14 @@ ScrollView {
                 color: "#2d2d2d"; radius: 3
 
                 // hover 时更新底部 DescLong（对应 IBR_Setting.cpp:90-91 DescLong = Li.DescLong）
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onContainsMouseChanged: {
-                        if (containsMouse) root.currentDescLong = modelData.descLong || ""
+                // 用 HoverHandler 而非下层 MouseArea：HoverHandler 在整个行区域内都能捕获悬停，
+                // 包括悬停在 CheckBox/SpinBox/Slider/ComboBox 等子控件上时也同样触发；
+                // 下层 MouseArea 会被子控件拦截，导致悬停在控件上时不更新底部注释。
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) root.currentDescLong = modelData.descLong || ""
                         else root.currentDescLong = ""
                     }
-                    // 不拦截点击事件，传递给子控件
-                    propagateComposedEvents: true
                 }
 
                 ColumnLayout {
@@ -76,24 +75,30 @@ ScrollView {
                         // 阶段 6.2：按 type 渲染编辑控件
                         // type: 0=None, 1=IntA, 2=IntB, 3=Bool, 4=Lang
 
-                        // Bool 类型：CheckBox（对应 ImGui Checkbox）
+                        // Bool 类型：CheckBox（对应 ImGui Checkbox），使用现代开关（Toggle Switch）样式
                         CheckBox {
                             visible: modelData.type === 3
                             checked: modelData.value || false
                             onToggled: settingController.setSettingValue(modelData.name, checked)
 
+                            // 现代开关样式：圆角胶囊轨道 + 滑动白色圆点拨钮
                             indicator: Rectangle {
-                                implicitWidth: 16; implicitHeight: 16
+                                implicitWidth: 34; implicitHeight: 18
                                 x: parent.leftPadding
                                 y: parent.topPadding + (parent.availableHeight - height) / 2
-                                radius: 2
+                                radius: height / 2
                                 color: parent.checked ? "#007acc" : "#3c3c3c"
                                 border.color: parent.checked ? "#007acc" : "#1e1e1e"
                                 border.width: 1
+                                // 圆形拨钮：选中时滑到右侧
                                 Rectangle {
-                                    x: 4; y: 4; width: 6; height: 6; radius: 1
-                                    visible: parent.parent.checked
+                                    width: parent.height - 4
+                                    height: parent.height - 4
+                                    radius: width / 2
+                                    y: 2
+                                    x: parent.checked ? parent.width - width - 2 : 2
                                     color: "#ffffff"
+                                    Behavior on x { NumberAnimation { duration: 120 } }
                                 }
                             }
                         }
