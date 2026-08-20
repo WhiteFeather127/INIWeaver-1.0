@@ -141,6 +141,18 @@ Item {
                 item.updateLinkNodeCenter(force)
             }
         }
+        // 折叠子模块：嵌套在父虚拟块 Column 内，父块移动/变化时其自身 onXChanged 不触发，
+        // 必须由父块级联回写 headLineRN/RadioButton 坐标，否则折叠子模块的连线与拖拽/伸缩不同步。
+        if (subModuleRepeater) {
+            for (var j = 0; j < subModuleRepeater.count; ++j) {
+                var slot = subModuleRepeater.itemAt(j)
+                if (slot && slot.subNodeLoader && slot.subNodeLoader.item) {
+                    var sub = slot.subNodeLoader.item
+                    // 递归级联：子模块自身也可能是虚拟块（嵌套编组），其内部子模块一并更新
+                    if (sub.updateAllCenters) sub.updateAllCenters(force)
+                }
+            }
+        }
     }
 
     // 拖拽目标命中 + 预览（供标题栏圆点拖拽复用）
@@ -339,8 +351,9 @@ Item {
             }
         }
 
-        // 内容区（对应 ImGui RenderUI_Lines / RenderUI_Virtual）
+        // 内容区（对应 ImGui RenderUI_Lines / RenderUI_Comment / RenderUI_Virtual）
         // 普通块：行列表用 SectionLineModel 暴露的 OnShow/LinkNode/Links 等字段
+        // 注释块：可编辑文本区 commentArea（对应 RenderUI_Comment InputTextMultiline）
         // 虚拟块：递归渲染 IncludingModules 子模块（对应 RenderUI_Virtual fold_left 累加 FinalY）
         Item {
             id: contentContainer
@@ -348,11 +361,15 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             // 子模块在父虚拟块中折叠时只显示标题栏（对应 CollapsedInComposed）
-            visible: !isComment && !isCollapsed && !collapsedInComposed
+            // 注释块也要显示（原本 `!isComment` 把注释主体整个隐藏，只剩 28px 标题栏 → 输入框看不到）
+            visible: !isCollapsed && !collapsedInComposed
             // 高度由 Qt 内容驱动（Column.implicitHeight 累加所有行高度），不依赖 EqH
-            height: visible ? (isVirtualBlock ? virtualBlockContainer.height
-                                              : lineColumn.implicitHeight + 8)
-                            : 0
+            // 注释块：高度取文本区隐式高度，至少 80px 保证可编辑框可见
+            height: visible ? (isComment
+                               ? Math.max(commentArea.implicitHeight + 8, 80)
+                               : (isVirtualBlock ? virtualBlockContainer.height
+                                                 : lineColumn.implicitHeight + 8))
+                           : 0
 
             // ===== 普通块：行列表 =====
             // 用 Column + Repeater 替代 ListView：
@@ -425,6 +442,7 @@ Item {
                 spacing: 6
 
                 Repeater {
+                    id: subModuleRepeater
                     model: (isVirtualBlock && sectionData.includingModules) ? sectionData.includingModules : []
 
                     delegate: Item {
@@ -434,6 +452,15 @@ Item {
                         // 隐藏的子模块不占垂直空间（对应 ImGui 中 Hidden 计数但不渲染）
                         height: (subModuleSlot.subData.hidden || false) ? 0 : subNodeLoader.item ? subNodeLoader.item.height : 0
                         visible: !(subModuleSlot.subData.hidden || false)
+
+                        // 折叠子模块被父 Column 重排推动时（展开/收起某个模块会推挤其他子模块的 y），
+                        // 自身 x/y 属性不变不触发 SectionNode.onYChanged，此处监听 slot.y 变化级联回写，
+                        // 否则其他被推动的折叠子模块连线端点停原地、与拖拽/伸缩不同步。
+                        onYChanged: {
+                            if (subNodeLoader.item && subNodeLoader.item.updateAllCenters) {
+                                subNodeLoader.item.updateAllCenters(true)
+                            }
+                        }
 
                         // 阶段 D2：按需查询子模块数据（对应 GetSectionFromID(id).GetSectionData()）
                         // D20：依赖 sectionDataRevision，sectionsChanged 时自动重新查询
@@ -453,7 +480,10 @@ Item {
                             source: "qrc:/INIWeaver/INIBrowser/ui/workspace/SectionNode.qml"
                             // 传递子模块上下文给 Loader 加载的实例
                             onLoaded: {
-                                item.sectionData = subModuleSlot.subData
+                                // 用绑定而非一次性赋值：子模块 sectionData 需随 sectionDataRevision
+                                // 变化实时刷新（编组展开/收起改 CollapsedInComposed 后，一次性赋值拿的是旧快照，
+                                // 界面永远停在折叠态）。Qt.binding 让其跟随 subModuleSlot.subData 重算。
+                                item.sectionData = Qt.binding(() => subModuleSlot.subData)
                                 // 性能优化：通过 selectedRevision 触发重新评估
                                 item.isSelected = Qt.binding(() => {
                                     workspaceController.selectedRevision
@@ -480,6 +510,36 @@ Item {
 
             // ImGui 原版 RenderUI_Lines 在 LineOrder 为空时不渲染任何提示，节点内部留空
             // (IBR_SectionData.cpp:951-976 for 循环不执行，无 Empty/NoLines 文本)
+
+            // ===== 注释块：可编辑文本区 =====
+            // 对应 ImGui RenderUI_Comment InputTextMultiline；填满整个内容区（内容多时滚动）
+            TextArea {
+                id: commentArea
+                visible: isComment
+                anchors.fill: parent
+                anchors.margins: 4
+                clip: true
+                wrapMode: TextArea.Wrap
+                // 显示注释正文（对应 Bsec->Comment）。不能用 displayName：注释的 displayName 是
+                // 注册名"注释块"，编辑后写回的是 Comment，若绑定 displayName 会一直显示"注释块"且被回写重置
+                text: sectionData.comment || ""
+                color: "#d4d4d4"
+                font.pixelSize: root.fontTitle
+                selectByMouse: true
+                // 编辑后回写 Comment（对应 ImGui InputTextMultiline 回调）
+                onEditingFinished: {
+                    if (text !== (sectionData.comment || "")) {
+                        workspaceController.updateCommentText(sectionData.sectionId, text)
+                    }
+                }
+                // 可见输入框外观（深底 + 边框，区别于纯透明，明确可编辑）
+                background: Rectangle {
+                    color: "#1e1e1e"
+                    border.color: "#3c3c3c"
+                    border.width: 1
+                    radius: 2
+                }
+            }
         }
 
         // 冻结遮罩（对应 FrozenMaskColor）
@@ -539,33 +599,20 @@ Item {
 
             MouseArea {
                 anchors.fill: parent
-                onClicked: workspaceController.toggleCollapseInComposed(
-                    sectionData.sectionId, !(sectionData.collapsedInComposed || false))
+                enabled: (sectionData.isIncluded || false) && !isComment
+                onClicked: {
+                    // DIAG：确认点击是否到达本 MouseArea（编组展开无反应排查）
+                    if (workspaceController.diagLogEnabled())
+                        console.log("[QML-FOLD] foldToggle onClicked sid=" + sectionData.sectionId
+                                    + " collapsedInComposed=" + (sectionData.collapsedInComposed || false)
+                                    + " isIncluded=" + (sectionData.isIncluded || false))
+                    workspaceController.toggleCollapseInComposed(
+                        sectionData.sectionId, !(sectionData.collapsedInComposed || false))
+                }
             }
         }
 
-        // 注释块样式（对应 RenderUI_Comment IBR_SectionData.cpp:813-833 InputTextMultiline）
-        // C11：注释块可编辑（对应 ImGui InputTextMultiline）
-        TextArea {
-            anchors.fill: parent
-            anchors.margins: 8
-            visible: isComment
-            text: sectionData.displayName || ""
-            color: "#858585"
-            font.pixelSize: root.fontTitle
-            wrapMode: TextArea.Wrap
-            verticalAlignment: TextArea.AlignTop
-            selectByMouse: true
-            // 编辑后回写 DisplayName（对应 ImGui InputTextMultiline 回调）
-            onEditingFinished: {
-                if (text !== sectionData.displayName) {
-                    workspaceController.updateCommentText(sectionData.sectionId, text)
-                }
-            }
-            background: Rectangle {
-                color: "transparent"
-            }
-        }
+        // 注释块编辑区已移至 contentContainer 内（commentArea，对应 RenderUI_Comment）
     }
 
     // LinkPoint 已移至每行右端（LinkNodePoint.qml），对应 ImGui RadioButton 位置
@@ -608,6 +655,11 @@ Item {
         }
 
         onPressed: {
+            // DIAG：检测点击是否被 nodeMouseArea 拦截（编组展开排查；若 sid 与折叠按钮区域重叠则被拦截）
+            if (workspaceController.diagLogEnabled())
+                console.log("[QML-NODE] nodeMouseArea onPressed sid=" + sectionData.sectionId
+                            + " x=" + mouseX + " y=" + mouseY
+                            + " w=" + width + " overFold=" + (mouseX > width-30 && mouseY < 20))
             dragStart = Qt.point(mouseX, mouseY)
             hasDragged = false
             dragStarted = false
@@ -668,9 +720,12 @@ Item {
                 if (!isSubModule && dragStarted) {
                     workspaceController.endDrag()
                 } else if (!hasDragged) {
-                    // 单击选中（additive = 是否按住 Ctrl/Shift）
-                    var additive = (mouse.modifiers & Qt.ControlModifier) || (mouse.modifiers & Qt.ShiftModifier)
-                    workspaceController.toggleSelectSection(sectionData.sectionId, additive)
+                    // 注释块不可单击单选（对应 ImGui：点击注释块进入编辑，不触发单选；
+                    // 仍可通过框选/多选选中）。普通块单击选中（additive = 是否按住 Ctrl/Shift）
+                    if (!isComment) {
+                        var additive = (mouse.modifiers & Qt.ControlModifier) || (mouse.modifiers & Qt.ShiftModifier)
+                        workspaceController.toggleSelectSection(sectionData.sectionId, additive)
+                    }
                 }
             } else if (mouse.button === Qt.RightButton) {
                 // 右键仅标题栏触发（对齐 ImGui RenderUI_TitleBar 标题栏右键，内容区不弹菜单）

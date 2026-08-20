@@ -1465,6 +1465,10 @@ void WorkspaceController::setHeadLineRN(qulonglong sectionId, qreal x, qreal y)
         if (link.SrcModuleID != id) continue;
         IBR_NodeSession::SetSessionStatus(link.SourceID, center, true);
     }
+    // 折叠态也回写 m_sectionAcceptPoint（绝对头部中心）。否则折叠目标子模块收 pb 时，
+    // 优先级 2 找不到新鲜接受点，会落到基于 EqPos 的兜底，而子模块 EqPos 是组内相对坐标
+    // → pb 错位（编组内子模块折叠时连线位置错误的根因）。setSectionAcceptPoint 只在非折叠态回写。
+    m_sectionAcceptPoint[id] = QPointF(x, y);
     m_linkEndpointsDirty = true;  // D10：标记端点表脏，下次 refreshFromTimer 重建
 }
 
@@ -1656,6 +1660,8 @@ void WorkspaceController::setViewportSize(qreal width, qreal height)
     IBR_RealCenter::WorkSpaceDR = dImVec2{ static_cast<double>(width), static_cast<double>(height) };
     IBR_RealCenter::Center = ImVec2(static_cast<float>(width) * 0.5f,
                                      static_cast<float>(height) * 0.5f);
+    m_viewportW = width;
+    m_viewportH = height;
     // 注意：不能置 m_dirty = true！拖拽侧边栏调整宽度时 QML 连续调用本函数，
     // 每帧触发 FULL REBUILD（90+ 节点 + 连线全量重建）导致画布卡顿/闪帧。
     // 视口变化只需 QML 侧实时生效：
@@ -1675,6 +1681,23 @@ void WorkspaceController::setViewportSize(qreal width, qreal height)
     m_viewportOffsetX = (width - m_endpointBaseW) * 0.5;
     m_viewportOffsetY = (height - m_endpointBaseH) * 0.5;
     emit viewportOffsetChanged();
+}
+
+void WorkspaceController::setViewportGlobal(qreal gx, qreal gy)
+{
+    m_viewportGX = gx;
+    m_viewportGY = gy;
+}
+
+bool WorkspaceController::viewportContainsPoint(qreal gx, qreal gy) const
+{
+    return gx >= m_viewportGX && gx <= m_viewportGX + m_viewportW &&
+           gy >= m_viewportGY && gy <= m_viewportGY + m_viewportH;
+}
+
+QPointF WorkspaceController::globalToViewport(qreal gx, qreal gy) const
+{
+    return QPointF(gx - m_viewportGX, gy - m_viewportGY);
 }
 
 void WorkspaceController::refreshFromTimer()
@@ -1944,6 +1967,10 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
     item["displayName"] = QString::fromUtf8(sd.DisplayName);
     // 阶段 12.9：寄存器名（对应 ShowRegName 切换显示）
     item["registerName"] = QString::fromUtf8(sd.Desc.Sec);
+    // 注释块正文（对应 ImGui CommentEdit / Bsec->Comment；输入框应显示它而非 DisplayName）
+    item["comment"] = sd.CommentEdit
+        ? QString::fromUtf8(reinterpret_cast<const char*>(sd.CommentEdit.get()))
+        : QString();
     item["eqX"] = sd.EqPos.x;
     item["eqY"] = sd.EqPos.y;
     item["eqW"] = sd.EqSize.x;
@@ -2321,11 +2348,49 @@ void WorkspaceController::rebuildLinkEndpoints()
         bool srcLineVisible = (link.FromKey == EmptyPoolStr) || !srcBsec
                               || srcBsec->IsOnShow(link.FromKey);
 
+        // 源模块自身折叠（编组内收起 / UICollapsed）：连线源点收敛到模块「最右端」锚点，
+        // 对应 ImGui RenderUI_Collapsed 的 HeadLineRN（IBR_SectionData.cpp:835-853，
+        // HeadLineRN = GetLineEndPos - {FontHeight*1.5, HalfLine}，即标题栏最右端垂直居中），
+        // 与隐藏行起点一致。直接计算并跳过后面的优先级。
+        auto srcDataFull = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
+        bool srcCollapsed = srcDataFull && (srcDataFull->CollapsedInComposed || srcDataFull->UICollapsed);
+        if (srcCollapsed && srcDataFull)
+        {
+            // 折叠子模块在 QML 里被堆叠在父虚拟块内（同 x 列、不同 y），其实际可见位置是
+            // QML 回写的 m_sectionAcceptPoint（headLineRN/RadioButton 中心）。不能用各子模块
+            // 独立全局 EqPosToRePos(EqPos)——那套坐标与 QML 堆叠渲染脱节，导致连线错位成乱。
+            // pa 为源端「最右端」。注意 acceptPt.x 是 RadioButton 中心而非模块左边缘：
+            //   普通块 RadioButton 距模块左边缘 = leftMargin(8) + 半径(5) = 13 逻辑（×ratio 视觉）
+            //   import 块 RadioButton 水平居中 → 距左边缘 = 半宽
+            // 故 pa.x = 模块右端 = acceptPt.x - radioLeftOffset + EqSize.x*ratio
+            ImVec2 rePosC = IBR_WorkSpace::EqPosToRePos(srcDataFull->EqPos);
+            auto itA = m_sectionAcceptPoint.find(static_cast<qulonglong>(link.SrcModuleID));
+            float baseX = (itA != m_sectionAcceptPoint.end() && !itA->isNull())
+                ? static_cast<float>(itA->x()) : rePosC.x;
+            bool srcIsImport = srcBsec && srcBsec->Dynamic.ImportCount > 0;
+            float radioLeftOffset = srcIsImport
+                ? (srcDataFull->EqSize.x * ratio * 0.5f)   // import 居中：中心=半宽
+                : (13.0f * ratio);                          // 普通块：左margin8 + 圆心距5
+            paX = static_cast<qreal>(baseX - radioLeftOffset + srcDataFull->EqSize.x * ratio);
+            paY = (itA != m_sectionAcceptPoint.end() && !itA->isNull())
+                ? itA->y() : static_cast<qreal>(rePosC.y + halfLine);
+            paValid = true;
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[FOLD-LINK] srcCollapsed src=" << static_cast<qulonglong>(link.SrcModuleID)
+                     << "EqPos=(" << srcDataFull->EqPos.x << "," << srcDataFull->EqPos.y << ")"
+                     << "EqSize=(" << srcDataFull->EqSize.x << "," << srcDataFull->EqSize.y << ")"
+                     << "ratio=" << ratio
+                     << "rePos=(" << rePosC.x << "," << rePosC.y << ")"
+                     << "acceptPt=" << (itA != m_sectionAcceptPoint.end() ? QString("(%1,%2)").arg(itA->x()).arg(itA->y()) : QStringLiteral("none"))
+                     << "pa=(" << paX << "," << paY << ")";
+#endif
+        }
+
         // 优先级 1：源行圆点（按 FromKey 查行级接受点，与 QML 回写同源）。
         // 修复：LastCenter 按 SessionID 索引，IIF 行链接的 SessionID 用 Comp=cidx（UpdateAll），
         // 而 QML 圆点回写用 Comp=0（rebuildEntries），两者不匹配 → LastCenter=0 → pa 回退标题栏（起点错）。
         // 按源行 key 查询直接取该行圆点坐标，免疫 SessionID 不匹配。
-        if (srcLineVisible && link.FromKey != EmptyPoolStr)
+        if (srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -2352,8 +2417,8 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 故 rePos.x + EqSize.x*ratio = 标题栏右边缘。
         // y 与头节点 RadioButton 水平对齐：优先用 m_sectionAcceptPoint 回写的头节点实际中心 y
         // （非折叠态由 updateRNCenter→setSectionAcceptPoint 回写），兜底 halfLine。
-        // 折叠态（sv.Collapsed=true）不进此分支，仍由优先级 3 走头部 RadioButton。
-        if (!paValid && !srcLineVisible && !sv.Collapsed)
+        // 折叠态（sv.Collapsed=true / srcCollapsed）由上方 srcCollapsed 分支处理，不进此分支。
+        if (!paValid && !srcCollapsed && !srcLineVisible && !sv.Collapsed)
         {
             auto srcDataH = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
             if (srcDataH)
@@ -2425,8 +2490,44 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 折叠态（sv.Collapsed=true）仍走优先级 2（标题栏 RadioButton）。
         bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
                               || dstBsec->IsOnShow(link.DestKey);
+        // 目标模块自身折叠（编组收起 / UICollapsed）：目标端是「块端」，连线应收敛到
+        // 目标模块标题栏 RadioButton（左端，ReWindowUL+ReOffset），对应 ImGui
+        // RSD->ReWindowUL + RSD->ReOffset（非折叠 pb 默认锚点，IBR_SectionData.cpp:749-753）。
+        // 行已隐藏、坐标残留故跳过行级坐标，直接落左端标题栏。
+        bool dstCollapsed = dstData && (dstData->CollapsedInComposed || dstData->UICollapsed);
+        if (dstCollapsed && dstData)
+        {
+            // 目标端「块端」落在折叠子模块标题栏 RadioButton（左端）。折叠子模块在 QML 里
+            // 堆叠于父虚拟块内，实际可见 RadioButton 位置由 QML 回写 m_sectionAcceptPoint，
+            // 不能再用各子模块独立全局 EqPos。pb = acceptPt 直接（x 为 RadioButton 中心）。
+            ImVec2 rePosD = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+            auto itD = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstActualId));
+            if (itD != m_sectionAcceptPoint.end() && !itD->isNull())
+            {
+                pbX = itD->x();
+                pbY = itD->y();
+            }
+            else
+            {
+                float reOffsetX = (dstBsec && dstBsec->Dynamic.ImportCount > 0)
+                    ? (dstData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
+                    : (fontHeightScaled * 0.7f);
+                pbX = static_cast<qreal>(rePosD.x + reOffsetX);
+                pbY = static_cast<qreal>(rePosD.y + halfLine);
+            }
+            pbValid = true;
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[FOLD-LINK] dstCollapsed dst=" << static_cast<qulonglong>(dstActualId)
+                     << "EqPos=(" << dstData->EqPos.x << "," << dstData->EqPos.y << ")"
+                     << "EqSize=(" << dstData->EqSize.x << "," << dstData->EqSize.y << ")"
+                     << "ratio=" << ratio
+                     << "rePos=(" << rePosD.x << "," << rePosD.y << ")"
+                     << "acceptPt=" << (itD != m_sectionAcceptPoint.end() ? QString("(%1,%2)").arg(itD->x()).arg(itD->y()) : QStringLiteral("none"))
+                     << "pb=(" << pbX << "," << pbY << ")";
+#endif
+        }
 
-        if (!sv.Collapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
+        if (!sv.Collapsed && !dstCollapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
         {
             auto itModel = m_lineModels.find(dstActualId);
             if (itModel != m_lineModels.end() && *itModel)
@@ -2488,6 +2589,15 @@ void WorkspaceController::rebuildLinkEndpoints()
         // destId 用实际 ID（GetSection 返回的 ID），字符串传递
         ep["destId"] = QString::number(static_cast<qulonglong>(dstActualId));
         endpoints.append(ep);
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[LINK-DIAG] rebuild src=" << static_cast<qulonglong>(link.SrcModuleID)
+                 << "dest=" << static_cast<qulonglong>(dstActualId)
+                 << "paValid=" << paValid << "pa=(" << paX << "," << paY << ")"
+                 << "pbValid=" << pbValid << "pb=(" << pbX << "," << pbY << ")"
+                 << "srcCollapsed=" << srcCollapsed
+                 << "dstCollapsed=" << dstCollapsed
+                 << "isCollapsed(src)=" << sv.Collapsed;
+#endif
 
         // D21：构建 map（key = "sessionId:destId"）
         // 字符串 key，与 QML 端 link.sourceSessionId + ":" + link.destId 拼接结果一致
@@ -2785,6 +2895,28 @@ bool WorkspaceController::isLastMassDragged(qulonglong sectionId) const
     return m_lastMassDragIds.contains(sectionId);
 }
 
+// 判断 sectionId 是否位于 groupId（虚拟块）的编组内（含 groupId 自身，可跨任意层级嵌套）。
+// 拖动编组块时整组一起移动，QML LinkRenderer 据此对子模块连线的 pa/pb 叠加同一 dragOffset。
+bool WorkspaceController::isInComposedOf(qulonglong groupId, qulonglong sectionId) const
+{
+    ModuleID_t root = static_cast<ModuleID_t>(groupId);
+    ModuleID_t target = static_cast<ModuleID_t>(sectionId);
+    // BFS 遍历 root 的所有层级 IncludngModules；命中 target 即返回 true
+    std::vector<ModuleID_t> queue{ root };
+    std::unordered_set<ModuleID_t> visited{ root };
+    while (!queue.empty()) {
+        auto cur = queue.back();
+        queue.pop_back();
+        if (cur == target) return true;
+        auto it = IBR_Inst_Project.IBR_SectionMap.find(cur);
+        if (it == IBR_Inst_Project.IBR_SectionMap.end()) continue;
+        for (auto sub : it->second.IncludingModules) {
+            if (visited.insert(sub).second) queue.push_back(sub);
+        }
+    }
+    return false;
+}
+
 bool WorkspaceController::selectedAllIgnored() const
 {
     return IBR_WorkSpace::SelectedAllIgnored();
@@ -2898,49 +3030,61 @@ void WorkspaceController::massAfterDuplicate()
 void WorkspaceController::toggleCollapseInComposed(qulonglong sectionId, bool collapsed)
 {
     // 对应 IBR_SectionData.cpp:862 CollapsedInComposed = false / :944 CollapsedInComposed = true
+    // 同步修改（见 toggleIgnore 注释）：SendToR 延迟到下一 tick 执行，而 refresh() 立即重建会读到旧值，
+    // 且下一 tick 因状态哈希早退不再重建 → 展开/收起永不生效（编组子模块无法展开、锚点不切换）。
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
-    IBRF_CoreBump.SendToR({ [id, collapsed]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
-            it->second.CollapsedInComposed = collapsed;
-        }
-    } });
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it != IBR_Inst_Project.IBR_SectionMap.end()) {
+        it->second.CollapsedInComposed = collapsed;
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[FOLD-DIAG] toggleCollapseInComposed id=" << sectionId
+                 << "setCollapsed=" << collapsed
+                 << "valueAfter=" << it->second.CollapsedInComposed;
+#endif
+    } else {
+#ifdef INIWEAVER_DIAG
+        qDebug() << "[FOLD-DIAG] toggleCollapseInComposed id=" << sectionId
+                 << "NOT FOUND in IBR_SectionMap!";
+#endif
+    }
     refresh();
 }
 
 void WorkspaceController::foldComposed(qulonglong virtualBlockId)
 {
-    // 对应 IBR_SectionData.cpp:355-361 FoldComposed
+    // 对应 IBR_SectionData.cpp:355-361 FoldComposed（同步修改，见 toggleCollapseInComposed 注释）
     ModuleID_t id = static_cast<ModuleID_t>(virtualBlockId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
-        auto &sd = it->second;
-        for (auto subId : sd.IncludingModules) {
-            auto subIt = IBR_Inst_Project.IBR_SectionMap.find(subId);
-            if (subIt != IBR_Inst_Project.IBR_SectionMap.end()) {
-                subIt->second.CollapsedInComposed = true;
-            }
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    auto &sd = it->second;
+    for (auto subId : sd.IncludingModules) {
+        auto subIt = IBR_Inst_Project.IBR_SectionMap.find(subId);
+        if (subIt != IBR_Inst_Project.IBR_SectionMap.end()) {
+            subIt->second.CollapsedInComposed = true;
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[FOLD-DIAG] foldComposed subId=" << static_cast<qulonglong>(subId);
+#endif
         }
-    } });
+    }
     refresh();
 }
 
 void WorkspaceController::unfoldComposed(qulonglong virtualBlockId)
 {
-    // 对应 IBR_SectionData.cpp:363-369 UnfoldComposed
+    // 对应 IBR_SectionData.cpp:363-369 UnfoldComposed（同步修改，见 toggleCollapseInComposed 注释）
     ModuleID_t id = static_cast<ModuleID_t>(virtualBlockId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
-        auto &sd = it->second;
-        for (auto subId : sd.IncludingModules) {
-            auto subIt = IBR_Inst_Project.IBR_SectionMap.find(subId);
-            if (subIt != IBR_Inst_Project.IBR_SectionMap.end()) {
-                subIt->second.CollapsedInComposed = false;
-            }
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    auto &sd = it->second;
+    for (auto subId : sd.IncludingModules) {
+        auto subIt = IBR_Inst_Project.IBR_SectionMap.find(subId);
+        if (subIt != IBR_Inst_Project.IBR_SectionMap.end()) {
+            subIt->second.CollapsedInComposed = false;
+#ifdef INIWEAVER_DIAG
+            qDebug() << "[FOLD-DIAG] unfoldComposed subId=" << static_cast<qulonglong>(subId);
+#endif
         }
-    } });
+    }
     refresh();
 }
 
@@ -3210,7 +3354,29 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         auto srcBsec = srcRsec.GetBack_Unsafe();
         bool srcLineVisible = (link.FromKey == EmptyPoolStr) || !srcBsec
                               || srcBsec->IsOnShow(link.FromKey);
-        if (srcLineVisible && link.FromKey != EmptyPoolStr)
+        // 源模块自身折叠（编组内收起 / UICollapsed）：行坐标残留，pa 收敛到模块「最右端」
+        //（同 rebuildLinkEndpoints，对齐 ImGui HeadLineRN 右端锚点）
+        auto srcDataFull = srcRsec.GetSectionData();
+        bool srcCollapsed = srcDataFull && (srcDataFull->CollapsedInComposed || srcDataFull->UICollapsed);
+        if (srcCollapsed && srcDataFull)
+        {
+            // 折叠子模块堆叠在父虚拟块内（同 x 列、不同 y），实际位置用 QML 回写的
+            // m_sectionAcceptPoint，不能用各自全局 EqPos。pa 源端「最右端」= 模块右端，
+            // 需扣除 acceptPt 相对模块左边缘的偏移（普通块左margin8+圆心距5=13；import 居中=半宽）。
+            ImVec2 rePosC = IBR_WorkSpace::EqPosToRePos(srcDataFull->EqPos);
+            auto itA = m_sectionAcceptPoint.find(srcId);
+            float baseX = (itA != m_sectionAcceptPoint.end() && !itA->isNull())
+                ? static_cast<float>(itA->x()) : rePosC.x;
+            bool srcIsImport = srcBsec && srcBsec->Dynamic.ImportCount > 0;
+            float radioLeftOffset = srcIsImport
+                ? (srcDataFull->EqSize.x * ratio * 0.5f)
+                : (13.0f * ratio);
+            paX = static_cast<qreal>(baseX - radioLeftOffset + srcDataFull->EqSize.x * ratio);
+            paY = (itA != m_sectionAcceptPoint.end() && !itA->isNull())
+                ? itA->y() : static_cast<qreal>(rePosC.y + halfLine);
+            paValid = true;
+        }
+        if (srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(srcId);
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -3220,7 +3386,7 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
                 if (!srcAc.isNull()) { paX = srcAc.x(); paY = srcAc.y(); paValid = true; }
             }
         }
-        if (!paValid && srcLineVisible && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        if (!paValid && (srcCollapsed || srcLineVisible) && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
         {
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
@@ -3228,7 +3394,7 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         }
         // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端（同 rebuildLinkEndpoints）
         // y 与头节点水平对齐：优先 m_sectionAcceptPoint.y()，兜底 halfLine
-        if (!paValid && !srcLineVisible && !sv.Collapsed)
+        if (!paValid && !srcCollapsed && !srcLineVisible && !sv.Collapsed)
         {
             auto srcDataH = srcRsec.GetSectionData();
             if (srcDataH)
@@ -3269,7 +3435,31 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         auto dstBsec = dstRsec.GetBack_Unsafe();
         bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
                               || dstBsec->IsOnShow(link.DestKey);
-        if (!sv.Collapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
+        // 目标模块自身折叠（编组收起 / UICollapsed）：目标端是「块端」，连线应收敛到
+        // 目标模块标题栏 RadioButton（左端，ReWindowUL+ReOffset），同 rebuildLinkEndpoints。
+        bool dstCollapsed = dstData && (dstData->CollapsedInComposed || dstData->UICollapsed);
+        if (dstCollapsed && dstData)
+        {
+            // 目标端「块端」落在折叠子模块标题栏 RadioButton（左端）。折叠子模块堆叠在父
+            // 虚拟块内，实际位置用 QML 回写 m_sectionAcceptPoint，不能用各自全局 EqPos。
+            ImVec2 rePosD = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+            auto itD = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstRsec.ID));
+            if (itD != m_sectionAcceptPoint.end() && !itD->isNull())
+            {
+                pbX = itD->x();
+                pbY = itD->y();
+            }
+            else
+            {
+                float reOffsetX = (dstBsec && dstBsec->Dynamic.ImportCount > 0)
+                    ? (dstData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
+                    : (fontHeightScaled * 0.7f);
+                pbX = static_cast<qreal>(rePosD.x + reOffsetX);
+                pbY = static_cast<qreal>(rePosD.y + halfLine);
+            }
+            pbValid = true;
+        }
+        if (!sv.Collapsed && !dstCollapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
         {
             auto itModel = m_lineModels.find(static_cast<qulonglong>(dstRsec.ID));
             if (itModel != m_lineModels.end() && *itModel)
@@ -3281,7 +3471,7 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
         }
         // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端（同 rebuildLinkEndpoints）
         // y 与头节点水平对齐：优先 m_sectionAcceptPoint.y()，兜底 halfLine
-        if (!pbValid && !dstLineVisible && !sv.Collapsed)
+        if (!pbValid && !dstLineVisible && !sv.Collapsed && !dstCollapsed)
         {
             if (dstData)
             {

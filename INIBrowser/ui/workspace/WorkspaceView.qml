@@ -47,9 +47,18 @@ Item {
 
     // 同步视口尺寸到 C++ IBR_RealCenter，供 EqPosToRePos 计算屏幕坐标
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
-    onWidthChanged: workspaceController.setViewportSize(width, height)
-    onHeightChanged: workspaceController.setViewportSize(width, height)
-    Component.onCompleted: workspaceController.setViewportSize(width, height)
+    function reportViewportGlobal() {
+        var g = mapToGlobal(0, 0)
+        workspaceController.setViewportGlobal(g.x, g.y)
+    }
+    onWidthChanged: { workspaceController.setViewportSize(width, height); workspaceView.reportViewportGlobal() }
+    onHeightChanged: { workspaceController.setViewportSize(width, height); workspaceView.reportViewportGlobal() }
+    onXChanged: workspaceView.reportViewportGlobal()
+    onYChanged: workspaceView.reportViewportGlobal()
+    Component.onCompleted: {
+        workspaceController.setViewportSize(width, height)
+        workspaceView.reportViewportGlobal()
+    }
 
     // 查找指定屏幕坐标下的 SectionNode（供 LinkPoint 拖放检测）
     function findSectionAt(screenX, screenY) {
@@ -258,24 +267,9 @@ Item {
         }
     }
 
-    // 模块拖放接收区（对应 IBR_WorkSpace::ProcessBackgroundOpr 的模块放置）
-    DropArea {
-        anchors.fill: parent
-        onEntered: (drag) => {
-            drag.accepted = true
-        }
-        onDropped: (drop) => {
-            var x = drop.x
-            var y = drop.y
-            var moduleKey = drop.getDataAsString("text/plain")
-            if (moduleKey.length > 0) {
-                // 通过 moduleTreeModel 在渲染线程执行 AddModule
-                // workspaceController.onDrop 仅更新投放坐标提示
-                moduleTreeModel.addModuleByKey(moduleKey)
-                workspaceController.onDrop(x, y, moduleKey)
-            }
-        }
-    }
+    // 模块拖放接收区已废弃：Qt Drag/DropArea 在本窗口/Layout 环境下不可靠（拖拽源在
+    // 列表 delegate 内被裁剪，自动拖拽不投递到 DropArea）。改为侧边栏手动拖拽
+    // （ModulesPanel onReleased 换算全局坐标 → 视口坐标 → placeModuleByKey 放置）。
 
     // Section 节点层（z-order 高于背景 MouseArea，确保节点可接收鼠标事件）
     // 性能优化：拖拽平移时不全量 refresh，而是根据 eqCenter 实时计算屏幕坐标
@@ -428,10 +422,14 @@ Item {
         function onContextMenuRequested(x, y) {
             var g = workspaceView.mapToGlobal(x, y)
             // 有选中模块 → 多选操作菜单；无选中（空白右键）→ 模块树菜单
-            if (workspaceController.massTargetIds().length > 0)
+            if (workspaceController.massTargetIds().length > 0) {
+                contextMenuHost.placePos = null
                 contextMenuHost.show(workspaceView.massAfterDescs(), g.x, g.y, (a) => workspaceView.dispatchMassAction(a))
-            else
+            } else {
+                // 记录右键的工作区视口坐标，模块菜单选中项时放到该位置
+                contextMenuHost.placePos = { x: x, y: y }
                 contextMenuHost.show(contextMenuHost.moduleTreeDescs(), g.x, g.y, (a) => workspaceView.dispatchEmptyAction(a))
+            }
         }
     }
 

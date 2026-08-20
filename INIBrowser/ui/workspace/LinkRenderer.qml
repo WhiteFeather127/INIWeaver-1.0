@@ -149,6 +149,17 @@ Canvas {
         return map;
     }
 
+    // 判断某 section 是否随当前拖动的编组块一起移动：
+    // 拖动编组（虚拟块）时整组移动，但内部子模块不在 sections 快照（dstSec==undefined），
+    // 默认不叠加 dragOffset → 子模块连线停在原地。本判断覆盖 groupId 自身 + 任意层级子模块。
+    function isMovedByDrag(sectionId) {
+        if (!sectionId) return false
+        var dragId = workspaceController.draggingSectionId
+        if (!dragId) return false
+        if (sectionId === dragId) return true
+        return workspaceController.isInComposedOf(dragId, sectionId)
+    }
+
     // 计算目标端坐标 pb（对应 ImGui RSD->ReWindowUL + RSD->ReOffset）
     // ReOffset = Import ? {W/2 - FontHeight/2, HalfLine} : {FontHeight*0.7, HalfLine}
     // 阶段 2：拖拽中的目标节点加入 dragOffset
@@ -208,7 +219,11 @@ Canvas {
             var srcT = zoomTransform(srcEp.x, srcEp.y);
             var paX = srcT.x + viewportOffsetX + canvasOffset.x;
             var paY = srcT.y + viewportOffsetY + canvasOffset.y;
-            if (srcSec && srcSec.dragging) {
+            // 拖拽跟随：源节点本身被拖（srcSec.dragging）或源模块位于当前拖动的编组块内
+            // （子模块不在 sections 快照、srcSec 可能 undefined，用 isMovedByDrag 判断）
+            if ((srcSec && srcSec.dragging)
+                || (root.isMovedByDrag(link.sourceId)
+                    && (workspaceController.dragOffset.x !== 0 || workspaceController.dragOffset.y !== 0))) {
                 paX += dragOffset.x;
                 paY += dragOffset.y;
             }
@@ -226,7 +241,11 @@ Canvas {
                 var pbT = zoomTransform(ep.pbX, ep.pbY);
                 var pbX = pbT.x + viewportOffsetX + canvasOffset.x;
                 var pbY = pbT.y + viewportOffsetY + canvasOffset.y;
-                if (dstSec && dstSec.dragging) {
+                // 拖拽跟随：目标节点本身被拖（dstSec.dragging）或目标模块位于当前拖动的编组块内
+                // （子模块 dstSec 为 undefined，用 isMovedByDrag 判断，否则编组拖动时其连线停原地）
+                if ((dstSec && dstSec.dragging)
+                    || (root.isMovedByDrag(link.destId)
+                        && (workspaceController.dragOffset.x !== 0 || workspaceController.dragOffset.y !== 0))) {
                     pbX += dragOffset.x;
                     pbY += dragOffset.y;
                 }
