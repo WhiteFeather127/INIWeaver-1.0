@@ -27,18 +27,6 @@ ApplicationWindow {
            + (projectController.isModified ? " [*]" : "")
     color: "#1e1e1e"
 
-    // 窗口居中：启动后在当前屏幕的可用区域内水平/垂直居中
-    // （QML ApplicationWindow 默认不居中，需手动计算左上角坐标）
-    Component.onCompleted: {
-        var sc = window.screen
-        if (sc) {
-            window.x = sc.availableVirtualGeometry.x
-                + (sc.availableVirtualGeometry.width - window.width) / 2
-            window.y = sc.availableVirtualGeometry.y
-                + (sc.availableVirtualGeometry.height - window.height) / 2
-        }
-    }
-
     // 全局点击失焦由 C++ 事件过滤器实现（QtMain.cpp FocusBlurFilter）
     // QML TapHandler 无法捕获被 nodeMouseArea.preventStealing 拦截的画布点击事件
 

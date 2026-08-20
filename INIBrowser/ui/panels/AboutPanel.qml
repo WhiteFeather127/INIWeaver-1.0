@@ -176,6 +176,10 @@ ScrollView {
     // 许可证弹窗（对应 IBR_PopupManager Popup GUI_About_License）
     Dialog {
         id: licenseDialog
+        // 显式挂到 Overlay.overlay 再居中：本弹窗声明在 AboutPanel 内，默认 parent 是左侧栏
+        // （宽 280），anchors.centerIn: parent 会居中到侧栏而非整个窗口，导致弹窗不居中。
+        // parent: Overlay.overlay 保证居中参考物为整个窗口内容区。
+        parent: Overlay.overlay
         modal: true
         anchors.centerIn: parent
         width: 520
@@ -273,6 +277,8 @@ ScrollView {
     // 鸣谢弹窗（对应 IBR_PopupManager Popup GUI_About_Acknowledgments）
     Dialog {
         id: ackDialog
+        // 同许可证弹窗：显式挂到整个窗口的 Overlay.overlay 再居中，避免居中到 280px 侧栏
+        parent: Overlay.overlay
         modal: true
         anchors.centerIn: parent
         width: 460
