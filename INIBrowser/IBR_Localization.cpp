@@ -248,7 +248,7 @@ namespace IBR_L10n
                 else S.replace(Pos, LineEnd - Pos, NewLine);
 
                 ExtFileClass E;
-                if (E.Open(LanguageININame.c_str(), L"w"))
+                if (E.Open(LanguageININame.c_str(), L"wb"))
                 {
                     E.PutStr(S);
                     E.Close();
