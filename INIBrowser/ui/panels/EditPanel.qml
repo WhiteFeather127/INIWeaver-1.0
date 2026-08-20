@@ -140,9 +140,7 @@ Item {
                 TextField {
                     id: newKeyField
                     Layout.fillWidth: true
-                    placeholderText: qsTr("Key")
                     color: "#e0e0e0"
-                    placeholderTextColor: "#909090"
                     font.pixelSize: 13
                     background: Rectangle { color: "#2d2d2d"; border.color: newKeyField.activeFocus ? "#007acc" : "#3c3c3c"; border.width: 1; radius: 2 }
                 }
@@ -150,9 +148,7 @@ Item {
                 TextField {
                     id: newValueField
                     Layout.fillWidth: true
-                    placeholderText: qsTr("Value")
                     color: "#e0e0e0"
-                    placeholderTextColor: "#909090"
                     font.pixelSize: 13
                     background: Rectangle { color: "#2d2d2d"; border.color: newValueField.activeFocus ? "#007acc" : "#3c3c3c"; border.width: 1; radius: 2 }
                     onAccepted: addNewLine()

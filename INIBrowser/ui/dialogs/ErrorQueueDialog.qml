@@ -36,7 +36,7 @@ Dialog {
             anchors.leftMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             // 对应 IBR_ErrorCollector.cpp:55 _W.Title（GUI_JsonParseError/GUI_ModuleParseError 等）
-            text: root.currentError.valid ? root.currentError.title : qsTr("错误")
+            text: root.currentError.valid ? root.currentError.title : (i18n.rev, i18n.tr("GUI_ErrorQueueTitle"))
             color: "#f14c4c"
             font.pixelSize: 13
             font.bold: true

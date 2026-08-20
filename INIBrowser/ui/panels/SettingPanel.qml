@@ -300,8 +300,8 @@ ScrollView {
                 id: descLongText
                 anchors.fill: parent
                 anchors.margins: 8
-                text: root.currentDescLong.length > 0 ? root.currentDescLong : qsTr("将鼠标悬停在设置项上查看详细说明")
-                color: root.currentDescLong.length > 0 ? "#d4d4d4" : "#5a5a5a"
+                text: root.currentDescLong
+                color: "#d4d4d4"
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
                 verticalAlignment: Text.AlignTop

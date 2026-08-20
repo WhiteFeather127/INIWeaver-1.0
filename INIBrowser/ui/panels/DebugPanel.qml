@@ -299,7 +299,6 @@ ScrollView {
                     id: poolQueryField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 24
-                    placeholderText: qsTr("输入字符串或 16 进制 ID...")
                     color: "#d4d4d4"
                     font.pixelSize: 12
                     selectByMouse: true

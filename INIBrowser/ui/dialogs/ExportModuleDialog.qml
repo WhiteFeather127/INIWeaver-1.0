@@ -41,8 +41,9 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 16
+        // 不设 anchors.fill：填满会连同 header(36px) 一起覆盖，导致顶部「模块」标签被标题栏遮住。
+        // 交给 Dialog 自动在 header 下方布局，margin 用 Layout.margins 控制（对齐 ExportDialog 写法）
+        Layout.margins: 16
         spacing: 12
 
         // 模块名称（对应 GUI_OutputModule_Name，必填）
@@ -62,8 +63,6 @@ Dialog {
                 Layout.preferredHeight: 30
                 color: "#d4d4d4"
                 font.pixelSize: 12
-                placeholderText: qsTr("输入模块名称（必填）")
-
                 background: Rectangle {
                     color: "#1e1e1e"
                     border.color: nameField.activeFocus ? "#007acc" : "#3c3c3c"
@@ -90,8 +89,6 @@ Dialog {
                 Layout.preferredHeight: 30
                 color: "#d4d4d4"
                 font.pixelSize: 12
-                placeholderText: qsTr("输入模块描述（可选）")
-
                 background: Rectangle {
                     color: "#1e1e1e"
                     border.color: descField.activeFocus ? "#007acc" : "#3c3c3c"
@@ -122,8 +119,6 @@ Dialog {
                     Layout.preferredHeight: 30
                     color: "#d4d4d4"
                     font.pixelSize: 12
-                    placeholderText: qsTr("选择 .ini 文件保存路径...")
-
                     background: Rectangle {
                         color: "#1e1e1e"
                         border.color: pathField.activeFocus ? "#007acc" : "#3c3c3c"

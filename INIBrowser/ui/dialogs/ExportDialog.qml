@@ -75,7 +75,6 @@ Dialog {
                     Layout.preferredHeight: 30
                     color: "#d4d4d4"
                     font.pixelSize: 12
-                    placeholderText: qsTr("选择或输入输出目录...")
 
                     background: Rectangle {
                         color: "#1e1e1e"

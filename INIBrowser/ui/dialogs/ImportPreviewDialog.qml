@@ -281,7 +281,6 @@ Dialog {
                 text: filterText
                 color: "#d4d4d4"
                 font.pixelSize: 12
-                placeholderText: qsTr("搜索 Section...")
                 onTextChanged: filterText = text
 
                 leftPadding: 28
@@ -447,7 +446,7 @@ Dialog {
                                     }
 
                                     Text {
-                                        text: "%1  (%2)".arg(modelData.typeName || qsTr("(无类型)")).arg(modelData.sections.length)
+                                        text: "%1  (%2)".arg(modelData.typeName).arg(modelData.sections.length)
                                         color: "#88cc88"
                                         font.pixelSize: 12
                                         font.bold: true
@@ -593,7 +592,7 @@ Dialog {
                                     }
 
                                     Text {
-                                        text: "%1  (%2)".arg(modelData.typeName || qsTr("(无类型)")).arg(modelData.sections.length)
+                                        text: "%1  (%2)".arg(modelData.typeName).arg(modelData.sections.length)
                                         color: "#66aacc"
                                         font.pixelSize: 12
                                         font.bold: true
