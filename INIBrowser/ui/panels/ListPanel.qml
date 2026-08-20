@@ -48,7 +48,7 @@ Item {
                 // 对齐 ImGui IBR_ListView.cpp:127-132：
                 //   全选时显示"全不选"(enabled)，未全选显示"全选"(enabled)，空列表显示"全选"(disabled)
                 StyledButton {
-                    width: 60; height: 22
+                    height: 22  // 宽度按文字内容自适应（StyledButton 已设左右 padding）
                     enabled: sectionListModel.rowCount() > 0
                     text: (sectionListModel.rowCount() > 0
                            && sectionListModel.selectedCount === sectionListModel.rowCount())
@@ -64,7 +64,7 @@ Item {
 
                 // 反选（走 workspaceController.selectInvert 统一同步）
                 StyledButton {
-                    width: 48; height: 22
+                    height: 22
                     enabled: sectionListModel.rowCount() > 0
                     text: (i18n.rev, i18n.tr("GUI_InvertSelect"))
                     font.pixelSize: 11
@@ -73,7 +73,7 @@ Item {
 
                 // 刷新
                 StyledButton {
-                    width: 48; height: 22
+                    height: 22
                     text: (i18n.rev, i18n.tr("GUI_Refresh"))
                     font.pixelSize: 11
                     onClicked: sectionListModel.refresh()
@@ -81,7 +81,7 @@ Item {
 
                 // Duplicate 按钮（对应 IBR_ListView.cpp:137, 144）
                 StyledButton {
-                    width: 64; height: 22
+                    height: 22
                     enabled: sectionListModel.selectedCount > 0
                     text: (i18n.rev, i18n.tr("GUI_Duplicate"))
                     font.pixelSize: 11
@@ -90,7 +90,7 @@ Item {
 
                 // Freeze/Unfreeze 智能切换按钮（对应 IBR_ListView.cpp:109, 146-147）
                 StyledButton {
-                    width: 56; height: 22
+                    height: 22
                     enabled: sectionListModel.selectedCount > 0
                     text: (sectionListModel.selectedCount > 0
                            && sectionListModel.selAndFrozenN === sectionListModel.selectedCount)
@@ -107,7 +107,7 @@ Item {
 
                 // Hide/Show 智能切换按钮（对应 IBR_ListView.cpp:110, 149-150）
                 StyledButton {
-                    width: 56; height: 22
+                    height: 22
                     enabled: sectionListModel.selectedCount > 0
                     text: (sectionListModel.selectedCount > 0
                            && sectionListModel.selAndHiddenN === sectionListModel.selectedCount)
@@ -124,7 +124,7 @@ Item {
 
                 // 删除
                 StyledButton {
-                    width: 48; height: 22
+                    height: 22
                     enabled: sectionListModel.selectedCount > 0
                     text: (i18n.rev, i18n.tr("GUI_Delete"))
                     font.pixelSize: 11
@@ -216,7 +216,6 @@ Item {
 
                     // 阶段 9.2 新增：ShowRegName 切换按钮（对应 IBR_ListView.cpp:294）
                     StyledButton {
-                        Layout.preferredWidth: 92
                         Layout.preferredHeight: 22
                         text: sectionListModel.showRegName ? (i18n.rev, i18n.tr("GUI_ShowRegMode")) : (i18n.rev, i18n.tr("GUI_ShowNameMode"))
                         accent: sectionListModel.showRegName

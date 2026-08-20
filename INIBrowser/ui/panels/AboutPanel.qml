@@ -176,20 +176,66 @@ ScrollView {
     // 许可证弹窗（对应 IBR_PopupManager Popup GUI_About_License）
     Dialog {
         id: licenseDialog
-        title: (i18n.rev, i18n.tr("GUI_About_License"))
         modal: true
         anchors.centerIn: parent
-        width: 480; height: 400
+        width: 520
+        // 高度随许可证文本内容自适应（含 36px header + contentItem 上下 12px 边距）
+        height: Math.min(520, 36 + licenseColumn.implicitHeight + 24)
+        padding: 0
+        closePolicy: Dialog.CloseOnEscape | Dialog.CloseOnPressOutside
 
         background: Rectangle { color: "#252526"; border.color: "#3c3c3c"; border.width: 1; radius: 4 }
 
+        // 统一弹窗风格：自定义 header（标题 + 关闭按钮），不设 anchors.fill 以免遮挡标题区
+        header: Rectangle {
+            height: 36
+            color: "#2d2d2d"
+            radius: 4
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: (i18n.rev, i18n.tr("GUI_About_License"))
+                color: "#cccccc"
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            // 关闭按钮
+            Rectangle {
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 20; height: 20
+                radius: 3
+                color: licenseCloseMouse.containsMouse ? "#3c3c3c" : "transparent"
+                Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: "#cccccc"
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    id: licenseCloseMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: licenseDialog.close()
+                }
+            }
+        }
+
         contentItem: ScrollView {
             clip: true
+            Layout.margins: 12
             Column {
+                id: licenseColumn
                 anchors.margins: 0
                 width: licenseDialog.width - 32
                 spacing: 8
+                // Column 的 implicitHeight 由子项自动累加（含 wrap 换行后的高度），对话框高度据此自适应
                 Text {
+                    id: text1
                     width: parent.width
                     color: "#e0e0e0"
                     font.pixelSize: 12
@@ -197,6 +243,7 @@ ScrollView {
                     text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_1"))
                 }
                 Text {
+                    id: text2
                     width: parent.width
                     color: "#e0e0e0"
                     font.pixelSize: 12
@@ -204,6 +251,7 @@ ScrollView {
                     text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_2"))
                 }
                 Text {
+                    id: text3
                     width: parent.width
                     color: "#e0e0e0"
                     font.pixelSize: 12
@@ -211,6 +259,7 @@ ScrollView {
                     text: (i18n.rev, i18n.tr("GUI_About_LicenseInfo_3"))
                 }
                 Text {
+                    id: text4
                     width: parent.width
                     color: "#e0e0e0"
                     font.pixelSize: 12
@@ -219,27 +268,72 @@ ScrollView {
                 }
             }
         }
-
-        standardButtons: Dialog.Close
     }
 
     // 鸣谢弹窗（对应 IBR_PopupManager Popup GUI_About_Acknowledgments）
     Dialog {
         id: ackDialog
-        title: (i18n.rev, i18n.tr("GUI_About_Acknowledgments"))
         modal: true
         anchors.centerIn: parent
-        width: 400; height: 300
+        width: 460
+        // 高度随鸣谢文本内容自适应（含 36px header + contentItem 上下 12px 边距）
+        height: Math.min(520, 36 + ackText.implicitHeight + 24)
+        padding: 0
+        closePolicy: Dialog.CloseOnEscape | Dialog.CloseOnPressOutside
 
         background: Rectangle { color: "#252526"; border.color: "#3c3c3c"; border.width: 1; radius: 4 }
 
-        contentItem: Text {
-            color: "#e0e0e0"
-            font.pixelSize: 12
-            wrapMode: Text.Wrap
-            text: (i18n.rev, i18n.tr("GUI_About_AcknowledgmentsInfo"))
+        // 统一弹窗风格：自定义 header（标题 + 关闭按钮）
+        header: Rectangle {
+            height: 36
+            color: "#2d2d2d"
+            radius: 4
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: (i18n.rev, i18n.tr("GUI_About_Acknowledgments"))
+                color: "#cccccc"
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            // 关闭按钮
+            Rectangle {
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 20; height: 20
+                radius: 3
+                color: ackCloseMouse.containsMouse ? "#3c3c3c" : "transparent"
+                Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: "#cccccc"
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    id: ackCloseMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: ackDialog.close()
+                }
+            }
         }
 
-        standardButtons: Dialog.Close
+        contentItem: ColumnLayout {
+            Layout.margins: 12
+            Text {
+                id: ackText
+                Layout.fillWidth: true
+                color: "#e0e0e0"
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignHCenter
+                text: (i18n.rev, i18n.tr("GUI_About_AcknowledgmentsInfo"))
+            }
+        }
     }
 }

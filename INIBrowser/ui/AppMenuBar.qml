@@ -41,6 +41,16 @@ Rectangle {
                 width: 56
                 height: parent.height
                 text: modelData.text
+                // 顶边栏按钮显隐（用户要求）：
+                //   编辑(4)：始终隐藏（叠代中永远是禁用态，见下 enabled 规则）
+                //   调试(7)：仅调试模式启动（-debugmenu）时显示，其余隐藏
+                visible: {
+                    switch (modelData.menuId) {
+                        case 4: return false
+                        case 7: return menuController.debugMenuEnabled
+                        default: return true
+                    }
+                }
                 // 禁用规则动态绑定，对齐 ImGui 版本（IBR_Panel.cpp:210-225）：
                 //   File/Modules/Setting/About：始终启用
                 //   View/List：仅项目打开时启用
@@ -56,7 +66,10 @@ Rectangle {
                     }
                 }
                 flat: true
-                checkable: true
+                // 不用 checkable 自行切换 checked：checkable 按钮点击会先把自身 checked 置反
+                // （覆盖掉 checked 绑定），导致已选中的按钮被点击后视觉上取消选中，而 activeMenu
+                // 又因值未变不发信号无法纠正。改用 checkable:false，checked 完全由 activeMenu 绑定驱动。
+                checkable: false
                 checked: menuController.activeMenu === modelData.menuId
                 onClicked: {
                     menuController.activeMenu = modelData.menuId

@@ -16,6 +16,12 @@ Button {
     property bool accent: false  // accent=true 时启用强调色边框/文字
     property color textColor: accent ? accentColor : "#cccccc"
 
+    // 横向左右 padding：使没显式设置宽度的按钮 implicitWidth 按文字内容自适应
+    // （implicitWidth = 文本宽 + 左右 padding），文字时长时不短、短时不空。
+    // 仅设置水平方向，避免改动垂直 default padding 影响高度（各列表按钮高度固定 22）
+    leftPadding: 8
+    rightPadding: 8
+
     background: Rectangle {
         color: control.enabled
                ? (control.hovered ? "#3c3c3c" : "#2d2d2d")
