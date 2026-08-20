@@ -140,12 +140,15 @@ Item {
         }
 
         // ===== 排序/筛选区 =====
+        // 高度随内容自适应：侧边栏变窄时排序行/筛选行用 Flow 自动换行，行数变多高度随之增高，
+        // 保证按钮/搜索框/复选框不被挤压裁切（原固定 132 高度 + RowLayout 不换行，缩太小时从右端"挤没"）
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 132
+            Layout.preferredHeight: sortColumn.implicitHeight + 8
             color: "#252525"
 
             ColumnLayout {
+                id: sortColumn
                 anchors.fill: parent
                 anchors.margins: 4
                 spacing: 4
@@ -160,11 +163,14 @@ Item {
                 }
 
                 // 第一行：排序 ComboBox + 升降序切换
-                RowLayout {
+                // 用 Flow 自动换行：侧栏窄时"排序方式:+下拉框+升降序"放不下一行，会整体换行不裁切
+                Flow {
                     Layout.fillWidth: true
                     spacing: 4
 
                     Text {
+                        height: 22
+                        verticalAlignment: Text.AlignVCenter
                         text: (i18n.rev, i18n.tr("GUI_SortBy")) + ":"
                         color: "#858585"
                         font.pixelSize: 11
@@ -173,8 +179,8 @@ Item {
                     // 排序方式下拉框（对应 IBR_ListView.cpp:161-177 IBR_Combo）
                     ComboBox {
                         id: sortCombo
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: 22
+                        width: 120
+                        height: 22
                         model: [
                             (i18n.rev, i18n.tr("GUI_SortByDefault")),
                             (i18n.rev, i18n.tr("GUI_SortByRegName")),
@@ -198,8 +204,8 @@ Item {
 
                     // 升降序切换按钮（对应 ArrowButton）
                     Button {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 22
+                        width: 28
+                        height: 22
                         text: sectionListModel.sortReverse ? "↓" : "↑"
                         onClicked: sectionListModel.sortReverse = !sectionListModel.sortReverse
                         background: Rectangle {
@@ -212,11 +218,9 @@ Item {
                         }
                     }
 
-                    Item { Layout.fillWidth: true }
-
                     // 阶段 9.2 新增：ShowRegName 切换按钮（对应 IBR_ListView.cpp:294）
                     StyledButton {
-                        Layout.preferredHeight: 22
+                        height: 22
                         text: sectionListModel.showRegName ? (i18n.rev, i18n.tr("GUI_ShowRegMode")) : (i18n.rev, i18n.tr("GUI_ShowNameMode"))
                         accent: sectionListModel.showRegName
                         font.pixelSize: 10
@@ -268,14 +272,15 @@ Item {
 
                 // 第三行：5 个筛选开关（对应 IBR_ListView.cpp:183-194）
                 // 阶段 9.2 新增：Full / CaseSensitive / Regex 三个 CheckBox
-                RowLayout {
+                // 用 Flow 自动换行：侧栏窄时"按注册名+Full/Case/Regex"放不下一行会换行，避免从右端被裁剪"挤没"
+                Flow {
                     Layout.fillWidth: true
                     spacing: 8
 
                     // 按寄存器名/显示名搜索切换（对应 IBR_ListView.cpp:184-185 ImGui::Button）
                     // 阶段 9.3：由 CheckBox 改为 Button，对齐 ImGui 的 Button 切换语义
                     StyledButton {
-                        Layout.preferredHeight: 22
+                        height: 22
                         text: sectionListModel.filterByRegistry
                               ? (i18n.rev, i18n.tr("GUI_SearchSec_ByRegistry")) : (i18n.rev, i18n.tr("GUI_SearchSec_ByDisplayName"))
                         accent: sectionListModel.filterByRegistry
@@ -306,8 +311,6 @@ Item {
                         onToggled: sectionListModel.filterRegex = checked
                         font.pixelSize: 11
                     }
-
-                    Item { Layout.fillWidth: true }
                 }
             }
 
