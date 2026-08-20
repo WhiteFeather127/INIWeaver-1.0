@@ -202,9 +202,10 @@ ScrollView {
                             textRole: "displayName"
                             // 宽度
                             implicitWidth: 140
-                            // 选中时切换语言
-                            onActivated: function(index) {
-                                var lang = model[index]
+                            // 选中项时切换语言（popup 为自定义 ListView，ComboBox 默认 activate 机制不会触发，故此处在 delegate 点击中显式调用）
+                            function applyLanguage(index) {
+                                var langs = settingController.availableLanguages()
+                                var lang = (index >= 0 && index < langs.length) ? langs[index] : null
                                 if (lang && lang.key)
                                     settingController.setLanguage(lang.key)
                             }
@@ -248,6 +249,12 @@ ScrollView {
                                 }
                                 background: Rectangle {
                                     color: parent.highlighted ? "#007acc" : "transparent"
+                                }
+                                // 手动触发语言切换并关闭弹出层（自定义 popup 需显式处理点击）
+                                onClicked: {
+                                    langComboBox.currentIndex = index
+                                    langComboBox.popup.close()
+                                    langComboBox.applyLanguage(index)
                                 }
                             }
                             // 弹出层样式（显式引用 langComboBox 的 model/delegate；此前误用 parent.parent 取到 overlay，导致 model 为 null 下拉无法打开）
