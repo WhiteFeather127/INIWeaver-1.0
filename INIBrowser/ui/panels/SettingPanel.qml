@@ -96,7 +96,9 @@ ScrollView {
                                     height: parent.height - 4
                                     radius: width / 2
                                     y: 2
-                                    x: parent.checked ? parent.width - width - 2 : 2
+                                    // parent 是轨道(胶囊)，轨道的 parent 才是 CheckBox；写成 parent.checked
+                                    // 会取到轨道上不存在的 checked(undefined)，拨钮永远停在左边不滑动
+                                    x: parent.parent.checked ? parent.width - width - 2 : 2
                                     color: "#ffffff"
                                     Behavior on x { NumberAnimation { duration: 120 } }
                                 }
