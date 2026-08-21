@@ -29,6 +29,10 @@
 #include <cmath>
 #include <limits>
 
+// 对齐 imgui：连线拖拽类型不符时生成带"连线类型 + 目标注册名"的预览文字（GUI_Preview_WrongType）
+// 定义于 IBR_SectionData.cpp:465，IBR_Misc.cpp:54 也仅作本地前向声明，这里补充声明供调用
+void Acceptor_RefusePreview(StrPoolID SourceReg, StrPoolID TargetReg, StrPoolID LinkType);
+
 // 阶段 12.4：前向声明 IBR_SectionData.cpp 中的自由函数（全局作用域）
 // 对应 IBR_SectionData.cpp:438-464
 bool Acceptor_CheckLinkType(StrPoolID SourceReg, StrPoolID TargetReg, StrPoolID LinkType);
@@ -3603,6 +3607,11 @@ int WorkspaceController::checkMergePreview(qulonglong sourceId, qulonglong destI
             typeAlt = NewPoolStr(linkKey.toUtf8().constData());
         }
         bool check = Acceptor_CheckLinkType(srcBack->Register, dstBack->Register, typeAlt);
+        if (!check) {
+            // 对齐 imgui：类型不符 → 生成带"连线类型 + 目标注册名"的预览文字（GUI_Preview_WrongType）
+            // 供 mergePreviewText 返回（对应 IBR_SectionData.cpp exam Acceptor_RefusePreview）
+            Acceptor_RefusePreview(srcBack->Register, dstBack->Register, typeAlt);
+        }
         return check ? 0 : 1;  // 0=允许, 1=类型不匹配
     } else {
         // IBR_SecDrag 路径：检查是否有默认链接 key
@@ -3642,6 +3651,10 @@ QString WorkspaceController::mergePreviewText(qulonglong sourceId, qulonglong de
             return srcText;
         }
         case 1:
+            // 对齐 imgui：连线拖拽类型不符时返回带"连线类型 + 目标注册名"的文字（GUI_Preview_WrongType）
+            // 由 checkMergePreview 内 Acceptor_RefusePreview 生成，临时存于 DragConditionTextAlt
+            if (isLinkDrag && !IBR_Inst_Project.DragConditionTextAlt.empty())
+                return QString::fromUtf8(IBR_Inst_Project.DragConditionTextAlt.c_str());
             return QString::fromUtf8(u8"类型不匹配");
         case 2:
             return QString::fromUtf8(u8"无默认链接 key");
