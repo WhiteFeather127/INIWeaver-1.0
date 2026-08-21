@@ -1598,7 +1598,9 @@ void WorkspaceController::deleteLink(qulonglong sourceId, qulonglong destId, con
 
 void WorkspaceController::setDraggingLink(qreal fromX, qreal fromY, qreal toX, qreal toY)
 {
+    bool wasActive = m_hasDraggingLink;
     m_hasDraggingLink = true;
+    if (!wasActive) emit draggingActiveChanged();
     m_dragLinkFromX = fromX; m_dragLinkFromY = fromY;
     m_dragLinkToX = toX; m_dragLinkToY = toY;
     emit draggingLinkChanged(fromX, fromY, toX, toY);
@@ -1607,6 +1609,7 @@ void WorkspaceController::setDraggingLink(qreal fromX, qreal fromY, qreal toX, q
 void WorkspaceController::clearDraggingLink()
 {
     m_hasDraggingLink = false;
+    emit draggingActiveChanged();
     emit draggingLinkCleared();
     // v3 批次 1.4：清除拖拽无效链接状态
     if (m_dragInvalidLink) {

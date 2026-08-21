@@ -78,6 +78,8 @@ class WorkspaceController : public QObject
     Q_PROPERTY(QString dragTargetText READ dragTargetText NOTIFY dragTargetChanged)
     // 连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 里的源文本，IBR_LinkNode.cpp:570-573）
     Q_PROPERTY(QString dragSourceText READ dragSourceText NOTIFY dragTargetChanged)
+    // 是否正在拖拽连线（区分有无目标命中：无目标时仅显示源标签，对齐 imgui 拖拽图像）
+    Q_PROPERTY(bool hasDraggingLink READ hasDraggingLink NOTIFY draggingActiveChanged)
     // 拖拽中的节点 ID（单节点拖拽用，0 表示无拖拽）
     // 修复：避免 beginMoveSection 中 refresh() 重建 QVariantList 导致 mouse grab 丢失
     Q_PROPERTY(qulonglong draggingSectionId READ draggingSectionId NOTIFY draggingSectionIdChanged)
@@ -147,6 +149,7 @@ public:
     QString dragTargetColor() const { return m_dragTargetColor; }
     QString dragTargetText() const { return m_dragTargetText; }
     QString dragSourceText() const { return m_dragSourceText; }
+    bool hasDraggingLink() const { return m_hasDraggingLink; }
 
     // 鼠标交互（对应 IBR_WorkSpace::ProcessBackgroundOpr 状态机）
     // button: Qt::LeftButton=1, Qt::RightButton=2, Qt::MiddleButton=4
@@ -442,6 +445,8 @@ signals:
     void dragInvalidLinkChanged(bool invalid);
     // 拖拽目标命中变化通知（QML SectionNode 据此绑定预览框显示）
     void dragTargetChanged();
+    // 连线拖拽开始/结束（驱动预览框是否有源标签显示）
+    void draggingActiveChanged();
     // 拖拽节点 ID 变化通知（QML 据此决定是否应用 dragOffset）
     void draggingSectionIdChanged();
     // 多节点拖拽状态变化通知

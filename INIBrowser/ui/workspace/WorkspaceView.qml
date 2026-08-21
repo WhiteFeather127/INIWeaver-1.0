@@ -452,7 +452,9 @@ Item {
         x: -1000
         y: -1000
         z: 200
-        visible: workspaceController.dragTargetSectionId
+        // 连线拖拽中即显示源标签（不对齐模块时仅源标签跟随鼠标，对齐 imgui 拖拽图像；
+        // 命中模块后 dragTargetSectionId 非 0，则下方目标行一并显示）
+        visible: workspaceController.hasDraggingLink || workspaceController.dragTargetSectionId
         width: dragPreviewCol.implicitWidth + 6
         height: dragPreviewCol.implicitHeight + 4
 
@@ -476,7 +478,9 @@ Item {
                 color: "#d4d4d4"
                 font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
             }
+            // 目标命中行（对勾/叉 + 目标文字），仅悬停在模块上时显示
             Row {
+                visible: workspaceController.dragTargetSectionId
                 spacing: 3
                 // 对勾 / 叉（对应 DrawCheckmark / DrawCross）
                 Text {
