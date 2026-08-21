@@ -1108,23 +1108,71 @@ void SectionLineModel::setIifComponentValue(int row, int compIdx, const QString 
         IBG_InputForm &form = *ii->Value;
         auto &comps = *form.InputComponents;
         if (compIdx < 0 || compIdx >= static_cast<int>(comps.size())) return;
-        int vid = comps[static_cast<size_t>(compIdx)]->GetCurrentTargetValueID();
-        if (vid < 0) return;
+        auto *comp = comps[static_cast<size_t>(compIdx)].get();
+        int vid = comp->GetCurrentTargetValueID();
+        if (vid < 0) { qDebug("[IIF-DIAG] vid<0 compIdx=%d kind=%d", compIdx, (int)row); return; }
 
         auto &V = form.GetValue(vid);
-        qDebug("[IIF-DIAG] setIifComponentValue row=%d compIdx=%d vid=%d text='%s'",
-               row, compIdx, vid, text.c_str());
+        const std::string &before = V.Value;
+        auto stBefore = V.StateValue<IIS_String>();
+        qDebug("[IIF-DIAG] BEFORE vid=%d V.Value='%s' state=%s", vid, before.c_str(),
+               (stBefore ? stBefore->Text.c_str() : "(null)"));
+
+        // 按分量类型写回（对齐 imgui IIC_InputText / IIC_InputInt::RenderUI 的 mf）：
+        // input/int 分量均以 IIS_String 令牌态存储；bool 分量经 setIifComponentValueBool 走 IIS_Bool
         if (auto st = V.StateValue<IIS_String>()) st->Text = text;
         else V.ResetState<IIS_String>(text);
-
-        // RegenFormattedString() 内部置 Form.dirty=true 并强制重算各分量值/格式串，
-        // 否则 GetFormattedString() 返回缓存旧串，改动不会落到 ini
-        // （对齐原版 Data_IIF::Replace / IBG_InputForm::RenderUI Changed 分支）
+        V.Value = text;                 // 同步 Value，供 GetFormattedString 直接读取
+        V.NeedsUpdate(form.GetValues(), *comp);   // 标记需重算，确保 GetFormattedString 读到新值
         form.RegenFormattedString();
         const std::string &_fmt = form.GetFormattedString();
         qDebug("[IIF-DIAG] after regen formatted='%s' (len=%zu)", _fmt.c_str(), _fmt.size());
         bsec->UpdateAll();
         refresh();
+        emit iifDataChanged(row);        // 通知 QML 重读 IIF 分量（refresh 快照可能 SKIP）
+        emit sectionDataChanged(m_sectionId);
+    } });
+}
+
+void SectionLineModel::setIifComponentValueBool(int row, int compIdx, bool val)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    const auto &e = m_entries[row];
+
+    ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
+    StrPoolID keyId = e.keyId;
+    int mult = e.lineMult;
+
+    IBRF_CoreBump.SendToR({ [row, srcId, keyId, mult, compIdx, val, this]() {
+        auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
+        auto bsec = rsec.GetBack_Unsafe();
+        if (!bsec) return;
+        auto *line = bsec->GetLineFromSubSecs(keyId);
+        if (!line) return;
+        auto dataPtr = line->Indexed(static_cast<size_t>(mult));
+        if (!dataPtr) return;
+        auto ii = dataPtr->GetData<IBB_IniLine_Data_IIF>();
+        if (!ii || !ii->Value) return;
+
+        IBG_InputForm &form = *ii->Value;
+        auto &comps = *form.InputComponents;
+        if (compIdx < 0 || compIdx >= static_cast<int>(comps.size())) return;
+        auto *b = dynamic_cast<IIC_Bool*>(comps[static_cast<size_t>(compIdx)].get());
+        if (!b) return;
+        int vid = b->GetCurrentTargetValueID();
+        if (vid < 0) return;
+
+        auto &V = form.GetValue(vid);
+        qDebug("[IIF-DIAG] bool BEFORE vid=%d V.Value='%s' newVal=%d", vid, V.Value.c_str(), (int)val);
+        if (auto st = V.StateValue<IIS_Bool>()) { st->Value = val; st->FmtType = b->FmtType; }
+        else V.ResetState<IIS_Bool>(val, b->FmtType);
+        V.NeedsUpdate(form.GetValues(), *b);   // 触发 UpdateValue→IIS_Bool::Format 生成 FmtType 文本
+        form.RegenFormattedString();
+        const std::string &_fmt = form.GetFormattedString();
+        qDebug("[IIF-DIAG] bool after regen formatted='%s' (len=%zu)", _fmt.c_str(), _fmt.size());
+        bsec->UpdateAll();
+        refresh();
+        emit iifDataChanged(row);        // 通知 QML 重读 IIF 分量（refresh 快照可能 SKIP）
         emit sectionDataChanged(m_sectionId);
     } });
 }

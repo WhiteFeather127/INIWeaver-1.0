@@ -134,6 +134,10 @@ public:
     // 修改该分量 state 后按格式化串重建整行并写回业务层
     Q_INVOKABLE void setIifComponentValue(int row, int compIdx, const QString &rawText);
 
+    // IIF 分量值写回（bool 分量：勾选框点击翻转）
+    // 用 IIS_Bool 状态 + IIC_Bool::FmtType 写回，格式化后落盘
+    Q_INVOKABLE void setIifComponentValueBool(int row, int compIdx, bool val);
+
 signals:
     void sectionIdChanged();
     void showRegNameChanged();
@@ -143,6 +147,10 @@ signals:
     // LinkNode 位置回写后通知 WorkspaceController 重建连线端点表
     // 对应 ImGui 每帧 UpdateLink → SetSessionStatus → 下帧 RenderUI_Links 用新 LastCenter
     void linkNodeCenterChanged();
+    // IIF 分量值写回后通知 QML 刷新该行 IIF 显示
+    // 因 IIF 值不走 role、且 refresh() 有内容快照 SKIP 优化，写回后需显式通知，
+    // 否则共享同一 ValueID 的多个分量不会同步更新显示
+    void iifDataChanged(int row);
 
 private:
     // 行条目（对应 ImGui 一行渲染所需的全部数据）

@@ -50,6 +50,20 @@ Item {
     property bool boolChecked: false  // Bool 键当前布尔值（keyType==1 时有效）
     // IIF 多分量单行自然宽度（供 SectionNode 扩展模块宽度以容纳 IIF，0=非 IIF）
     property real iifNaturalWidth: 0
+    // IIF 分量列表刷新计数：写回共享 ValueID 后递增，强制 Repeater 重读 iifComponents，
+    // 使共享同一 ValueID 的多个分量一起更新显示
+    property int iifRevision: 0
+
+    // 监听模型写回通知：刷新本行 IIF 分量列表与自然宽度
+    Connections {
+        target: root.lineModel
+        function onIifDataChanged(r) {
+            if (r === root.rowIndex) {
+                root.iifRevision++
+                root.recomputeIifNaturalWidth()
+            }
+        }
+    }
 
     // 布尔文本判真（IIF 布尔分量勾选状态；yes/true/t/1 → 真）
     function boolTrue(t) {
@@ -354,7 +368,7 @@ Item {
         spacing: 4
 
         Repeater {
-            model: root.lineModel ? root.lineModel.iifComponents(root.rowIndex) : []
+            model: root.lineModel && root.iifRevision >= 0 ? root.lineModel.iifComponents(root.rowIndex) : []
 
             Item {
                 id: iic
@@ -382,14 +396,15 @@ Item {
                     width: visible ? implicitWidth : 0
                 }
 
-                // 布尔勾选框（只读展示当前布尔态，编辑写回后续阶段）
+                // 布尔勾选框（点击翻转，写回 IIS_Bool）
                 Rectangle {
+                    id: iifBoolBox
                     visible: cc.kind === "bool"
                     width: parent.width
                     height: parent.height
                     anchors.centerIn: parent
                     radius: 3
-                    color: "#1e1e1e"
+                    color: iifBoolMA.containsMouse ? "#3a3a3a" : "#1e1e1e"
                     border.color: root.boolTrue(cc.text) ? "#007acc" : "#5a5a5a"
                     border.width: 1
                     Text {
@@ -399,6 +414,17 @@ Item {
                         color: "#4ec9b0"
                         font.pixelSize: root.fontBody
                         font.bold: true
+                    }
+                    MouseArea {
+                        id: iifBoolMA
+                        anchors.fill: parent
+                        preventStealing: true  // 阻止穿透到 nodeMouseArea（避免误选中模块）
+                        hoverEnabled: true
+                        onClicked: {
+                            if (root.lineModel)
+                                root.lineModel.setIifComponentValueBool(
+                                            root.rowIndex, cc.compIdx, !root.boolTrue(cc.text))
+                        }
                     }
                 }
 
