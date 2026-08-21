@@ -44,16 +44,24 @@ Item {
     // Style = IsInherit ? ImGuiRadioButtonFlags_RoundedSquare : GlobalNodeStyle
     // 默认 GlobalNodeStyle = Circle
     // 仅负责视觉绘制；拖拽源挂在下方 dragProxy 上（对应 ImGui BeginDragDropSource + IBR_LineDrag）
+    // 两层绘制：底层透明灰色圆（hover 提亮），上层不透明颜色层（对应 ImGui FrameBg 基圆 + CheckMark 内点）
     Rectangle {
-        id: nodeCircle
+        // 低一位图层：透明灰色圆，鼠标放上后提高亮度
+        id: nodeHalo
         anchors.fill: parent
         // IsInherit → RoundedSquare（小圆角矩形）；其他 → Circle（全圆）
         radius: root.isInherit ? 2 : (width / 2)
+        color: hoverArea.containsMouse ? "#90c8c8c8" : "#48a0a0a0"
+    }
+    Rectangle {
+        // 上层：不透明颜色层（键行用 linkCol，随 AdjustNodeCol 的业务色）
+        id: nodeCircle
+        anchors.centerIn: parent
+        width: parent.width * 0.7
+        height: width
+        radius: root.isInherit ? 2 : (width / 2)
         color: root.linkCol
-        // 对齐 imgui：节点为低一位图层的半透明圆，无边框。
-        // 半透明填充 = 单次填充绘制，无边框开销最小。
-        // 空链接更淡提示（对应 IllegalLineColor 红色由 linkCol 已传入）
-        opacity: root.isEmpty ? 0.5 : 0.6
+        opacity: 1.0
     }
 
     // ===== 拖拽代理（对应 ImGui BeginDragDropSource + SetDragDropPayload("IBR_LineDrag")） =====

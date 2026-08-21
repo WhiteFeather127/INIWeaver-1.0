@@ -242,15 +242,24 @@ Item {
                 anchors.leftMargin: root.isImport ? 0 : 8
                 anchors.verticalCenter: parent.verticalCenter
                 // 与键行 LinkNode 同尺寸同样式（统一节点视觉）：fontSmall*1.5 逻辑尺寸，circle 圆点
+                // 两层绘制：底层透明灰色圆（hover 提亮），上层不透明颜色层
                 width: root.fontSmall * 1.5
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
-                // 颜色（对齐 imgui）：非 Ignore 用默认 CheckMark（深色主题 0.26/0.59/0.98 ≈ #4296fa，
-                // imgui_draw.cpp:213）；Ignore 用 TempWbg 白色（对应 IBR_SectionData.cpp:743/744）
-                color: isIgnored ? "#80ffffff" : "#4296fa"
-                // 对齐 imgui：节点为低一位图层的半透明圆，无边框（半透明填充 = 单次绘制，开销最小）
-                opacity: 0.6
+                // 低一位图层：透明灰色圆，鼠标放上后提高亮度
+                color: headRNMouseArea.containsMouse ? "#90c8c8c8" : "#48a0a0a0"
                 visible: !isComment
+
+                // 上层：不透明颜色层（对齐 imgui）：非 Ignore 用默认 CheckMark
+                //（深色主题 0.26/0.59/0.98 ≈ #4296fa，imgui_draw.cpp:213）；Ignore 用 TempWbg 白色
+                //（对应 IBR_SectionData.cpp:743/744）
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width * 0.7
+                    height: width
+                    radius: width / 2  // Circle 样式
+                    color: isIgnored ? "#ffffff" : "#4296fa"
+                }
 
                 // 阶段 1/3：坐标回写（对应 ImGui HeadLineRN → Session.LastCenter）
                 // 折叠态：回写 setHeadLineRN（连线源端点汇聚到头部，对应 RenderUI_Collapsed）
@@ -287,7 +296,7 @@ Item {
                 id: headRNMouseArea
                 anchors.fill: headLineRN
                 acceptedButtons: Qt.LeftButton
-                hoverEnabled: false
+                hoverEnabled: true  // 驱动底层透明灰色圆的悬停提亮（headLineRN.color 绑定 containsMouse）
                 drag.target: headDragProxy
                 drag.threshold: 4
                 drag.axis: Drag.XAndYAxis
