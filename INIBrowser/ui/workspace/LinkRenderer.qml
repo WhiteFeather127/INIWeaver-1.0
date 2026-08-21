@@ -283,7 +283,7 @@ Canvas {
             var col = link.color;
             var isFocused = (link.sourceId === focusedSectionId || link.destId === focusedSectionId);
             if (isFocused) {
-                col = "#4fc3f7";  // FocusLineColor
+                col = "#ffffff";  // FocusLineColor（对齐 ImGui 深色主题 255,255,255 = 白，IBR_Misc.cpp:1032）
             } else if (!col || col === "#00000000") {
                 col = "#cccccc";  // LegalLineColor（默认）
             }
