@@ -1,20 +1,24 @@
 // AppToolTip.qml
-// 全局统一悬停提示框（Popup 单例）—— 项目内所有"鼠标放上去的提示"的唯一入口。
+// 全局统一悬停提示框 —— 项目内所有"鼠标放上去的提示"的唯一入口。
 // 统一为暗色方角 + 固定字号，对齐 ImGui IBR_ToolTip 扁平提示。
 // 不随工作区缩放变化（字体固定，不乘 ratio）。
+//
+// 实现要点：这是一个挂在 Overlay.overlay 上的"纯渲染" Item（enabled=false），
+// 只负责绘制，完全不参与鼠标命中/焦点链 —— 对下方任何鼠标操作零影响
+// （Popup 即便非 modal，其内容区也可能处于命中链顶层/抢焦点，故弃用）。
 //
 // 用法：
 //   // Main.qml 实例化，挂 Overlay.overlay（与 ContextMenuHost 同架构）：
 //   //   AppToolTip { id: appToolTip; parent: Overlay.overlay }
 //   // 各 hover 源（菜单按钮/连线节点/模块项等）：
-//   //   onEntered: appToolTip.show(text, screenX, screenY)
-//   //   onExited:  appToolTip.hide()
+//   //   onEntered: appToolTip.show(text, screenX, screenY[, source])
+//   //   onExited:  appToolTip.hide(source)
 //
-// 方向性修复：
-//   1. 防抖隐藏（Timer 120ms）：快速跨多个源滑动时 onExited 高频触发，延迟 close
-//      避免 popup 闪烁/瞬间消失（旧 hide 后新 show 的时序竞争）。
-//   2. 优先显示在参考点上方（空间不足才下方）：popup 不落在鼠标前进路径上，
-//      避免从上往下滑动时 popup 出现在鼠标即将经过的区域造成"不显示"。
+// 修复要点：
+//   1. 防抖隐藏（Timer 120ms）：快速跨多个源滑动时 onExited 高频触发，延迟 hide
+//      避免提示框闪烁/瞬间消失（旧 hide 后新 show 的时序竞争）。
+//   2. 优先显示在参考点上方（空间不足才下方）：框不落在鼠标前进路径上，
+//      避免从上往下滑动时框出现在鼠标即将经过的区域造成"不显示"。
 //   3. 源身份校验（source 参数）：相邻条目快速切换、或跨区域串扰时，旧条目滞后的
 //      onExited(hide) 可能晚于新条目 onEntered(show) 到达，会误把刚显示的提示关掉。
 //      规定：带 source 的 hide 仅在 source == 当前显示源时才生效；无源的提示
@@ -22,10 +26,14 @@
 import QtQuick
 import QtQuick.Controls
 
-Popup {
+Item {
     id: root
-    padding: 0
-    closePolicy: Popup.NoAutoClose  // 提示框由 show/hide 显式控制，不点外部关闭
+
+    // 纯渲染：不接收鼠标/键盘/焦点，对下方所有交互零影响（只画不挡）
+    enabled: false
+    visible: false
+    // 顶层 z：盖过 overlay 中的其他浮层（菜单等），确保提示可见
+    z: 10000
 
     // 提示框最大宽度（超出则文本换行，避免长文本把框拉宽到屏幕外）
     property int maxTipWidth: 420
@@ -34,40 +42,37 @@ Popup {
     // 用于抵御相邻条目切换时滞后的 onExited 事件
     property var activeSource: null
 
-    // 防抖隐藏：鼠标快速滑过多个源时，onExited 高频触发；延迟一定时间再 close，
-    // 若期间又有新 show 则取消，避免 popup 闪烁/切换丢显
+    // 防抖隐藏：鼠标快速滑过多个源时，onExited 高频触发；延迟一定时间再隐藏，
+    // 若期间又有新 show 则取消，避免提示框闪烁/切换丢显
     Timer {
         id: hideTimer
         interval: 120
         onTriggered: {
-            root.close()
+            root.visible = false
             tipText.text = ""
             root.activeSource = null
         }
     }
 
-    contentItem: Text {
+    // 背景：暗色方角（对齐 imgui 扁平提示）
+    Rectangle {
+        id: bg
+        anchors.fill: parent
+        color: "#e6242424"
+        radius: 0
+        border.color: "#3c3c3c"
+        border.width: 1
+    }
+
+    // 内容文本：x/y 预留内边距，width/height 由 show() 按内容精确计算，wrap 自动换行
+    Text {
         id: tipText
-        leftPadding: 6
-        rightPadding: 6
-        topPadding: 4
-        bottomPadding: 4
+        x: 7
+        y: 5
         color: "#e8e8e8"
         // 固定字号：不乘 ratio，不随工作区缩放变化
         font.pixelSize: 12
         wrapMode: Text.Wrap
-        // 换行上限：隐式宽超过此值时才按上限换行（否则自然单行）
-        onImplicitWidthChanged: {
-            var cap = root.maxTipWidth
-            width = (implicitWidth > cap - 12) ? (cap - 12) : implicitWidth
-        }
-    }
-
-    background: Rectangle {
-        color: "#e6242424"
-        radius: 0  // 方角（对齐 imgui 扁平提示）
-        border.color: "#3c3c3c"
-        border.width: 1
     }
 
     // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
@@ -75,18 +80,23 @@ Popup {
     function show(text, screenX, screenY, source) {
         activeSource = source || null
         tipText.text = text || ""
-        var cap = maxTipWidth - 12
-        tipText.width = (tipText.implicitWidth > cap) ? cap : tipText.implicitWidth
         hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
+        // 内容换行宽度：受 maxTipWidth 限制；再据此算框总尺寸（内容 + 内边距 + 边框）
+        tipText.width = (tipText.implicitWidth > maxTipWidth) ? maxTipWidth : tipText.implicitWidth
+        var ww = tipText.width + 16                       // 左7 + 右7 + 边框2
+        var hh = tipText.implicitHeight + 12              // 上5 + 下5 + 边框2
+        // 屏幕坐标 → Overlay 坐标
         var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        var w = Math.max(2, Math.min(o.x, Overlay.overlay.width - tipText.width - 14))
-        var hh = root.implicitHeight
-        // 优先显示在参考点上方（不遮挡鼠标前进路径），上方不足才下方
+        // 水平：参考点向右偏移 8px（贴近而不遮鼠标），再钳制在窗口内
+        var x = Math.max(2, Math.min(o.x + 8, Math.max(2, Overlay.overlay.width - ww - 2)))
+        // 垂直：优先显示在参考点上方（不遮鼠标前进路径），空间不足才下方
         var above = o.y - hh - 10
-        var below = o.y + 10
-        root.x = w
+        var below = o.y + 12
+        root.x = x
         root.y = (above >= 4) ? above : Math.min(below, Overlay.overlay.height - hh - 4)
-        root.open()
+        root.width = ww
+        root.height = hh
+        root.visible = true
     }
 
     // source=归属源对象（可选）。带 source 的 hide 仅在 source 为当前显示源时才生效，
