@@ -34,6 +34,10 @@ Item {
     property string keyName: ""
     property int lineMult: 0
 
+    // 是否确实发生过连线拖拽（避免普通点击圆点松手时误建自连）
+    // 自连（拖动连线落回本模块）= targetId == sourceId，对应 ImGui Link.IsSelfLinked
+    property bool linkWasDragged: false
+
     // D16：圆点尺寸随 ratio 缩放（对应 ImGui FontHeight，基准 13px）
     // fontSmall 由 LineRow 传入，SectionNode 按 _r 缩放计算
     // 放大 1.5 倍提升可点击性
@@ -145,16 +149,21 @@ Item {
         }
 
         // 拖拽开始时发信号（供 LineRow / WorkspaceController 同步状态）
-        onPressed: root.pressed()
+        onPressed: { root.linkWasDragged = false; root.pressed() }
+        // 仅在确实拖拽过（超过 threshold）才置为 true，供 onReleased 判定是否建链
+        drag.onActiveChanged: { if (drag.active) root.linkWasDragged = true }
         onReleased: {
             // 用拖拽终点（或按下位置）命中目标节点，命中则建链（对应 IBR_LineDrag 落点）
+            // 允许自连：targetId == sourceId 时链接回本模块（DLK），对应 ImGui Link.IsSelfLinked
+            // 仅当确实拖拽过才建链，普通点击圆点（无拖动）松手不误建自连
             var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
             var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
-            if (targetId && targetId !== (root.sectionData.sectionId || 0) && root.linkLimit !== 0) {
+            if (root.linkWasDragged && targetId && root.linkLimit !== 0) {
                 workspaceController.createLinkFromDrag(
                     root.sectionData.sectionId, root.keyName || "", root.lineMult || 0,
                     targetId, "", 0)
             }
+            root.linkWasDragged = false
             root.released()
             // 拖拽结束：清除 Bezier 预览与目标预览
             workspaceController.clearDraggingLink()
@@ -171,9 +180,9 @@ Item {
                 // 预览框跟随鼠标（对应 ImGui 拖拽图像）：toPos 已是 workspaceView 坐标
                 workspaceView.dragPreviewItem.x = toPos.x + 8
                 workspaceView.dragPreviewItem.y = toPos.y + 8
-                // 目标命中 + 预览（lineDrag：建链）
+                // 目标命中 + 预览（lineDrag：建链；允许自连，拖动中悬停本模块也给出预览）
                 var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
-                if (targetId && targetId !== (root.sectionData.sectionId || 0)) {
+                if (targetId) {
                     if (root.linkLimit === 0) {
                         // LinkLimit=0 无法建链：源端红叉"无效链接" + 目标红色预览
                         // 对应 ImGui DrawDragPreviewIcon_LinkLim0（IBR_SectionData.cpp:96-106）
