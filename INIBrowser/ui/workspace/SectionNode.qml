@@ -247,7 +247,8 @@ Item {
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
                 // 低一位图层：透明灰色圆，鼠标放上后提高亮度
-                color: headRNMouseArea.containsMouse ? "#90c8c8c8" : "#48a0a0a0"
+                // 内层颜色圆用 anchors.centerIn 与之同心（颜色圆圆心 = 灰圆圆心）
+                color: headRNMouseArea.containsMouse ? "#b0c8c8c8" : "#62a0a0a0"
                 visible: !isComment
 
                 // 上层：不透明颜色层（对齐 imgui）：非 Ignore 用默认 CheckMark
