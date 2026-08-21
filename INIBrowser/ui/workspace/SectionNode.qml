@@ -241,7 +241,8 @@ Item {
                 anchors.left: root.isImport ? undefined : parent.left
                 anchors.leftMargin: root.isImport ? 0 : 8
                 anchors.verticalCenter: parent.verticalCenter
-                width: 10  // 逻辑尺寸（缩放方案，视觉随 scale）
+                // 与键行 LinkNode 同尺寸同样式（统一节点视觉）：fontSmall*1.5 逻辑尺寸，circle 圆点
+                width: root.fontSmall * 1.5
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
                 // Ignore → 白色半透明（TempWbg）；否则用白色边框圆点（标题栏已是注册表颜色）
