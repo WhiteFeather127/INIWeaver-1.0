@@ -241,9 +241,11 @@ void EditPanelController::rebuildEditLines()
             entry["values"] = values;
             entry["value"] = values.isEmpty() ? QString() : values.first().toString();
         } else {
+            // 非多值键：只填单值，不设 values（空 → 侧边栏多值 Repeater model 恒 0，
+            // 从根上杜绝该 Repeater 对非 Multiple 键产生额外输入框）
             QString val = QString::fromUtf8(pLine->FinalExportString(0).c_str());
             entry["value"] = val;
-            entry["values"] = QVariantList{val};
+            entry["values"] = QVariantList();
         }
 
         m_editLines.append(entry);

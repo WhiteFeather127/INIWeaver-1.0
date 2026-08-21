@@ -263,11 +263,16 @@ Item {
                                 }
 
                                 // 值编辑控件（缺失行、多值键不显示；多值键由下方 Repeater 依次渲染各值）
+                                // 互斥规则：主值框 与 多值 Repeater 严格二选一，绝不并存
+                                //  - 非 Multiple 键：主值框显示（多值 Repeater 恒 0）
+                                //  - Multiple 但仅 1 个值：主值框显示（无第二框）
+                                //  - Multiple 且值 > 1：主值框隐藏，Repeater 逐值渲染
                                 TextField {
                                     id: mainValueField
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
-                                             && !(modelData.isMultiple || false)
+                                             && !((modelData.isMultiple || false)
+                                                  && ((modelData.values ? modelData.values.length : 0) > 1))
                                     text: modelData.value || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
@@ -292,12 +297,14 @@ Item {
                                 }
 }
 
-                            // 同名多值键（isMultiple）：每个值独立一行编辑，按分量索引写回（对应 imgui ForEachWithIdx 逐行渲染）
+                            // 同名多值键（isMultiple 且值 > 1）：每个值独立一行编辑，按分量索引写回（对应 imgui ForEachWithIdx 逐行渲染）
+                            // 与主值框严格互斥（主值框仅在非 Multiple / 单值 Multiple 时显示）；非 Multiple 键 values 为空 → model 恒 0
                             Repeater {
                                 id: valueRows
                                 // 捕获外层 ListView 键条目（Repeater delegate 内 modelData 会被整型 model 遮蔽）
                                 property var entry: modelData
                                 visible: (entry.isMultiple || false)
+                                         && ((entry.values ? entry.values.length : 0) > 1)
                                          && !(entry.missing || false)
                                 model: entry.values ? entry.values.length : 0
                                 // 高度不固定，跟随普通单值框自适应（mainValueField.height 为其自然高度）
