@@ -65,7 +65,7 @@ Item {
     // 尺寸（由内容自适应驱动；缩放方案下为逻辑尺寸，视觉尺寸 = 逻辑 × scale(_r)）
     // 宽度：max(WidthFix, wbase)（对应 ImGui IBR_WorkSpace.cpp:1840-1841）
     // 高度：标题栏 + 内容区，折叠时只保留标题栏
-    implicitWidth: Math.max(sectionData.widthFix || 0, sectionData.widthBase || 221)
+    implicitWidth: Math.max(sectionData.widthFix || 0, sectionData.widthBase || 221, root.maxIIFNaturalWidth() + 10)
     implicitHeight: header.height + contentContainer.height + (contentContainer.visible ? 4 : 0)
 
     // 拖拽时置顶 + 透明度（对应 IBR_WorkSpace.cpp:1673-1708 完整透明度计算）
@@ -121,6 +121,16 @@ Item {
                 Qt.callLater(() => updateAllCenters())
             }
         }
+    }
+
+    // 遍历行列表取最大的 IIF 自然宽度（供 implicitWidth 自适应模块宽度容纳 IIF 多分量）
+    function maxIIFNaturalWidth() {
+        var m = 0
+        for (var i = 0; i < lineColumnRepeater.count; ++i) {
+            var it = lineColumnRepeater.itemAt(i)
+            if (it && it.iifNaturalWidth > m) m = it.iifNaturalWidth
+        }
+        return m
     }
 
     function updateAllCenters(force) {

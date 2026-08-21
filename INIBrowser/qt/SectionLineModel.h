@@ -126,6 +126,14 @@ public:
     // 读取 Data_Bool 当前 bool，翻转后按 StrBoolType 格式写回
     Q_INVOKABLE bool toggleBoolValue(int row);
 
+    // IIF 多分量导出（阶段一核心分量）：返回该行各可见分量描述(QVariantMap)
+    // 字段：kind(text/bool/int/input/samel/newl/sep)、text(显示值)、isLink、compIdx、readOnly
+    Q_INVOKABLE QVariantList iifComponents(int row) const;
+
+    // IIF 分量值写回（阶段一核心：input/int 分量文本编辑）
+    // 修改该分量 state 后按格式化串重建整行并写回业务层
+    Q_INVOKABLE void setIifComponentValue(int row, int compIdx, const QString &rawText);
+
 signals:
     void sectionIdChanged();
     void showRegNameChanged();

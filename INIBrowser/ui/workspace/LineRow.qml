@@ -48,6 +48,46 @@ Item {
     property bool isInputMode: false
     property int keyType: 0  // 键输入类型：0=String, 1=Bool, 2=IIF
     property bool boolChecked: false  // Bool 键当前布尔值（keyType==1 时有效）
+    // IIF 多分量单行自然宽度（供 SectionNode 扩展模块宽度以容纳 IIF，0=非 IIF）
+    property real iifNaturalWidth: 0
+
+    // 布尔文本判真（IIF 布尔分量勾选状态；yes/true/t/1 → 真）
+    function boolTrue(t) {
+        var s = (t || "").trim().toLowerCase()
+        return !(s === "no" || s === "0" || s === "n" || s === "false" || s === "f")
+    }
+
+    // IIF 单行自然宽计算：遍历分量按 kind 累加宽度，供 SectionNode 扩展模块宽度
+    function recomputeIifNaturalWidth() {
+        if (!(root.isInputMode && root.keyType === 2) || !root.lineModel) {
+            root.iifNaturalWidth = 0
+            return
+        }
+        var list = root.lineModel.iifComponents(root.rowIndex)
+        var row = 0
+        var best = 0
+        for (var i = 0; i < list.length; i++) {
+            var cc = list[i]
+            if (cc.kind === "newl") {
+                best = Math.max(best, row)
+                row = 0
+                continue
+            }
+            var w = 0
+            if (cc.kind === "input" || cc.kind === "int") w = root.fontBody * 12
+            else if (cc.kind === "bool") w = root.fontBody * 1.4 + 4
+            else if (cc.kind === "sep") w = 2
+            else if (cc.kind === "text") w = (cc.text ? cc.text.length * root.fontBody * 0.6 : 0)
+            else w = 0  // samel 无宽
+            row += (row > 0 ? 4 : 0) + w  // 分量间 4px 间距
+        }
+        best = Math.max(best, row)
+        root.iifNaturalWidth = best
+    }
+    onIsInputModeChanged: root.recomputeIifNaturalWidth()
+    onKeyTypeChanged: root.recomputeIifNaturalWidth()
+    onVisibleChanged: if (root.visible) root.recomputeIifNaturalWidth()
+    Component.onCompleted: root.recomputeIifNaturalWidth()
 
     // 行级增行按钮 + 右键菜单临时态（对应 ImGui WorkSpaceLine 多个会话级标志）
     // isMultiple：InputType.Multiple（"+" 增行按钮显示条件）
@@ -218,7 +258,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.isInputMode && root.keyType !== 1
+        visible: root.isInputMode && root.keyType === 0  // 仅 String 用文本框（Bool/IIF 用专属控件）
         height: root.fontBody * 2
         // 绑定 exportValue：ImGui 每帧用 CurrentValue 重新渲染 InputText
         text: root.exportValue
@@ -296,6 +336,107 @@ Item {
             hoverEnabled: true
             onClicked: {
                 if (root.lineModel) root.lineModel.toggleBoolValue(root.rowIndex)
+            }
+        }
+    }
+
+    // ===== IIF 多分量编辑器（对应 ImGui IBG_InputForm 多分量渲染, IBG_InputType.cpp:149-245） =====
+    // IIF 行 Input 态按分量渲染为 文本/输入框/布尔勾框/分隔/换行 等核心分量的水平流
+    // 分量描述由 SectionLineModel::iifComponents 导出；输入分量编辑经 setIifComponentValue 写回
+    Flow {
+        id: iifEdit
+        visible: root.isInputMode && root.keyType === 2
+        anchors.left: onShowLabel.right
+        anchors.leftMargin: 6
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 4
+
+        Repeater {
+            model: root.lineModel ? root.lineModel.iifComponents(root.rowIndex) : []
+
+            Item {
+                id: iic
+                property var cc: modelData
+                // newl 全宽占位强制换行；input/int 固定宽；text 内容宽；sep 竖线宽；samel/bool 固定宽
+                width: cc.kind === "newl" ? (iifEdit.width - iifEdit.spacing)
+                     : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 12
+                     : cc.kind === "bool" ? (root.fontBody * 1.4 + 4)
+                     : cc.kind === "sep" ? 2
+                     : cc.kind === "text" ? txtTxt.implicitWidth
+                     : 0
+                height: (cc.kind === "newl" || cc.kind === "samel") ? 0
+                      : (cc.kind === "sep") ? root.fontBody * 1.2
+                      : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 2  // 与 string 输入框同高
+                      : root.fontBody * 1.5
+
+                // 静态文本分量（PureText / LocalizedText / Setter_String）
+                Text {
+                    id: txtTxt
+                    visible: cc.kind === "text"
+                    text: cc.text || ""
+                    color: "#c586c0"
+                    font.pixelSize: root.fontBody
+                    elide: Text.ElideRight
+                    width: visible ? implicitWidth : 0
+                }
+
+                // 布尔勾选框（只读展示当前布尔态，编辑写回后续阶段）
+                Rectangle {
+                    visible: cc.kind === "bool"
+                    width: parent.width
+                    height: parent.height
+                    anchors.centerIn: parent
+                    radius: 3
+                    color: "#1e1e1e"
+                    border.color: root.boolTrue(cc.text) ? "#007acc" : "#5a5a5a"
+                    border.width: 1
+                    Text {
+                        visible: root.boolTrue(cc.text)
+                        anchors.centerIn: parent
+                        text: "✓"
+                        color: "#4ec9b0"
+                        font.pixelSize: root.fontBody
+                        font.bold: true
+                    }
+                }
+
+                // 分隔竖线
+                Rectangle {
+                    visible: cc.kind === "sep"
+                    width: 1
+                    height: parent.height
+                    anchors.centerIn: parent
+                    color: "#5a5a5a"
+                }
+
+                // 输入/整数分量（可编辑文本框），编辑完成后写回
+                TextField {
+                    id: iifFld
+                    visible: cc.kind === "input" || cc.kind === "int"
+                    anchors.fill: parent
+                    anchors.topMargin: 0
+                    anchors.bottomMargin: 0
+                    text: cc.text || ""
+                    font.pixelSize: root.fontBody
+                    color: "#ce9178"
+                    horizontalAlignment: Text.AlignLeft
+                    verticalAlignment: Text.AlignVCenter
+                    selectByMouse: true
+                    background: Rectangle {
+                        color: "#1e1e1e"  // 与普通 String 输入框样式一致（仅尺寸紧凑）
+                        border.color: "#007acc"
+                        border.width: 1
+                        radius: 2
+                    }
+                    onEditingFinished: {
+                        console.log("[IIF-DIAG] editingFinished row=" + root.rowIndex
+                                    + " compIdx=" + cc.compIdx + " text='" + text + "'")
+                        if (root.lineModel)
+                            root.lineModel.setIifComponentValue(root.rowIndex, cc.compIdx, text)
+                    }
+                }
             }
         }
     }
