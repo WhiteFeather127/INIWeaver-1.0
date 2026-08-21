@@ -17,6 +17,9 @@ Item {
     // QML 中 id 不能通过 "." 从其他组件文件访问，子组件（LinkNodePoint/SectionNode）
     // 必须经此属性更新预览框位置（跟随鼠标）
     property alias dragPreviewItem: dragPreview
+    // 长注释提示框暴露为属性（QML 无法通过 id 从外部组件访问子 Item，
+    // 必须用 property alias；LineRow 经此访问 showTip/hideTip）
+    property alias hoverTipItem: hoverTip
 
     // 缩放补间动画（QML 端驱动，渲染线程与帧同步）
     // 参考 GraphFlow（Qt/QML 节点图编辑器）：缩放动画放 QML 侧由 QQuickWindow
@@ -509,8 +512,8 @@ Item {
         y: -1000
         z: 200
         visible: false
-        width: hoverTipText.implicitWidth + 10
-        height: hoverTipText.implicitHeight + 6
+        // 提示框最大宽度（超出则文本换行，避免长注释把框拉宽到屏幕外）
+        property int maxTipWidth: 420
 
         Rectangle {
             anchors.fill: parent
@@ -521,15 +524,27 @@ Item {
         }
         Text {
             id: hoverTipText
-            anchors.fill: parent
-            anchors.margins: 3
+            // 不 fill：宽度由 showTip 按文本自然宽/上限显式计算（避免 anchors+implicitWidth 循环）
+            anchors.topMargin: 3
+            anchors.leftMargin: 3
             color: "#d4d4d4"
             font.pixelSize: Math.max(1, Math.round(12 * workspaceController.ratio))
             wrapMode: Text.Wrap
         }
         function showTip(text, wx, wy) {
             hoverTipText.text = text
-            x = wx
+            // 计算目标宽度：文本自然宽，超出 maxTipWidth 则限宽并使 Text 换行
+            var innerW = hoverTipText.implicitWidth
+            if (innerW > maxTipWidth - 6) {
+                hoverTipText.width = maxTipWidth - 6
+                width = maxTipWidth
+            } else {
+                hoverTipText.width = innerW
+                width = innerW + 10
+            }
+            // Text 限宽后 implicitHeight 反映换行后的实际高度
+            height = hoverTipText.implicitHeight + 6
+            x = Math.min(wx, workspaceView.width - width - 2)  // 防超出右边界
             y = wy
             visible = true
         }

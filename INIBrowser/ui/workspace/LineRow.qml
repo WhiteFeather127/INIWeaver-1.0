@@ -119,9 +119,9 @@ Item {
                     if (root.descLong.length === 0) return
                     // 提示落在标签下方，映射到 workspace 坐标
                     var p = onShowLabel.mapToItem(workspaceView, 0, onShowLabel.height + 4)
-                    workspaceView.hoverTip.showTip(root.descLong, p.x, p.y)
+                    workspaceView.hoverTipItem.showTip(root.descLong, p.x, p.y)
                 } else {
-                    workspaceView.hoverTip.hideTip()
+                    workspaceView.hoverTipItem.hideTip()
                 }
             }
         }
