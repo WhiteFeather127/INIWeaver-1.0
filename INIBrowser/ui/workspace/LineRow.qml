@@ -75,6 +75,9 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: 8
         anchors.verticalCenter: parent.verticalCenter
+        // 编辑行注释（inputOnShow）时隐藏原文本，由 descEditField 替代（对应 ImGui
+        // InputOnShow 分支替换 onShow 文本输入框，而非叠加覆盖）
+        visible: !root.inputOnShow
         // Input 态：文本占自然宽度（随字体等比缩放），输入框占剩余宽度
         //   对应 ImGui: TextEx(Hint.Short) 自然宽度 + SameLine + SetNextItemWidth(剩余)
         //   用 implicitWidth（Text 全文本自然宽度，不依赖布局完成，避免 contentWidth 初始为 0 导致塌缩）
@@ -287,12 +290,14 @@ Item {
     // Escape 取消 → toggleInputOnShow 关闭（不写入）
     TextField {
         id: descEditField
-        anchors.left: parent.left
-        anchors.leftMargin: 8
-        anchors.right: parent.right
-        anchors.rightMargin: 4
+        // 覆盖在 onShowLabel 位置（对应 ImGui InputOnShow 分支替换 onShow 文本输入框）。
+        // 靠模块左侧、与 onShowLabel 同宽：仅覆盖原注释文本区域，不盖右侧 LinkNode 与键值。
+        anchors.left: onShowLabel.left
+        anchors.right: onShowLabel.right
         anchors.verticalCenter: parent.verticalCenter
         visible: root.inputOnShow
+        // 编辑期置顶，避免外层 MouseArea（nodeMouseArea 等）抢占点击导致点击自身时焦点丢失
+        z: 100
         height: root.fontBody * 2
         // 初始文本：onShowLabel 当前显示文本（空描述时为空串）
         // 对应 ImGui: if(OnShow == EmptyOnShowDesc) EditOnShow = ""
@@ -325,6 +330,30 @@ Item {
             }
         }
 
+        // 失焦 = 相当于按回车（对齐 ImGui：InputText 失焦即提交关闭，非 Esc 取消）
+        // 点击输入框自身（含最右侧空白/选中文本）会短暂丢焦点又重获，若同步提交会把编辑误关。
+        // 用 Qt.callLater 延迟到焦点稳定后，按鼠标落点判断：落在输入框内 → 重新聚焦保持编辑；
+        // 落在框外（点击画布/他处）→ 提交并关闭。
+        onActiveFocusChanged: {
+            if (!activeFocus && visible) {
+                Qt.callLater(() => {
+                    if (!visible || !root.lineModel) return
+                    var gp = workspaceController.globalMousePos()
+                    var pr = root.mapFromGlobal(Qt.point(gp.x, gp.y))
+                    var inField = (pr.x >= descEditField.x - 2
+                                   && pr.x <= descEditField.x + descEditField.width + 2
+                                   && pr.y >= descEditField.y - 2
+                                   && pr.y <= descEditField.y + descEditField.height + 2)
+                    if (inField) {
+                        descEditField.forceActiveFocus()
+                    } else {
+                        root.lineModel.editDesc(root.rowIndex, text)
+                        root.lineModel.toggleInputOnShow(root.rowIndex)
+                    }
+                })
+            }
+        }
+
         // Escape 取消（对应 ImGui Esc 关闭 InputText）
         Keys.onEscapePressed: {
             if (root.lineModel) {
@@ -344,8 +373,18 @@ Item {
         onClicked: {
             if (mouse.button === Qt.RightButton) {
                 var globalPos = lineRightClickMA.mapToGlobal(mouse.x, mouse.y)
-                contextMenuHost.show(root.buildLineDescs(), globalPos.x, globalPos.y,
-                                     (a) => root.dispatchLineAction(a))
+                // 多选态（MassAfter）右键选中模块的键行：应弹模块多选菜单而非键行菜单
+                //（对齐 ImGui：多选状态下右键任意选中模块位置弹多选操作菜单）
+                // 键行所属的父模块被多选且当前处于多选操作态时，右键转发到多选菜单
+                if (workspaceController.inputState === 4
+                    && workspaceController.isSectionSelected(root.sectionData.sectionId)
+                    && workspaceController.massTargetIds().length > 1) {
+                    contextMenuHost.show(workspaceView.massAfterDescs(), globalPos.x, globalPos.y,
+                                         (a) => workspaceView.dispatchMassAction(a))
+                } else {
+                    contextMenuHost.show(root.buildLineDescs(), globalPos.x, globalPos.y,
+                                         (a) => root.dispatchLineAction(a))
+                }
             }
         }
     }

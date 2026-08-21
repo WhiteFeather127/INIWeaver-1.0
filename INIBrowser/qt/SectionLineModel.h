@@ -112,6 +112,9 @@ public:
     // editDesc：提交 OnShow 描述编辑结果（对应 ImGui InputText EnterReturnsTrue 后写 bsec->OnShow[key]）
     // 由 LineRow 编辑框 onAccepted/onEditingFinished 调用
     Q_INVOKABLE void editDesc(int row, const QString& text);
+    // hasActiveInputOnShow：本模块是否有行处于 InputOnShow 描述编辑态
+    // 供 nodeMouseArea 门控：编辑期间不抢左键点击，避免点击编辑框自身触发选中→刷新→编辑框销毁失焦
+    Q_INVOKABLE bool hasActiveInputOnShow() const;
 
     // 行级增行按钮（对应 IBR_Misc.cpp:373-385 "+" 按钮）
     // addLine：对 Multiple 行追加新分量（bsec->MergeLine(Key, Index_AlwaysNew, ...))

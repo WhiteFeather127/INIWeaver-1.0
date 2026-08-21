@@ -904,6 +904,14 @@ void SectionLineModel::toggleInputOnShow(int row)
     emit dataChanged(idx, idx, {InputOnShowRole});
 }
 
+// 本模块是否有行处于 InputOnShow 描述编辑态
+bool SectionLineModel::hasActiveInputOnShow() const
+{
+    for (auto it = m_inputOnShow.constBegin(); it != m_inputOnShow.constEnd(); ++it)
+        if (it.value()) return true;
+    return false;
+}
+
 // 行级右键菜单：编辑 OnShow 描述（对应 IBR_Misc.cpp:245-250 EditDesc）
 // 写 bsec->OnShow[key]，空串写 EmptyOnShowDesc 标记
 void SectionLineModel::editDesc(int row, const QString& text)

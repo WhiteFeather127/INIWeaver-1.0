@@ -880,7 +880,39 @@ void WorkspaceController::toggleSelectSection(qulonglong sectionId)
 
 void WorkspaceController::composeSelected()
 {
+    // 编组：ComposeSelected 原生实现（IsMassAfter 多选态 → ComposeSections）。
+    // ComposeSections 计算父块 EqPos=质心 但不设置子模块 EqDelta，而 DecomposeSection 解组时
+    // 用 pData->EqPos = 父EqPos + pData->EqDelta 还原位置。若 EpDelta 未设（0/旧残留），
+    // 解组后子模块会挤到父块质心 → 位置出错/重叠。
+    // 故编组前记录目标，成功后给子模块设 EqDelta = 子EqPos - 父块EqPos，使解组可精确还原原位。
+    // 注：需在 ComposeSelected 前捕获 targets（Compose 后 MassTarget 被消费/清空）。
+    std::vector<ModuleID_t> targets;
+    const auto mass = massTargetIds();
+    for (const auto &v : mass) targets.push_back(static_cast<ModuleID_t>(v.toULongLong()));
+
     IBR_WorkSpace::ComposeSelected();
+
+    if (!targets.empty()) {
+        for (auto &kv : IBR_Inst_Project.IBR_SectionMap) {
+            auto &sd = kv.second;
+            if (sd.IncludingModules.empty()) continue;
+            bool allMatch = true;
+            for (auto t : targets) {
+                if (std::find(sd.IncludingModules.begin(), sd.IncludingModules.end(), t)
+                    == sd.IncludingModules.end()) { allMatch = false; break; }
+            }
+            if (!allMatch) continue;
+            // 找到包含全部目标的新虚拟块：给各子模块设 EqDelta = 子EqPos - 父块EqPos
+            for (auto subId : sd.IncludingModules) {
+                auto subIt = IBR_Inst_Project.IBR_SectionMap.find(subId);
+                if (subIt != IBR_Inst_Project.IBR_SectionMap.end()) {
+                    subIt->second.EqDelta.x = subIt->second.EqPos.x - sd.EqPos.x;
+                    subIt->second.EqDelta.y = subIt->second.EqPos.y - sd.EqPos.y;
+                }
+            }
+            break;
+        }
+    }
     refresh();
 }
 
@@ -1149,24 +1181,34 @@ void WorkspaceController::endMoveSection()
     // 拖动单个模块结束后选中该模块（非追加模式）
     // 注意：在 m_dragSectionId 清零之前保存 ID
     ModuleID_t draggedId = m_dragSectionId;
-    IBR_WorkSpace::MassSelect({ draggedId });
+    // 注释块拖动结束后不选中（对应 ImGui：注释块不可单选，返回编辑态而非选中态）。
+    // 普通模块拖动结束（含从编组内拖出等特殊路径）仍选中。
+    bool isCommentDragged = IBR_Inst_Project.GetSectionFromID(draggedId).GetSectionData()
+                            && IBR_Inst_Project.GetSectionFromID(draggedId).GetSectionData()->IsComment;
+    if (!isCommentDragged) {
+        IBR_WorkSpace::MassSelect({ draggedId });
+    }
     // 用户要求：拖单个模块后回到普通态（不进入 MassAfter 多选操作态），
     // 模块保持选中（蓝框），右键弹单模块菜单；点空白仍可取消选中（BgDragging → clearSelection）
     updateInputState(0);  // Normal（原为 4/MassAfter）
     // 先发蓝框更新信号（视觉反馈优先，不阻塞）
     ++m_selectedRevision;
     emit selectedRevisionChanged();
-    if (m_editPanelController) {
-        m_editPanelController->setActive(changedId);
+    // 注释块拖动结束不激活编辑侧边栏（选中与编辑侧边栏强绑定；注释块不可单选 → 不进编辑态）。
+    // 否则注释块拖动后侧边栏切到编辑、显示"编辑"文本，与"注释块不进编辑侧边栏"冲突。
+    if (!isCommentDragged) {
+        if (m_editPanelController) {
+            m_editPanelController->setActive(changedId);
+        }
+        enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
     }
-    enterEditMenu();  // 记录进入编辑前的菜单 + 切到编辑侧边栏
     // 性能优化：直接更新 CurSection.ID，不调用 SetActive
     // SetActive 在 50ms tick 的 IBR_AutoProc 中同步执行于 UI 线程，包含：
     //   1. 遍历所有 INI 的所有 section 清除 Selected（ExtendMassSelect 已做，冗余）
     //   2. IBD_RInterruptF 获取锁（自旋等待，阻塞 UI 线程导致拖动卡顿）
     //   3. ResetEdit 重建 EditLines（Qt 版本 EditPanelController 不读 EditLines，冗余）
     // Qt 版本只需要 CurSection.ID 用于 focusedSectionId（连线高亮）
-    IBR_EditFrame::CurSection.ID = draggedId;
+    IBR_EditFrame::CurSection.ID = isCommentDragged ? INVALID_MODULE_ID : draggedId;
     m_dragSectionId = INVALID_MODULE_ID;
     m_lastDraggedId = changedId;  // LinkRenderer 据此在端点表重建前继续叠加 dragOffset（防松手连线弹）
 #ifdef INIWEAVER_DIAG
@@ -3092,16 +3134,19 @@ void WorkspaceController::decomposeSection(qulonglong virtualBlockId)
 {
     // 对应 IBR_SectionData.cpp:322-339 Decompose
     ModuleID_t id = static_cast<ModuleID_t>(virtualBlockId);
-    IBRF_CoreBump.SendToR({ [id]() {
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
-        auto &sd = it->second;
-        if (!sd.Decomposable()) return;
-        auto res = IBR_Inst_Project.DecomposeSection(id);
-        if (res) {
-            IBR_WorkSpace::MassSelect(*res);
-        }
-    } });
+    // 同步执行（见 toggleIgnore/toggleCollapseInComposed 注释）：SendToR 延迟到下一 tick，
+    // 而 refresh() 立即重建会读到旧 IncludingModules/IncludedByModule → 虚拟块已清空 IncludedModules、
+    // 子模块 IsIncluded 未刷新 → 子模块不再被父块 Include 也不独立渲染，模块消失在画布。
+    // DecomposeSection 同步改 EqPos(IncludedByModule=INVALID + 父EqPos+EqDelta) 与 IncludingModules，
+    // 随之 refresh() 读到正确的新状态，子模块作为独立 section 重新渲染。
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    auto &sd = it->second;
+    if (!sd.Decomposable()) return;
+    auto res = IBR_Inst_Project.DecomposeSection(id);
+    if (res) {
+        IBR_WorkSpace::MassSelect(*res);
+    }
     refresh();
 }
 

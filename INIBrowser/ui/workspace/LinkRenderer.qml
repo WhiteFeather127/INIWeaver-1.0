@@ -152,9 +152,20 @@ Canvas {
     // 判断某 section 是否随当前拖动的编组块一起移动：
     // 拖动编组（虚拟块）时整组移动，但内部子模块不在 sections 快照（dstSec==undefined），
     // 默认不叠加 dragOffset → 子模块连线停在原地。本判断覆盖 groupId 自身 + 任意层级子模块。
+    // 松手过渡：拖动结束后 draggingSectionId=INVALID，但端点表 rebuild 是 Queued 异步，
+    // 叠加失效会让折叠子模块连线先弹回旧基准一帧（回弹）。故用 lastDraggedId（刚拖完的
+    // 编组块，dragOffset 尚未清零）替代 draggingSectionId 继续判定组内子模块跟随，
+    // 直到收尾 cleanup 重建端点表 + 清 dragOffset 后过渡自动失效。与 buildSectionMap 顶层
+    // 节点用 lastDraggedId+hasOffset 叠加同源一致。
     function isMovedByDrag(sectionId) {
         if (!sectionId) return false
-        var dragId = workspaceController.draggingSectionId
+        var dragId = workspaceController.lastDraggedId()
+        if (dragId && workspaceController.hasLastDragged()
+            && (workspaceController.dragOffset.x !== 0 || workspaceController.dragOffset.y !== 0)) {
+            // 松手过渡期：以 lastDraggedId 为准（刚拖完的编组块）
+            return sectionId === dragId || workspaceController.isInComposedOf(dragId, sectionId)
+        }
+        dragId = workspaceController.draggingSectionId
         if (!dragId) return false
         if (sectionId === dragId) return true
         return workspaceController.isInComposedOf(dragId, sectionId)

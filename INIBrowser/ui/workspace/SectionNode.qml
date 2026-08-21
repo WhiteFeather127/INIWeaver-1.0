@@ -664,6 +664,13 @@ Item {
             hasDragged = false
             dragStarted = false
             if (mouse.button === Qt.LeftButton) {
+                // 行注释（InputOnShow）编辑中：不抢左键点击。
+                // 否则点击编辑框自身（含最右侧空白处）会先命中本 MouseArea → 松手触发
+                // toggleSelectSection 选中模块 → 刷新重建 → 编辑框实例销毁 → 失焦/误提交。
+                // 保持编辑框持久聚焦（点击编辑框内任意位置都不应失焦），键盘/失焦变速箱不变。
+                if (sectionData.lineModel && sectionData.lineModel.hasActiveInputOnShow()) {
+                    return
+                }
                 // 阶段 D3：子模块不参与顶层拖拽状态机（由父虚拟块整体拖拽）
                 // 但保留单击选中与双击编辑（对应 ImGui CurOnRender_Clicked 命中即激活）
                 if (!isSubModule) {
@@ -714,6 +721,10 @@ Item {
 
         onReleased: {
             if (mouse.button === Qt.LeftButton) {
+                // 行注释编辑中：与 onPressed 同理，不执行选中/拖拽收尾（保持编辑框焦点）
+                if (sectionData.lineModel && sectionData.lineModel.hasActiveInputOnShow()) {
+                    return
+                }
                 // 拖动结束：endDrag 内部会处理选中状态
                 // - 单节点拖动 → endMoveSection 选中该模块（对应 ImGui ActivateAndEdit）
                 // - 多节点拖动 → endMassDrag 取消选中（对应 ImGui IsMassAfter=false）
@@ -728,14 +739,16 @@ Item {
                     }
                 }
             } else if (mouse.button === Qt.RightButton) {
-                // 右键仅标题栏触发（对齐 ImGui RenderUI_TitleBar 标题栏右键，内容区不弹菜单）
-                if (mouseY <= header.height) {
-                    var g = nodeMouseArea.mapToGlobal(mouseX, mouseY)
-                    // 多选态（MassAfter）右键选中模块 → 多选操作菜单（对应 IBR_WorkSpace.cpp:1170-1290）
-                    // 否则 → 单节点菜单（对应 IBR_SectionData.cpp:584-806）
-                    if (workspaceController.inputState === 4
-                            && workspaceController.isSectionSelected(root.sectionData.sectionId)
-                            && workspaceController.massTargetIds().length > 1) {
+                var g = nodeMouseArea.mapToGlobal(mouseX, mouseY)
+                // 多选态（MassAfter）右键选中模块 → 多选操作菜单：模块身体任意位置都可触发
+                // （对齐 ImGui：多选状态下右键任意选中模块弹多选菜单，不做标题栏限制）
+                var massMenu = (workspaceController.inputState === 4
+                                && workspaceController.isSectionSelected(root.sectionData.sectionId)
+                                && workspaceController.massTargetIds().length > 1);
+                // 右键触发条件：多选菜单 → 任意位置；单节点菜单 → 仅标题栏（对齐 ImGui
+                // RenderUI_TitleBar 标题栏右键，内容区不弹菜单）
+                if (massMenu || mouseY <= header.height) {
+                    if (massMenu) {
                         contextMenuHost.show(workspaceView.massAfterDescs(), g.x, g.y,
                                              (a) => workspaceView.dispatchMassAction(a))
                     } else {
@@ -748,6 +761,10 @@ Item {
 
         onDoubleClicked: {
             if (mouse.button === Qt.LeftButton) {
+                // 行注释编辑中：不进入模块编辑（保持编辑框焦点）
+                if (sectionData.lineModel && sectionData.lineModel.hasActiveInputOnShow()) {
+                    return
+                }
                 // 双击进入编辑模式（对应 IBR_EditFrame::ActivateAndEdit）
                 workspaceController.activateAndEdit(sectionData.sectionId)
             }
