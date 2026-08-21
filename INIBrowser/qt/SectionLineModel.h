@@ -74,6 +74,9 @@ public:
     // QML layout 后回写 RadioButton 屏幕坐标到 IBR_NodeSession::SessionValue.LastCenter
     // 对应 ImGui 立即模式下每帧重算 DefaultCenter
     Q_INVOKABLE void setLinkNodeCenter(int row, qreal x, qreal y);
+    // IIF 分量节点坐标回写：compIdx 定位分量，sessionId 按 compIdx 重算（对应 UpdateAll 用 Comp=cidx）
+    // 写回后连线端点表经 priority 2（sv.LastCenter）解析到正确分量圆点
+    Q_INVOKABLE void setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal y);
     // 行级接受点回写（对应 ImGui ActiveLines[key].AcceptCenter[mult]）
     // 该坐标作为连线终点 pb 的行精确值，由 LineRow.updateLinkNodeCenter 同步回写
     Q_INVOKABLE void setAcceptCenter(int row, qreal x, qreal y);
@@ -93,6 +96,10 @@ public:
     Q_INVOKABLE bool createLink(int row, qulonglong destSectionId, const QString &destKey);
     Q_INVOKABLE bool deleteLink(int row, int linkIdx);
     Q_INVOKABLE void deleteAllLinks(int row);
+    // 阶段 4：IIF 分量节点建链（compIdx 定位分量，写入该分量 Value 后重算格式化串，落盘）
+    Q_INVOKABLE bool createLinkAt(int row, int compIdx, qulonglong destSectionId, const QString &destKey);
+    // IIF 分量节点清空链接（解除该分量链接：写入空值 + 重算格式化串）
+    Q_INVOKABLE void deleteAllLinksAt(int row, int compIdx);
 
     // 修改行值（对应 Input 态 ModifyAndShow）
     Q_INVOKABLE bool modifyValue(int row, const QString &newText);
@@ -239,6 +246,9 @@ private:
                               size_t lineIdx, size_t lineMult, size_t compIdx) const;
     QColor computeNodeColor(uint32_t linkColRaw, bool isEmpty, bool isInherit,
                             bool hasLinkNode, bool sectionIgnored) const;
+    // IIF 分量节点坐标 writing 需要 sessionId 与 UpdateAll 使用的 Comp=cidx 一致
+    // 供 setLinkNodeCenterAt 查询（compIdx==0 直接用 e.sessionId 快速路径）
+    qulonglong sessionIdFor(int row, int compIdx) const;
     // D13：构建继承描述文本（对应 ImGui IBR_SectionData.cpp:396-414 InheritStr lambda）
     // 按 ShowRegName 决定显示注册名或解析后的显示名，最终格式化为本地化字符串
     QString buildInheritStr(const struct IBB_Section *bsec, const struct IBR_Section &rsec,

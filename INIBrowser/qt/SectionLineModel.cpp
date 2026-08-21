@@ -309,12 +309,12 @@ void SectionLineModel::rebuildEntries()
                         } else {
                             auto iifData = dataPtr->GetData<IBB_IniLine_Data_IIF>();
                             if (iifData && iifData->Value) {
-                                auto& cs = iifData->Value->GetComponentStatus();
-                                if (mult < cs.size()) {
-                                    e.isInputMode = !(cs[mult].InputMethod == IICStatus::Link);
-                                } else {
-                                    e.isInputMode = !(dataPtr->FirstIsLink());
-                                }
+                                // 多分量 IIF：整行始终渲染其分量 Flow（各分量自身的 Link/Input
+                                // 状态由 iifComponents 的 isLink 决定 → 节点/输入框）。行级 isInputMode
+                                // 不能由 ComponentStatus[mult]（分量状态数组按分量索引起始）推断，
+                                // 否则组件数量与值数量不对齐时会把"多节点 IIF"（如两个 Type:Link 分量）
+                                // 折叠成行级单节点 → 三分量结构消失。故 IIF 恒定 Input 态显示 Flow。
+                                e.isInputMode = true;
                                 e.keyType = 2;  // IIF
                             } else {
                                 // Data_Bool 或未知类型：永远 Input 态
@@ -452,6 +452,39 @@ void SectionLineModel::setLinkNodeCenter(int row, qreal x, qreal y)
     // 通知 WorkspaceController 端点表需要重建
     // Qt 版本无每帧渲染，LastCenter 更新后需主动触发 rebuildLinkEndpoints
     emit linkNodeCenterChanged();
+}
+
+// IIF 分量节点坐标回写：compIdx 定位分量，sessionId 按 compIdx 重算（与 UpdateAll 的 Comp=cidx 一致）
+// 写回后 rebuildLinkEndpoints 的 priority 2（sv.LastCenter）读到该分量圆点坐标，连线起点/终点正确。
+// 注意：IIF 分量节点不写 acceptCenterByKey（多分量同名会互相覆盖），故 priority 1 恒 miss → 走 priority 2。
+void SectionLineModel::setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal y)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    qulonglong sid = sessionIdFor(row, compIdx);
+    if (sid == 0) return;
+    IBR_NodeSession::SetSessionStatus(sid, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
+    emit linkNodeCenterChanged();
+}
+
+qulonglong SectionLineModel::sessionIdFor(int row, int compIdx) const
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return 0;
+    const auto &e = m_entries[row];
+    if (compIdx <= 0) return e.sessionId;  // 快速路径：compIdx==0 即 e.sessionId
+    ModuleID_t sid = static_cast<ModuleID_t>(m_sectionId);
+    auto bsec = IBR_Inst_Project.GetSectionFromID(sid).GetBack_Unsafe();
+    if (!bsec) return 0;
+    for (auto subIdx : bsec->SubSecOrder) {
+        auto &sub = bsec->SubSecs[subIdx];
+        if (!sub.CanOwnKey(e.keyId)) continue;
+        if (e.lineIdx < 0 || e.lineIdx >= static_cast<int>(sub.Lines_ByName.size())) return 0;
+        if (sub.Lines_ByName[static_cast<size_t>(e.lineIdx)] != e.keyId) return 0;
+        // 对应 UpdateAll 中 IIF 行链接建 Session：Comp = 分量索引
+        return IBR_NodeSession::GetSessionIdx(
+            bsec->GetThisID(), sub.Default->Name, static_cast<size_t>(e.lineIdx),
+            static_cast<size_t>(e.lineMult), static_cast<size_t>(compIdx));
+    }
+    return 0;
 }
 
 void SectionLineModel::setAcceptCenter(int row, qreal x, qreal y)
@@ -636,6 +669,130 @@ bool SectionLineModel::createLink(int row, qulonglong destSectionId, const QStri
     } });
 
     return true;
+}
+
+// IIF 分量节点建链（comIdx 定位分量）：把目标链接串写入该分量 Value 并重算格式化串落盘
+// 对应 imgui IIC_InputText(Link) RenderUI_Node 的 ModifyFunc（IBG_InputType.cpp:1407）：
+// 写 IIS_String = 目标串 → NeedsUpdate → RegenFormat → UpdateAll 重建链接列表。
+bool SectionLineModel::createLinkAt(int row, int compIdx, qulonglong destSectionId, const QString &destKey)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
+    const auto &e = m_entries[row];
+
+    ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
+    StrPoolID srcKeyId = e.keyId;
+    int mult = e.lineMult;
+    ModuleID_t dstId = static_cast<ModuleID_t>(destSectionId);
+
+    auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
+    auto bsec = rsec.GetBack_Unsafe();
+    auto drsec = IBR_Inst_Project.GetSectionFromID(dstId);
+    auto dbsec = drsec.GetBack_Unsafe();
+    auto ddata = drsec.GetSectionData();
+    if (!bsec || !dbsec || !ddata) return false;
+
+    // 源分量链接类型（LinkNode.Type 决定 Accept 校验）
+    StrPoolID compLinkType = 0;
+    auto *ln = bsec->GetLineFromSubSecs(srcKeyId);
+    if (!ln || !ln->Default) return false;
+    auto dataPtr = ln->Indexed(static_cast<size_t>(mult));
+    if (!dataPtr) return false;
+    auto iedit = dataPtr->GetData<IBB_IniLine_Data_IIF>();
+    if (!iedit || !iedit->Value) return false;
+    auto &comps = *iedit->Value->InputComponents;
+    if (compIdx < 0 || compIdx >= static_cast<int>(comps.size())) return false;
+    compLinkType = comps[static_cast<size_t>(compIdx)]->NodeSetting.LinkType;
+
+    if (!Acceptor_CheckLinkType(bsec->Register, dbsec->Register, compLinkType)) return false;
+
+    // 目标 key：未指定用目标的 DLK（DefaultLinkKey）
+    StrPoolID finalDstKey = 0;
+    if (!destKey.isEmpty() && destKey != QLatin1String("default")) {
+        finalDstKey = NewPoolStr(destKey.toUtf8().constData());
+    }
+    if (finalDstKey == 0) {
+        finalDstKey = dbsec->GetDLK(dbsec->Register);
+        if (finalDstKey == 0) finalDstKey = NewPoolStr("default");
+    }
+    std::string newTarget = TargetValueStr(ddata->Desc.Sec, finalDstKey, 0);
+
+    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, mult, compIdx, newTarget, row, this]() {
+        if (!IBR_Inst_Project.GetSectionFromID(srcId).HasBack()) return;
+        // 与 writeIifCompString 同步执行（避免 m_entries 在 refresh 后错位）：
+        // 这里在渲染线程 lambda 内直接写业务数据，保持与 setIifComponentValue 一致
+        auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
+        auto srcBsec = srcRsec.GetBack_Unsafe();
+        if (!srcBsec) return;
+        auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
+        if (!line) return;
+        auto dPtr = line->Indexed(static_cast<size_t>(mult));
+        if (!dPtr) return;
+        auto ii = dPtr->GetData<IBB_IniLine_Data_IIF>();
+        if (!ii || !ii->Value) return;
+
+        IBG_InputForm &form = *ii->Value;
+        auto &comps = *form.InputComponents;
+        if (compIdx < 0 || compIdx >= static_cast<int>(comps.size())) return;
+        auto *comp = comps[static_cast<size_t>(compIdx)].get();
+        int vid = comp->GetCurrentTargetValueID();
+        if (vid < 0) return;
+
+        auto &V = form.GetValue(vid);
+        if (auto st = V.StateValue<IIS_String>()) st->Text = newTarget;
+        else V.ResetState<IIS_String>(newTarget);
+        V.Value = newTarget;
+        V.NeedsUpdate(form.GetValues(), *comp);
+        form.RegenFormattedString();
+        srcBsec->UpdateAll();
+        IBR_Inst_Project.RefreshLinkList = true;
+        refresh();
+        emit iifDataChanged(row);
+        emit sectionDataChanged(m_sectionId);
+    } });
+    return true;
+}
+
+// IIF 分量节点清空链接（解除该分量链接）：写入空串 + 重算格式化串
+void SectionLineModel::deleteAllLinksAt(int row, int compIdx)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    const auto &e = m_entries[row];
+
+    ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
+    StrPoolID srcKeyId = e.keyId;
+    int mult = e.lineMult;
+
+    IBRF_CoreBump.SendToR({ [srcId, srcKeyId, mult, compIdx, row, this]() {
+        auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
+        auto srcBsec = srcRsec.GetBack_Unsafe();
+        if (!srcBsec) return;
+        auto *line = srcBsec->GetLineFromSubSecs(srcKeyId);
+        if (!line) return;
+        auto dPtr = line->Indexed(static_cast<size_t>(mult));
+        if (!dPtr) return;
+        auto ii = dPtr->GetData<IBB_IniLine_Data_IIF>();
+        if (!ii || !ii->Value) return;
+
+        IBG_InputForm &form = *ii->Value;
+        auto &comps = *form.InputComponents;
+        if (compIdx < 0 || compIdx >= static_cast<int>(comps.size())) return;
+        auto *comp = comps[static_cast<size_t>(compIdx)].get();
+        int vid = comp->GetCurrentTargetValueID();
+        if (vid < 0) return;
+        if (form.GetValue(vid).Value.empty()) return;  // 本就空，无需改动
+
+        auto &V = form.GetValue(vid);
+        if (auto st = V.StateValue<IIS_String>()) st->Text.clear();
+        else V.ResetState<IIS_String>("");
+        V.Value.clear();
+        V.NeedsUpdate(form.GetValues(), *comp);
+        form.RegenFormattedString();
+        srcBsec->UpdateAll();
+        IBR_Inst_Project.RefreshLinkList = true;
+        refresh();
+        emit iifDataChanged(row);
+        emit sectionDataChanged(m_sectionId);
+    } });
 }
 
 bool SectionLineModel::deleteLink(int row, int linkIdx)
@@ -1008,6 +1165,25 @@ bool SectionLineModel::toggleBoolValue(int row)
     return true;
 }
 
+// IIF 分量悬停 Hint（对齐 imgui RenderIICInputText 的 IBR_ToolTip(pIn->Hint.Long)）
+// 交互型分量带 Hint（Short+Long）；纯文本类分量无 Hint 返回空串（呼层再回退自身文本）
+// Long 为空时回退到 Short，保证每个分量都有提示（imgui 中 Short 是节点/输入框标签，Long 是悬停说明）
+static std::string IIC_HintText(const IBG_InputComponent *comp)
+{
+    IICDescStr H;
+    if (auto t = dynamic_cast<const IIC_InputText*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_InputInt*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_Bool*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_MultipleChoice*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_EnumCombo*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_EnumRadio*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_ColorPanel*>(comp)) H = t->Hint;
+    else if (auto t = dynamic_cast<const IIC_SliderInt*>(comp)) H = t->Hint;
+    if (H.Long.empty()) return H.Short;
+    if (H.Short.empty()) return H.Long;
+    return H.Short + "\n" + H.Long;
+}
+
 // IIF 多分量导出：返回该行各可见分量描述（阶段一核心分量）
 // 遍历 InputComponents，按核心类型分派；每分量附 ComponentStatus 的 Link/Input 状态与当前值
 QVariantList SectionLineModel::iifComponents(int row) const
@@ -1032,6 +1208,22 @@ QVariantList SectionLineModel::iifComponents(int row) const
     auto &cs = form.GetComponentStatus();
     auto &comps = *form.InputComponents;
 
+    // 分量节点元数据所需的 SubSec / lineIdx / sectionIgnored（链接列表、颜色、坐标用）
+    IBB_SubSec *sub = nullptr;
+    size_t lineIdx = 0;
+    for (auto subIdx : bsec->SubSecOrder) {
+        auto &ss = bsec->SubSecs[subIdx];
+        if (!ss.CanOwnKey(e.keyId)) continue;
+        sub = &ss;
+        for (size_t i = 0; i < ss.Lines_ByName.size(); ++i) {
+            if (ss.Lines_ByName[i] == e.keyId) { lineIdx = i; break; }
+        }
+        break;
+    }
+    bool sectionIgnored = false;
+    auto sd = rsec.GetSectionData();
+    if (sd) sectionIgnored = sd->Ignore;
+
     for (size_t i = 0; i < comps.size(); ++i) {
         auto &p = comps[i];
         int vid = p->GetCurrentTargetValueID();
@@ -1041,6 +1233,7 @@ QVariantList SectionLineModel::iifComponents(int row) const
         m["compIdx"] = static_cast<int>(i);
         m["isLink"] = isLink;
         m["readOnly"] = false;
+        m["hint"] = QString::fromUtf8(IIC_HintText(p.get()).c_str());
 
         QString disp;
         if (vid >= 0)
@@ -1078,6 +1271,36 @@ QVariantList SectionLineModel::iifComponents(int row) const
             m["kind"] = "input";
             m["text"] = disp;
         }
+
+        // 无专属 Hint 的纯文本分量：回退显示其自身文本，保证"每个组件都有提示"且不空白
+        if (m["hint"].toString().isEmpty() && m["kind"] == "text")
+            m["hint"] = m["text"];
+
+        // Link 状态分量（InputMethod==Link，对应 Type:"Link" 的 IIC_InputText）：渲染为链接节点 LeNLinkPoint
+        // 对齐 imgui RenderIICInputText 的 Link 分支 → IBR_LinkNode::RenderUI_Node
+        if (isLink && (m["kind"] == "input" || m["kind"] == "int" || m["kind"] == "bool")) {
+            m["kind"] = "link";
+            m["text"] = QString();
+
+            // 节点元数据（LineRow 用这些字段实例化真实 LinkNodePoint 并接入拖拽建链/坐标回写）
+            auto hasNode = IBB_DefaultRegType::HasRegType(p->NodeSetting.LinkType);
+            bool empty = true;
+            QVariantList compLinks;
+            if (sub) {
+                auto [cb, ce] = sub->GetLink(lineIdx, e.lineMult, i);
+                empty = (cb == ce);
+                compLinks = collectLinks(*sub, lineIdx, e.lineMult, i);
+            }
+            m["hasLinkNode"] = hasNode;
+            m["linkLimit"] = p->NodeSetting.LinkLimit;
+            m["linkType"] = QString::fromUtf8(PoolStr(p->NodeSetting.LinkType));
+            m["linkCol"] = computeNodeColor(p->NodeSetting.LinkCol, empty, false, hasNode, sectionIgnored);
+            m["isEmpty"] = empty;
+            m["links"] = compLinks;
+            m["lineMult"] = static_cast<int>(e.lineMult);
+            m["sessionId"] = QString::number(static_cast<qulonglong>(sessionIdFor(row, static_cast<int>(i))));
+        }
+
         out << m;
     }
     return out;

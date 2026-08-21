@@ -8,6 +8,8 @@
 #include "IBB_PropStringPool.h"
 #include "IBG_UndoTree.h"
 #include "IBG_InputType.h"
+#include "IBG_InputType_Derived.h"
+#include "IBB_IniLine.h"
 #include "FromEngine/RFBump.h"
 #include "FromEngine/global_tool_func.h"
 #include <QString>
@@ -129,6 +131,25 @@ void EditPanelController::refreshLines()
     rebuildEditLines();
 }
 
+// IIF 分量悬停 Hint：交互分量用 Hint.Long；纯文本分量无 Hint，回退用其自身文本
+// 保证 IIF 每个分量在侧边栏都能列出一条提示（每分量一行，用 \n 分隔）
+static std::string Edit_IIC_HintLong(const IBG_InputComponent *comp)
+{
+    if (auto t = dynamic_cast<const IIC_InputText*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_InputInt*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_Bool*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_MultipleChoice*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_EnumCombo*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_EnumRadio*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_ColorPanel*>(comp)) return t->Hint.Long;
+    if (auto t = dynamic_cast<const IIC_SliderInt*>(comp)) return t->Hint.Long;
+    // 纯文本类分量：无专属 Hint，回退为其渲染文本
+    if (auto t = dynamic_cast<const IIC_PureText*>(comp)) return t->Text;
+    if (auto t = dynamic_cast<const IIC_LocalizedText*>(comp)) return t->FallbackText;
+    if (auto t = dynamic_cast<const IIC_Setter_String*>(comp)) return t->Value;
+    return "";
+}
+
 void EditPanelController::rebuildEditLines()
 {
     // 对应 IBR_EditFrame::ResetEdit + RenderUI_Lines
@@ -192,6 +213,19 @@ void EditPanelController::rebuildEditLines()
         entry["missing"] = false;
         // 直接从 Default->DescLong 读取 Hint（对应 ResetEdit 里 Line.Hint = V.Default->DescLong）
         entry["hint"] = QString::fromUtf8(PoolDesc(pLine->Default->DescLong));
+        // IIF 键：键级 DescLong 为空时，改用分量 Hint.Long，让侧边栏悬停也能显示说明
+        if (entry["hint"].toString().isEmpty()) {
+            if (auto dataPtr = pLine->Indexed(0)) {
+                if (auto ii = dataPtr->GetData<IBB_IniLine_Data_IIF>(); ii && ii->Value) {
+                    QStringList hints;
+                    for (auto &comp : *ii->Value->InputComponents) {
+                        QString h = QString::fromUtf8(Edit_IIC_HintLong(comp.get()).c_str());
+                        if (!h.isEmpty()) hints << h;
+                    }
+                    if (!hints.isEmpty()) entry["hint"] = hints.join(QStringLiteral("\n"));
+                }
+            }
+        }
         entry["isMultiple"] = pLine->IsMultiple();
         entry["lineCount"] = static_cast<int>(pLine->Count());
 #ifdef INIWEAVER_DIAG

@@ -226,13 +226,14 @@ Item {
                                     rightPadding: 0
                                 }
 
-                                // Key 名
+                                // Key 名（不省略号，按自然宽度完整显示，避免长键名被截断）
                                 Text {
-                                    Layout.preferredWidth: 80
+                                    Layout.fillWidth: false
+                                    Layout.preferredWidth: implicitWidth
                                     text: modelData.keyName
                                     color: modelData.missing ? "#f48771" : "#e0e0e0"
                                     font.pixelSize: 13
-                                    elide: Text.ElideRight
+                                    elide: Text.ElideNone
                                     HoverHandler {
                                         id: hoverHandler
                                         // 悬停提示（统一用全局 appToolTip，暗色方角立即显示）
@@ -263,6 +264,7 @@ Item {
 
                                 // 值编辑控件（缺失行、多值键不显示；多值键由下方 Repeater 依次渲染各值）
                                 TextField {
+                                    id: mainValueField
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
                                              && !(modelData.isMultiple || false)
@@ -298,14 +300,14 @@ Item {
                                 visible: (entry.isMultiple || false)
                                          && !(entry.missing || false)
                                 model: entry.values ? entry.values.length : 0
-                                // Repeater 的 delegate 不是布局直接子项，不会自动纵向堆叠/撑开高度，
-                                // 需用 y 逐行定位，并显式给出整体高度
-                                height: (entry.values ? entry.values.length : 0) * 28
+                                // 高度不固定，跟随普通单值框自适应（mainValueField.height 为其自然高度）
+                                readonly property real rowH: Math.max(24, mainValueField.height) + 2
+                                height: (entry.values ? entry.values.length : 0) * rowH
                                 delegate: TextField {
-                                    // 每行一个值，height=28 对齐普通输入框
-                                    y: index * 28
+                                    // 每行一个值，宽高随普通输入框自适应
+                                    y: index * valueRows.rowH
                                     width: linesListView.width - 4
-                                    height: 28
+                                    height: Math.max(24, mainValueField.height)
                                     text: valueRows.entry.values[index] || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"

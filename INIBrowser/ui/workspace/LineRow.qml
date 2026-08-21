@@ -90,6 +90,7 @@ Item {
             var w = 0
             if (cc.kind === "input" || cc.kind === "int") w = root.fontBody * 12
             else if (cc.kind === "bool") w = root.fontBody * 1.4 + 4
+            else if (cc.kind === "link") w = root.fontSmall * 1.5 + 6  // 分量连线节点（LinkNodePoint）
             else if (cc.kind === "sep") w = 2
             else if (cc.kind === "text") w = (cc.text ? cc.text.length * root.fontBody * 0.6 : 0)
             else w = 0  // samel 无宽
@@ -376,7 +377,7 @@ Item {
                 // newl 全宽占位强制换行；input/int 固定宽；text 内容宽；sep 竖线宽；samel/bool 固定宽
                 width: cc.kind === "newl" ? (iifEdit.width - iifEdit.spacing)
                      : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 12
-                     : cc.kind === "bool" ? (root.fontBody * 1.4 + 4)
+                     : (cc.kind === "bool" || cc.kind === "link") ? (root.fontBody * 1.4 + 4)
                      : cc.kind === "sep" ? 2
                      : cc.kind === "text" ? txtTxt.implicitWidth
                      : 0
@@ -428,6 +429,36 @@ Item {
                     }
                 }
 
+                // Link 状态分量（Type:"Link"）：渲染为真实连线节点 LinkNodePoint（可拖拽建链/断链/悬停 Hint）
+                // 对应 imgui RenderIICInputText Link 分支 → IBR_LinkNode::RenderUI_Node
+                // 坐标经 LinkNodePoint.iifNode → setLinkNodeCenterAt(compIdx) 回写分量端点
+                LinkNodePoint {
+                    id: iifLinkNode
+                    visible: cc.kind === "link"
+                    flowNode: true
+                    anchors.centerIn: parent
+                    sectionData: root.sectionData
+                    lineModel: root.lineModel
+                    rowIndex: root.rowIndex
+                    keyName: root.keyName
+                    lineMult: cc.lineMult
+                    compIdx: cc.compIdx
+                    iifHint: cc.hint
+                    links: cc.links
+                    linkLimit: cc.linkLimit
+                    linkCol: cc.linkCol
+                    hasLinkNode: cc.hasLinkNode
+                    isEmpty: cc.isEmpty
+                    isInherit: false
+                    isImport: false
+                    fontSmall: root.fontSmall
+                    linkType: cc.linkType
+                    // 双击切回 Input 态（对应 RenderUI_Node 双击 Status.InputMethod=Input）
+                    onDoubleClicked: {
+                        if (root.lineModel) root.lineModel.toggleInputMode(root.rowIndex)
+                    }
+                }
+
                 // 分隔竖线
                 Rectangle {
                     visible: cc.kind === "sep"
@@ -461,6 +492,24 @@ Item {
                                     + " compIdx=" + cc.compIdx + " text='" + text + "'")
                         if (root.lineModel)
                             root.lineModel.setIifComponentValue(root.rowIndex, cc.compIdx, text)
+                    }
+                }
+
+                // IIF 分量悬停提示：显示该分量的 Hint.Long（对齐 imgui IBR_ToolTip(Hint.Long)）
+                // acceptedButtons NoButton → 不拦截点击，输入框/勾选框仍可正常交互
+                // Link 分量由上方 LinkNodePoint 自持悬停 Hint，此处跳过避免冲突
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    hoverEnabled: true
+                    onContainsMouseChanged: {
+                        if (!containsMouse || cc.kind === "link") {
+                            if (!containsMouse) appToolTip.hide()
+                            return
+                        }
+                        if (!cc.hint || cc.hint.length === 0) return
+                        var g = parent.mapToGlobal(0, parent.height + 2)
+                        appToolTip.show(cc.hint, g.x, g.y)
                     }
                 }
             }

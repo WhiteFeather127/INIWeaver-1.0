@@ -33,6 +33,19 @@ Item {
     // 行级 DropTarget 定位源行所需信息（供 createLinkFromDrag 在 C++ 侧定位源行）
     property string keyName: ""
     property int lineMult: 0
+    // 阶段 4：IIF 分量节点（flowNode=true，由 LineRow 的 IIF Flow 内实例化），启用：
+    //   1. 连线操作走 compIdx 重载（createLinkAt / deleteAllLinksAt）
+    //   2. 坐标经 setLinkNodeCenterAt 按分量 sessionId 回写
+    property int compIdx: 0
+    // 是否渲染在 IIF 分量 Flow 内（行级节点为 false）。Flow 内节点一律按分量坐标/连线处理，
+    // 即使 compIdx==0（单分量 IIF）也需要 setLinkNodeCenterAt 回写端点。
+    property bool flowNode: false
+    readonly property bool iifNode: flowNode
+    // IIF 分量节点的组件 Hint（对应 IIC Hint，用户要求每个分量都有提示）。非空时优先显示。
+    property string iifHint: ""
+    // IIF 分量节点布局完成门控：Flow 重排期间跳过中间坐标写回（对齐 LineRow.layoutDone），
+    // onCompleted 延迟到事件循环末尾置 true 并回写一次最终坐标，之后再随 onX/onY 实时回写。
+    property bool iifReady: false
 
     // 是否确实发生过连线拖拽（避免普通点击圆点松手时误建自连）
     // 自连（拖动连线落回本模块）= targetId == sourceId，对应 ImGui Link.IsSelfLinked
@@ -122,7 +135,8 @@ Item {
                 if (!root.isEmpty && root.linkLimit === 1) {
                     // ModifyAndShow("") → 解除唯一链接
                     if (root.lineModel) {
-                        root.lineModel.deleteAllLinks(root.rowIndex)
+                        if (root.iifNode) root.lineModel.deleteAllLinksAt(root.rowIndex, root.compIdx)
+                        else root.lineModel.deleteAllLinks(root.rowIndex)
                     }
                 }
             } else if (mouse.button === Qt.RightButton) {
@@ -164,9 +178,14 @@ Item {
             var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
             var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
             if (root.linkWasDragged && targetId && root.linkLimit !== 0) {
-                workspaceController.createLinkFromDrag(
-                    root.sectionData.sectionId, root.keyName || "", root.lineMult || 0,
-                    targetId, "", 0)
+                if (root.iifNode) {
+                    // IIF 分量节点：写入该分量 Value（compIdx）建链
+                    root.lineModel.createLinkAt(root.rowIndex, root.compIdx, targetId, "")
+                } else {
+                    workspaceController.createLinkFromDrag(
+                        root.sectionData.sectionId, root.keyName || "", root.lineMult || 0,
+                        targetId, "", 0)
+                }
             }
             root.linkWasDragged = false
             root.released()
@@ -210,10 +229,15 @@ Item {
 
         // 悬停提示（统一用全局 appToolTip，对应 IBR_LinkNode.cpp:541-564 IsItemHovered && !Empty）
         onContainsMouseChanged: {
-            if (root.isEmpty || root.tipText.length === 0) return
             if (hoverArea.containsMouse) {
+                // IIF 分量节点：优先显示组件 Hint（用户要求每个分量都有提示）；
+                // 否则（普通行节点/无 Hint）显示连线目标列表。
                 var g = hoverArea.mapToGlobal(hoverArea.width / 2, hoverArea.height + 4)
-                appToolTip.show(root.tipText, g.x, g.y)
+                if (root.iifNode && root.iifHint.length > 0) {
+                    appToolTip.show(root.iifHint, g.x, g.y)
+                } else if (!root.isEmpty && root.tipText.length > 0) {
+                    appToolTip.show(root.tipText, g.x, g.y)
+                }
             } else {
                 appToolTip.hide()
             }
@@ -230,7 +254,8 @@ Item {
     function dispatchLinkAction(action) {
         if (!root.lineModel) return
         if (action === "unlink" || action === "unlinkAll") {
-            root.lineModel.deleteAllLinks(root.rowIndex)
+            if (root.iifNode) root.lineModel.deleteAllLinksAt(root.rowIndex, root.compIdx)
+            else root.lineModel.deleteAllLinks(root.rowIndex)
         }
         // "link:N" 为 checkable 项，单击由 checkable 机制翻转，关闭时统一回读
     }
@@ -284,6 +309,26 @@ Item {
         root.linkMenuActive = true
         contextMenuHost.show(root.buildLinkDescs(), globalX, globalY, (a) => root.dispatchLinkAction(a))
     }
+
+    // ===== IIF 分量节点坐标回写（阶段 4） =====
+    // 用 setLinkNodeCenterAt 按分量 sessionId（Comp=cidx）写 LastCenter，
+    // rebuildLinkEndpoints 的 priority 2 读到该分量圆点坐标 → 连线起点/终点正确。
+    // 减 dragOffset 与 LineRow 一致：存储原位置，LinkRenderer 叠加拖拽位移动态修正。
+    function pushCompCenter() {
+        if (!root.iifNode || !root.iifReady) return
+        if (!root.lineModel || root.rowIndex < 0 || root.compIdx < 0) return
+        if (workspaceController.inputState === 1 || workspaceController.zoomPending) return
+        var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
+        var dx = workspaceController.dragOffset.x
+        var dy = workspaceController.dragOffset.y
+        root.lineModel.setLinkNodeCenterAt(root.rowIndex, root.compIdx, pos.x - dx, pos.y - dy)
+    }
+
+    onXChanged: root.pushCompCenter()
+    onYChanged: root.pushCompCenter()
+    onWidthChanged: root.pushCompCenter()
+    onHeightChanged: root.pushCompCenter()
+    Component.onCompleted: Qt.callLater(() => { root.iifReady = true; root.pushCompCenter() })
 
     // ===== 信号（供 LineRow 监听） =====
     signal clicked()
