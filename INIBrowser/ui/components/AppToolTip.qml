@@ -9,6 +9,12 @@
 //   // 各 hover 源（菜单按钮/连线节点/模块项等）：
 //   //   onEntered: appToolTip.show(text, screenX, screenY)
 //   //   onExited:  appToolTip.hide()
+//
+// 方向性修复：
+//   1. 防抖隐藏（Timer 120ms）：快速跨多个源滑动时 onExited 高频触发，延迟 close
+//      避免 popup 闪烁/瞬间消失（旧 hide 后新 show 的时序竞争）。
+//   2. 优先显示在参考点上方（空间不足才下方）：popup 不落在鼠标前进路径上，
+//      避免从上往下滑动时 popup 出现在鼠标即将经过的区域造成"不显示"。
 import QtQuick
 import QtQuick.Controls
 
@@ -19,6 +25,17 @@ Popup {
 
     // 提示框最大宽度（超出则文本换行，避免长文本把框拉宽到屏幕外）
     property int maxTipWidth: 420
+
+    // 防抖隐藏：鼠标快速滑过多个源时，onExited 高频触发；延迟一定时间再 close，
+    // 若期间又有新 show 则取消，避免 popup 闪烁/切换丢显
+    Timer {
+        id: hideTimer
+        interval: 120
+        onTriggered: {
+            root.close()
+            tipText.text = ""
+        }
+    }
 
     contentItem: Text {
         id: tipText
@@ -47,18 +64,21 @@ Popup {
     // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
     function show(text, screenX, screenY) {
         tipText.text = text || ""
-        // 强制按当前文本重新计算换行宽度（text 变化会触发 onImplicitWidthChanged）
-        var tw = tipText.implicitWidth > (maxTipWidth - 12) ? (maxTipWidth - 12) : tipText.implicitWidth
-        tipText.width = tw
+        var cap = maxTipWidth - 12
+        tipText.width = (tipText.implicitWidth > cap) ? cap : tipText.implicitWidth
+        hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
         var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        var w = tw + tipText.leftPadding + tipText.rightPadding
-        root.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - w - 2))
-        root.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - root.implicitHeight - 4))
+        var w = Math.max(2, Math.min(o.x, Overlay.overlay.width - tipText.width - 14))
+        var hh = root.implicitHeight
+        // 优先显示在参考点上方（不遮挡鼠标前进路径），上方不足才下方
+        var above = o.y - hh - 10
+        var below = o.y + 10
+        root.x = w
+        root.y = (above >= 4) ? above : Math.min(below, Overlay.overlay.height - hh - 4)
         root.open()
     }
 
     function hide() {
-        root.close()
-        tipText.text = ""
+        hideTimer.start()
     }
 }
