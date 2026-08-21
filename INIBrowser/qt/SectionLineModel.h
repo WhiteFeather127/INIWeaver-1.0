@@ -133,8 +133,9 @@ public:
     // 读取 Data_Bool 当前 bool，翻转后按 StrBoolType 格式写回
     Q_INVOKABLE bool toggleBoolValue(int row);
 
-    // IIF 多分量导出（阶段一核心分量）：返回该行各可见分量描述(QVariantMap)
-    // 字段：kind(text/bool/int/input/samel/newl/sep)、text(显示值)、isLink、compIdx、readOnly
+    // IIF 多分量导出（对齐 imgui IBG_InputForm::RenderUI）：返回该行各分量描述(QVariantMap)
+    // 字段：idx/type(细粒度)、label(Short)、tooltip(Long||Short)、value、isLink、readOnly、disabled、
+    //       link 分量附节点元数据(hasLinkNode/linkLimit/linkCol/isEmpty/links/linkType/sessionId/lineMult)
     Q_INVOKABLE QVariantList iifComponents(int row) const;
 
     // IIF 分量值写回（阶段一核心：input/int 分量文本编辑）

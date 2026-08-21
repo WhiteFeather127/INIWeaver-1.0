@@ -1165,27 +1165,23 @@ bool SectionLineModel::toggleBoolValue(int row)
     return true;
 }
 
-// IIF 分量悬停 Hint（对齐 imgui RenderIICInputText 的 IBR_ToolTip(pIn->Hint.Long)）
-// 交互型分量带 Hint（Short+Long）；纯文本类分量无 Hint 返回空串（呼层再回退自身文本）
-// Long 为空时回退到 Short，保证每个分量都有提示（imgui 中 Short 是节点/输入框标签，Long 是悬停说明）
-static std::string IIC_HintText(const IBG_InputComponent *comp)
+// IIF 分量 Hint（对齐 imgui RenderIICInputText）：Short 是可见标签文本，Long 是悬停提示
+static IICDescStr IIC_Hint(const IBG_InputComponent *comp)
 {
-    IICDescStr H;
-    if (auto t = dynamic_cast<const IIC_InputText*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_InputInt*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_Bool*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_MultipleChoice*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_EnumCombo*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_EnumRadio*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_ColorPanel*>(comp)) H = t->Hint;
-    else if (auto t = dynamic_cast<const IIC_SliderInt*>(comp)) H = t->Hint;
-    if (H.Long.empty()) return H.Short;
-    if (H.Short.empty()) return H.Long;
-    return H.Short + "\n" + H.Long;
+    if (auto t = dynamic_cast<const IIC_InputText*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_InputInt*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_Bool*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_MultipleChoice*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_EnumCombo*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_EnumRadio*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_ColorPanel*>(comp)) return t->Hint;
+    else if (auto t = dynamic_cast<const IIC_SliderInt*>(comp)) return t->Hint;
+    return {};
 }
 
-// IIF 多分量导出：返回该行各可见分量描述（阶段一核心分量）
-// 遍历 InputComponents，按核心类型分派；每分量附 ComponentStatus 的 Link/Input 状态与当前值
+// IIF 多分量导出：返回该行各分量描述，信息对齐 imgui IBG_InputForm::RenderUI
+// 每分量：idx(=compIdx)/type(细粒度)/label(Short)/tooltip(Long||Short)/value/isLink/readOnly/disabled
+// 链接分量（isLink && SupportLinks）type="link"，附节点元数据供 LinkNodePoint 建链/坐标回写。
 QVariantList SectionLineModel::iifComponents(int row) const
 {
     QVariantList out;
@@ -1208,16 +1204,15 @@ QVariantList SectionLineModel::iifComponents(int row) const
     auto &cs = form.GetComponentStatus();
     auto &comps = *form.InputComponents;
 
-    // 分量节点元数据所需的 SubSec / lineIdx / sectionIgnored（链接列表、颜色、坐标用）
+    // 节点元数据所需的 SubSec / lineIdx / sectionIgnored（链接列表、颜色、坐标用）
     IBB_SubSec *sub = nullptr;
     size_t lineIdx = 0;
     for (auto subIdx : bsec->SubSecOrder) {
         auto &ss = bsec->SubSecs[subIdx];
         if (!ss.CanOwnKey(e.keyId)) continue;
         sub = &ss;
-        for (size_t i = 0; i < ss.Lines_ByName.size(); ++i) {
-            if (ss.Lines_ByName[i] == e.keyId) { lineIdx = i; break; }
-        }
+        for (size_t k = 0; k < ss.Lines_ByName.size(); ++k)
+            if (ss.Lines_ByName[k] == e.keyId) { lineIdx = k; break; }
         break;
     }
     bool sectionIgnored = false;
@@ -1228,61 +1223,61 @@ QVariantList SectionLineModel::iifComponents(int row) const
         auto &p = comps[i];
         int vid = p->GetCurrentTargetValueID();
         bool isLink = (i < cs.size()) && (cs[i].InputMethod == IICStatus::Link);
+        auto H = IIC_Hint(p.get());
 
         QVariantMap m;
         m["compIdx"] = static_cast<int>(i);
+        m["idx"] = static_cast<int>(i);
         m["isLink"] = isLink;
         m["readOnly"] = false;
-        m["hint"] = QString::fromUtf8(IIC_HintText(p.get()).c_str());
+        m["disabled"] = p->Disabled;
+        m["label"] = QString::fromUtf8(H.Short.c_str());
+        m["tooltip"] = QString::fromUtf8(H.Long.empty() ? H.Short.c_str() : H.Long.c_str());
 
         QString disp;
-        if (vid >= 0)
-            disp = QString::fromUtf8(form.GetValue(vid).Value.c_str());
+        if (vid >= 0) disp = QString::fromUtf8(form.GetValue(vid).Value.c_str());
+        m["value"] = disp;
 
         if (auto t = dynamic_cast<IIC_PureText*>(p.get())) {
-            m["kind"] = "text";
-            m["text"] = QString::fromUtf8(t->Text.c_str());
-            m["readOnly"] = true;
+            m["type"] = "text";   m["value"] = QString::fromUtf8(t->Text.c_str()); m["readOnly"] = true;
         } else if (auto t = dynamic_cast<IIC_LocalizedText*>(p.get())) {
-            m["kind"] = "text";
-            m["text"] = QString::fromUtf8(t->FallbackText.c_str());
-            m["readOnly"] = true;
+            m["type"] = "locale"; m["value"] = QString::fromUtf8(t->FallbackText.c_str()); m["readOnly"] = true;
         } else if (auto t = dynamic_cast<IIC_Setter_String*>(p.get())) {
-            m["kind"] = "text";
-            m["text"] = QString::fromUtf8(t->Value.c_str());
-            m["readOnly"] = true;
+            m["type"] = "setter"; m["value"] = QString::fromUtf8(t->Value.c_str()); m["readOnly"] = true;
         } else if (dynamic_cast<IIC_SameLine*>(p.get())) {
-            m["kind"] = "samel";
-            m["readOnly"] = true;
+            m["type"] = "samel"; m["readOnly"] = true;
         } else if (dynamic_cast<IIC_NewLine*>(p.get())) {
-            m["kind"] = "newl";
-            m["readOnly"] = true;
+            m["type"] = "newl"; m["readOnly"] = true;
         } else if (dynamic_cast<IIC_Separator*>(p.get())) {
-            m["kind"] = "sep";
-            m["readOnly"] = true;
+            m["type"] = "sep"; m["readOnly"] = true;
         } else if (dynamic_cast<IIC_Bool*>(p.get())) {
-            m["kind"] = "bool";
-            m["text"] = disp;
+            m["type"] = "bool";
         } else if (dynamic_cast<IIC_InputInt*>(p.get())) {
-            m["kind"] = "int";
-            m["text"] = disp;
+            m["type"] = "int";
+        } else if (dynamic_cast<IIC_MultipleChoice*>(p.get())) {
+            m["type"] = "choice";
+        } else if (dynamic_cast<IIC_EnumCombo*>(p.get())) {
+            m["type"] = "combo";
+        } else if (dynamic_cast<IIC_EnumRadio*>(p.get())) {
+            m["type"] = "radio";
+        } else if (dynamic_cast<IIC_ColorPanel*>(p.get())) {
+            m["type"] = "color";
+        } else if (dynamic_cast<IIC_SliderInt*>(p.get())) {
+            m["type"] = "slider";
         } else {
-            // IIC_InputText 及未识别分量：按可编辑输入框处理
-            m["kind"] = "input";
-            m["text"] = disp;
+            m["type"] = "input";   // IIC_InputText 及未识别分量按输入框
         }
 
-        // 无专属 Hint 的纯文本分量：回退显示其自身文本，保证"每个组件都有提示"且不空白
-        if (m["hint"].toString().isEmpty() && m["kind"] == "text")
-            m["hint"] = m["text"];
+        // 纯文本类分量无 Hint：tooltip 回退为其自身文本，悬停可见
+        if (m["tooltip"].toString().isEmpty()
+            && (m["type"] == "text" || m["type"] == "locale" || m["type"] == "setter"))
+            m["tooltip"] = m["value"];
 
-        // Link 状态分量（InputMethod==Link，对应 Type:"Link" 的 IIC_InputText）：渲染为链接节点 LeNLinkPoint
-        // 对齐 imgui RenderIICInputText 的 Link 分支 → IBR_LinkNode::RenderUI_Node
-        if (isLink && (m["kind"] == "input" || m["kind"] == "int" || m["kind"] == "bool")) {
-            m["kind"] = "link";
-            m["text"] = QString();
+        // Link 态分量（支持链接）：渲染为链接节点（对应 RenderUI_Node：Short 标签 + 行末节点）
+        if (isLink && p->SupportLinks() && m["type"] != "text") {
+            m["type"] = "link";
+            m["value"] = QString();
 
-            // 节点元数据（LineRow 用这些字段实例化真实 LinkNodePoint 并接入拖拽建链/坐标回写）
             auto hasNode = IBB_DefaultRegType::HasRegType(p->NodeSetting.LinkType);
             bool empty = true;
             QVariantList compLinks;
