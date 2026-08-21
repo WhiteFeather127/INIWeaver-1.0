@@ -261,10 +261,11 @@ Item {
                                     font.pixelSize: 13
                                 }
 
-                                // 值编辑控件（缺失行不显示）
+                                // 值编辑控件（缺失行不显示；多值同名键由下方 Repeater 逐行渲染）
                                 TextField {
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
+                                             && !(modelData.values && modelData.values.length > 1)
                                     text: modelData.value || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
@@ -283,6 +284,45 @@ Item {
                                             appToolTip.show(modelData.hint, g.x, g.y)
                                         } else {
                                             appToolTip.hide()
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 同名多值键（isMultiple）：每个值独立一行编辑，按分量索引写回
+                            Repeater {
+                                visible: (modelData.values && modelData.values.length > 1)
+                                model: modelData.values ? modelData.values.length : 0
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Text {
+                                        Layout.preferredWidth: 80
+                                        text: "[" + (index + 1) + "]"
+                                        color: "#808080"
+                                        font.pixelSize: 11
+                                        horizontalAlignment: Text.AlignRight
+                                    }
+                                    TextField {
+                                        Layout.fillWidth: true
+                                        text: modelData.values[index] || ""
+                                        color: "#e0e0e0"
+                                        placeholderTextColor: "#909090"
+                                        font.pixelSize: 13
+                                        background: Rectangle {
+                                            color: "#2d2d2d"
+                                            border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
+                                            border.width: 1
+                                            radius: 2
+                                        }
+                                        onEditingFinished: editPanelController.setLineValueAt(modelData.keyName, index, text)
+                                        onHoveredChanged: {
+                                            if (hovered && modelData.hint && modelData.hint.length > 0) {
+                                                var g = mapToGlobal(width / 2, height + 4)
+                                                appToolTip.show(modelData.hint, g.x, g.y)
+                                            } else {
+                                                appToolTip.hide()
+                                            }
                                         }
                                     }
                                 }

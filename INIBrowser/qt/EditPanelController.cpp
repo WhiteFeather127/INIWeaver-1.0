@@ -390,6 +390,30 @@ void EditPanelController::setLineValue(const QString &key, const QString &value)
     });
 }
 
+void EditPanelController::setLineValueAt(const QString &key, int index, const QString &value)
+{
+    // 对应 setLineValue，但按指定分量索引写回（同名多行键 isMultiple 的每个值独立编辑）
+    std::string keyStr = key.toUtf8().toStdString();
+    std::string valStr = value.toUtf8().toStdString();
+    StrPoolID K = NewPoolStr(keyStr);
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
+    if (!pbk) return;
+
+    IBRF_CoreBump.SendToR({ [pbk, K, index, valStr]() {
+        IBG_Undo.SomethingShouldBeHere();
+        pbk->MergeLine(K, index, valStr, IBB_IniMergeMode::Replace);
+        IBF_Inst_Project.UpdateAll();
+    } });
+
+    QTimer::singleShot(30, this, [this]() {
+        rebuildEditLines();
+        emit sectionDataChanged(m_currentSectionId);
+    });
+}
+
 void EditPanelController::switchToText()
 {
     // 对应 IBR_EditFrame::SwitchToText（IBR_Misc.cpp:649-661）
