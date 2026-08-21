@@ -118,6 +118,11 @@ Item {
     // 右侧 LinkNode 圆点（对应 IBR_LinkNode::RenderUI_Node 的 RadioButton）
     LinkNodePoint {
         id: linkNode
+        // 圆点交互优先级高于行级右键 MouseArea（lineRightClickMA）：
+        // 右键圆点应弹连线节点自己的菜单（对应 IBR_LinkNode.cpp:479-540），而非键行菜单。
+        // lineRightClickMA 覆盖整行且在 linkNode 之后声明，同一 z 下会先抢走圆点的右键，
+        // 故把圆点 z 提到它之上。
+        z: 2
         // D15：DefaultCenter 位置（对应 ImGui IBR_LinkNode.cpp:202-205）
         // ImGui: Center.x = 行末 - 1.5*FontHeight，左上角 = Center - size/2
         // Import SubSec 居中（ImportCenter），否则行末 1.5*fontSmall
