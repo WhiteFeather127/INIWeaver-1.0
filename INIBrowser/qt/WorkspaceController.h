@@ -76,6 +76,8 @@ class WorkspaceController : public QObject
     Q_PROPERTY(qulonglong dragTargetSectionId READ dragTargetSectionId NOTIFY dragTargetChanged)
     Q_PROPERTY(QString dragTargetColor READ dragTargetColor NOTIFY dragTargetChanged)
     Q_PROPERTY(QString dragTargetText READ dragTargetText NOTIFY dragTargetChanged)
+    // 连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 里的源文本，IBR_LinkNode.cpp:570-573）
+    Q_PROPERTY(QString dragSourceText READ dragSourceText NOTIFY dragTargetChanged)
     // 拖拽中的节点 ID（单节点拖拽用，0 表示无拖拽）
     // 修复：避免 beginMoveSection 中 refresh() 重建 QVariantList 导致 mouse grab 丢失
     Q_PROPERTY(qulonglong draggingSectionId READ draggingSectionId NOTIFY draggingSectionIdChanged)
@@ -139,9 +141,12 @@ public:
     Q_INVOKABLE qulonglong hitTestSection(qreal screenX, qreal screenY) const;
     // 拖拽目标预览（拖拽源在 onPositionChanged 中调用；结束/离开时传 id=0 清除）
     Q_INVOKABLE void setDragTarget(qulonglong targetId, const QString &color, const QString &text);
+    // 设置连线拖拽的源预览标签（由 LinkNodePoint 拖动时调用，imgui BeginDragDropSource 源文本）
+    Q_INVOKABLE void setDragSourceText(const QString &text);
     qulonglong dragTargetSectionId() const { return m_dragTargetSectionId; }
     QString dragTargetColor() const { return m_dragTargetColor; }
     QString dragTargetText() const { return m_dragTargetText; }
+    QString dragSourceText() const { return m_dragSourceText; }
 
     // 鼠标交互（对应 IBR_WorkSpace::ProcessBackgroundOpr 状态机）
     // button: Qt::LeftButton=1, Qt::RightButton=2, Qt::MiddleButton=4
@@ -219,6 +224,9 @@ public:
     Q_INVOKABLE int checkMergePreview(qulonglong sourceId, qulonglong destId, const QString &linkKey, bool isLinkDrag);
     // 获取拖拽预览文本（对应 DragConditionText / DragConditionTextAlt）
     Q_INVOKABLE QString mergePreviewText(qulonglong sourceId, qulonglong destId, const QString &linkKey, bool isLinkDrag);
+    // 获取连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 源文本，IBR_LinkNode.cpp:570-573）
+    // 返回 "Ini -> DisplayName : KeyName"（继承连为 GUI_InheritTo 格式）
+    Q_INVOKABLE QString lineDragSourcePreview(qulonglong sectionId, const QString &keyName);
 
     // ===== 阶段 12.5：节点右键菜单项补齐 =====
     // 智能切换 Ignore/Freeze/Hide（对应 IBR_SectionData.cpp:629-676 的智能互斥逻辑）
@@ -519,6 +527,7 @@ private:
     qulonglong m_dragTargetSectionId{0};
     QString m_dragTargetColor;
     QString m_dragTargetText;
+    QString m_dragSourceText;
     // 拖拽中的节点 ID（单节点拖拽，INVALID_MODULE_ID=无拖拽）
     // 修复：不能用 0 作为"无拖拽"哨兵值，因为 0 是合法的 sectionId（第一个新建模块 ID=0）
     // 否则第一个新建模块会因 sectionId(0) === draggingSectionId(0) 永远显示 isDragging 蓝框

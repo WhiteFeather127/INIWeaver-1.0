@@ -1614,10 +1614,11 @@ void WorkspaceController::clearDraggingLink()
         emit dragInvalidLinkChanged(false);
     }
     // 拖拽结束同时清拖拽目标预览（拖拽源 onReleased 已执行建链/合并，这里兜底清理）
-    if (m_dragTargetSectionId != 0 || !m_dragTargetColor.isEmpty() || !m_dragTargetText.isEmpty()) {
+    if (m_dragTargetSectionId != 0 || !m_dragTargetColor.isEmpty() || !m_dragTargetText.isEmpty() || !m_dragSourceText.isEmpty()) {
         m_dragTargetSectionId = 0;
         m_dragTargetColor.clear();
         m_dragTargetText.clear();
+        m_dragSourceText.clear();
         emit dragTargetChanged();
     }
 }
@@ -1638,6 +1639,13 @@ void WorkspaceController::setDragTarget(qulonglong targetId, const QString &colo
     m_dragTargetSectionId = targetId;
     m_dragTargetColor = color;
     m_dragTargetText = text;
+    emit dragTargetChanged();
+}
+
+void WorkspaceController::setDragSourceText(const QString &text)
+{
+    if (m_dragSourceText == text) return;
+    m_dragSourceText = text;
     emit dragTargetChanged();
 }
 
@@ -3662,6 +3670,20 @@ QString WorkspaceController::mergePreviewText(qulonglong sourceId, qulonglong de
         default:
             return QString::fromUtf8(u8"无效链接");
     }
+}
+
+QString WorkspaceController::lineDragSourcePreview(qulonglong sectionId, const QString &keyName)
+{
+    // 对应 ImGui IBR_LinkNode.cpp:570-573 BeginDragDropSource 的源文本：
+    //    普通连 "Ini -> DisplayName : KeyName"
+    ModuleID_t id = static_cast<ModuleID_t>(sectionId);
+    auto sec = IBR_Inst_Project.GetSectionFromID(id);
+    auto data = sec.GetSectionData();
+    if (!data) return QString();
+    std::string first = std::string(data->Desc.Ini) + " -> " + std::string(data->DisplayName);
+    StrPoolID keyId = NewPoolStr(keyName.toUtf8().constData());
+    std::string full = first + " : " + PoolStr(keyId);
+    return QString::fromUtf8(full.c_str());
 }
 
 // ===== 阶段 12.5：节点右键菜单项补齐实现 =====

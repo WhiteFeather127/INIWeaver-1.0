@@ -453,8 +453,8 @@ Item {
         y: -1000
         z: 200
         visible: workspaceController.dragTargetSectionId
-        width: dragPreviewRow.implicitWidth + 6
-        height: dragPreviewRow.implicitHeight + 4
+        width: dragPreviewCol.implicitWidth + 6
+        height: dragPreviewCol.implicitHeight + 4
 
         Rectangle {
             anchors.fill: parent
@@ -463,23 +463,33 @@ Item {
             border.color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
             border.width: 1
         }
-        Row {
-            id: dragPreviewRow
+        Column {
+            id: dragPreviewCol
             anchors.left: parent.left
             anchors.leftMargin: 3
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 3
-            // 对勾 / 叉（对应 DrawCheckmark / DrawCross）
+            spacing: 2
+            // 连线源预览（对应 imgui BeginDragDropSource 源文本，IBR_LinkNode.cpp:570-573）
             Text {
-                text: workspaceController.dragTargetColor === "#4fc3f7" ? "✓" : "✕"
-                color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+                visible: workspaceController.dragSourceText.length > 0
+                text: workspaceController.dragSourceText
+                color: "#d4d4d4"
                 font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
             }
-            // 预览文本（"链接到: Xxx -> Yyy" / "无效链接" / "类型不匹配" 等）
-            Text {
-                text: workspaceController.dragTargetText
-                color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
-                font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+            Row {
+                spacing: 3
+                // 对勾 / 叉（对应 DrawCheckmark / DrawCross）
+                Text {
+                    text: workspaceController.dragTargetColor === "#4fc3f7" ? "✓" : "✕"
+                    color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+                    font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+                }
+                // 预览文本（"链接到: Xxx -> Yyy" / "无效链接" / "类型不匹配" 等）
+                Text {
+                    text: workspaceController.dragTargetText
+                    color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+                    font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+                }
             }
         }
     }

@@ -151,7 +151,14 @@ Item {
         // 拖拽开始时发信号（供 LineRow / WorkspaceController 同步状态）
         onPressed: { root.linkWasDragged = false; root.pressed() }
         // 仅在确实拖拽过（超过 threshold）才置为 true，供 onReleased 判定是否建链
-        drag.onActiveChanged: { if (drag.active) root.linkWasDragged = true }
+        drag.onActiveChanged: {
+            if (drag.active) {
+                root.linkWasDragged = true
+                // 设置连线源预览标签（对应 imgui BeginDragDropSource 源文本，IBR_LinkNode.cpp:570-573）
+                workspaceController.setDragSourceText(
+                    workspaceController.lineDragSourcePreview(root.sectionData.sectionId, root.keyName || ""))
+            }
+        }
         onReleased: {
             // 用拖拽终点（或按下位置）命中目标节点，命中则建链（对应 IBR_LineDrag 落点）
             // 允许自连：targetId == sourceId 时链接回本模块（DLK），对应 ImGui Link.IsSelfLinked
