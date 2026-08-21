@@ -90,10 +90,9 @@ Item {
             var w = 0
             if (cc.kind === "input" || cc.kind === "int") w = root.fontBody * 12
             else if (cc.kind === "bool") w = root.fontBody * 1.4 + 4
-            else if (cc.kind === "link") w = root.fontSmall * 1.5 + 6  // 分量连线节点（LinkNodePoint）
             else if (cc.kind === "sep") w = 2
             else if (cc.kind === "text") w = (cc.text ? cc.text.length * root.fontBody * 0.6 : 0)
-            else w = 0  // samel 无宽
+            else w = 0  // samel / link（link 靠右对齐，不占用模块宽）无宽
             row += (row > 0 ? 4 : 0) + w  // 分量间 4px 间距
         }
         best = Math.max(best, row)
@@ -103,6 +102,20 @@ Item {
     onKeyTypeChanged: root.recomputeIifNaturalWidth()
     onVisibleChanged: if (root.visible) root.recomputeIifNaturalWidth()
     Component.onCompleted: root.recomputeIifNaturalWidth()
+
+    // 拆分 IIF 分量：链接节点（link，靠右各自一行）与其余分量（文本/输入框/布尔/分隔，左侧水平流）
+    // 依赖 root.iifRevision：分量数据写回后递增，强制重新求值两处 Repeater 的 model。
+    // 返回数组供 Repeater.model 绑定；getLink=true 取链接节点，false 取其余分量。
+    function iifCompsByKind(getLink) {
+        if (!root.lineModel || root.rowIndex < 0) return []
+        var all = root.lineModel.iifComponents(root.rowIndex)
+        var out = []
+        for (var i = 0; i < all.length; i++) {
+            var isLink = all[i].kind === "link"
+            if ((getLink && isLink) || (!getLink && !isLink)) out.push(all[i])
+        }
+        return out
+    }
 
     // 行级增行按钮 + 右键菜单临时态（对应 ImGui WorkSpaceLine 多个会话级标志）
     // isMultiple：InputType.Multiple（"+" 增行按钮显示条件）
@@ -117,7 +130,10 @@ Item {
     property bool isDragging: false
 
     // 行高随字体等比缩放（fontBody 已按 ratio 缩放）
-    height: root.fontBody * 2
+    // IIF 行：多个链接分量靠右各自堆叠一行时需加高以容纳整列（iifEdit 为 Column 递归高度）
+    height: (root.isInputMode && root.keyType === 2 && root.lineModel)
+            ? Math.max(root.fontBody * 2, root.iifEdit.height)
+            : root.fontBody * 2
 
     // 布局完成后回写（解决 Component.onCompleted 时布局未完成导致 LastCenter=0）
     onWidthChanged: updateLinkNodeCenter()
@@ -358,7 +374,7 @@ Item {
     // ===== IIF 多分量编辑器（对应 ImGui IBG_InputForm 多分量渲染, IBG_InputType.cpp:149-245） =====
     // IIF 行 Input 态按分量渲染为 文本/输入框/布尔勾框/分隔/换行 等核心分量的水平流
     // 分量描述由 SectionLineModel::iifComponents 导出；输入分量编辑经 setIifComponentValue 写回
-    Flow {
+    Column {
         id: iifEdit
         visible: root.isInputMode && root.keyType === 2
         anchors.left: onShowLabel.right
@@ -368,75 +384,145 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 4
 
-        Repeater {
-            model: root.lineModel && root.iifRevision >= 0 ? root.lineModel.iifComponents(root.rowIndex) : []
+        // ---- 其余分量（文本/输入框/布尔勾框/分隔/换行）：左侧水平流（对应 IBG_InputType.cpp:149-245）----
+        Flow {
+            id: iifOtherFlow
+            width: iifEdit.width
+            spacing: 4
+            visible: (root.keyType === 2 && root.iifRevision >= 0) && root.iifCompsByKind(false).length > 0
+            // visible 依赖 length 使 Flow 随数据变化折叠；model 用同一函数（各 kind 已排除链接）
+            Repeater {
+                model: (root.keyType === 2 && root.iifRevision >= 0) ? root.iifCompsByKind(false) : []
+                // 其余分量不含 link，kind 分支与整行 IIF 渲染一致
+                Item {
+                    id: iicO
+                    property var cc: modelData
+                    // newl 全宽占位强制换行；input/int 固定宽；text 内容宽；sep 竖线宽；bool 固定宽
+                    width: cc.kind === "newl" ? (iifOtherFlow.width - iifOtherFlow.spacing)
+                         : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 12
+                         : (cc.kind === "bool") ? (root.fontBody * 1.4 + 4)
+                         : cc.kind === "sep" ? 2
+                         : cc.kind === "text" ? txtTxtO.implicitWidth
+                         : 0
+                    height: (cc.kind === "newl" || cc.kind === "samel") ? 0
+                          : (cc.kind === "sep") ? root.fontBody * 1.2
+                          : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 2  // 与 string 输入框同高
+                          : root.fontBody * 1.5
 
-            Item {
-                id: iic
-                property var cc: modelData
-                // newl 全宽占位强制换行；input/int 固定宽；text 内容宽；sep 竖线宽；samel/bool 固定宽
-                width: cc.kind === "newl" ? (iifEdit.width - iifEdit.spacing)
-                     : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 12
-                     : (cc.kind === "bool" || cc.kind === "link") ? (root.fontBody * 1.4 + 4)
-                     : cc.kind === "sep" ? 2
-                     : cc.kind === "text" ? txtTxt.implicitWidth
-                     : 0
-                height: (cc.kind === "newl" || cc.kind === "samel") ? 0
-                      : (cc.kind === "sep") ? root.fontBody * 1.2
-                      : (cc.kind === "input" || cc.kind === "int") ? root.fontBody * 2  // 与 string 输入框同高
-                      : root.fontBody * 1.5
-
-                // 静态文本分量（PureText / LocalizedText / Setter_String）
-                Text {
-                    id: txtTxt
-                    visible: cc.kind === "text"
-                    text: cc.text || ""
-                    color: "#c586c0"
-                    font.pixelSize: root.fontBody
-                    elide: Text.ElideRight
-                    width: visible ? implicitWidth : 0
-                }
-
-                // 布尔勾选框（点击翻转，写回 IIS_Bool）
-                Rectangle {
-                    id: iifBoolBox
-                    visible: cc.kind === "bool"
-                    width: parent.width
-                    height: parent.height
-                    anchors.centerIn: parent
-                    radius: 3
-                    color: iifBoolMA.containsMouse ? "#3a3a3a" : "#1e1e1e"
-                    border.color: root.boolTrue(cc.text) ? "#007acc" : "#5a5a5a"
-                    border.width: 1
+                    // 静态文本分量（PureText / LocalizedText / Setter_String）
                     Text {
-                        visible: root.boolTrue(cc.text)
-                        anchors.centerIn: parent
-                        text: "✓"
-                        color: "#4ec9b0"
+                        id: txtTxtO
+                        visible: cc.kind === "text"
+                        text: cc.text || ""
+                        color: "#c586c0"
                         font.pixelSize: root.fontBody
-                        font.bold: true
+                        elide: Text.ElideRight
+                        width: visible ? implicitWidth : 0
                     }
-                    MouseArea {
-                        id: iifBoolMA
+
+                    // 布尔勾选框（点击翻转，写回 IIS_Bool）
+                    Rectangle {
+                        id: iifBoolBoxO
+                        visible: cc.kind === "bool"
+                        width: parent.width
+                        height: parent.height
+                        anchors.centerIn: parent
+                        radius: 3
+                        color: iifBoolMAO.containsMouse ? "#3a3a3a" : "#1e1e1e"
+                        border.color: root.boolTrue(cc.text) ? "#007acc" : "#5a5a5a"
+                        border.width: 1
+                        Text {
+                            visible: root.boolTrue(cc.text)
+                            anchors.centerIn: parent
+                            text: "✓"
+                            color: "#4ec9b0"
+                            font.pixelSize: root.fontBody
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: iifBoolMAO
+                            anchors.fill: parent
+                            preventStealing: true  // 阻止穿透到 nodeMouseArea（避免误选中模块）
+                            hoverEnabled: true
+                            onClicked: {
+                                if (root.lineModel)
+                                    root.lineModel.setIifComponentValueBool(
+                                                root.rowIndex, cc.compIdx, !root.boolTrue(cc.text))
+                            }
+                        }
+                    }
+
+                    // 分隔竖线
+                    Rectangle {
+                        visible: cc.kind === "sep"
+                        width: 1
+                        height: parent.height
+                        anchors.centerIn: parent
+                        color: "#5a5a5a"
+                    }
+
+                    // 输入/整数分量（可编辑文本框），编辑完成后写回
+                    TextField {
+                        id: iifFldO
+                        visible: cc.kind === "input" || cc.kind === "int"
                         anchors.fill: parent
-                        preventStealing: true  // 阻止穿透到 nodeMouseArea（避免误选中模块）
-                        hoverEnabled: true
-                        onClicked: {
+                        anchors.topMargin: 0
+                        anchors.bottomMargin: 0
+                        text: cc.text || ""
+                        font.pixelSize: root.fontBody
+                        color: "#ce9178"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                        selectByMouse: true
+                        background: Rectangle {
+                            color: "#1e1e1e"  // 与普通 String 输入框样式一致（仅尺寸紧凑）
+                            border.color: "#007acc"
+                            border.width: 1
+                            radius: 2
+                        }
+                        onEditingFinished: {
+                            console.log("[IIF-DIAG] editingFinished row=" + root.rowIndex
+                                        + " compIdx=" + cc.compIdx + " text='" + text + "'")
                             if (root.lineModel)
-                                root.lineModel.setIifComponentValueBool(
-                                            root.rowIndex, cc.compIdx, !root.boolTrue(cc.text))
+                                root.lineModel.setIifComponentValue(root.rowIndex, cc.compIdx, text)
+                        }
+                    }
+
+                    // 分量悬停提示（对应 imgui IBR_ToolTip(Hint.Long)）；链接分量由下方 LinkNodePoint 自持
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        onContainsMouseChanged: {
+                            if (containsMouse) {
+                                if (!cc.hint || cc.hint.length === 0) return
+                                var g = parent.mapToGlobal(0, parent.height + 2)
+                                appToolTip.show(cc.hint, g.x, g.y)
+                            } else {
+                                appToolTip.hide()
+                            }
                         }
                     }
                 }
+            }
+        }
 
-                // Link 状态分量（Type:"Link"）：渲染为真实连线节点 LinkNodePoint（可拖拽建链/断链/悬停 Hint）
-                // 对应 imgui RenderIICInputText Link 分支 → IBR_LinkNode::RenderUI_Node
-                // 坐标经 LinkNodePoint.iifNode → setLinkNodeCenterAt(compIdx) 回写分量端点
+        // ---- 链接分量：各自独立一行，节点靠模块右端堆叠（对应 imgui RenderUI_Node 每行右端 RadioButton）----
+        Repeater {
+            id: iifLinkRows
+            model: (root.keyType === 2 && root.iifRevision >= 0) ? root.iifCompsByKind(true) : []
+            delegate: Item {
+                id: iifLinkRow
+                property var cc: modelData
+                width: iifEdit.width
+                height: root.fontBody * 2
+
                 LinkNodePoint {
                     id: iifLinkNode
-                    visible: cc.kind === "link"
                     flowNode: true
-                    anchors.centerIn: parent
+                    // 靠模块右端（对应行级 LinkNodePoint 的 x 公式：parent.width - 1.5*fontSmall）
+                    x: parent.width - width - 4
+                    anchors.verticalCenter: parent.verticalCenter
                     sectionData: root.sectionData
                     lineModel: root.lineModel
                     rowIndex: root.rowIndex
@@ -456,60 +542,6 @@ Item {
                     // 双击切回 Input 态（对应 RenderUI_Node 双击 Status.InputMethod=Input）
                     onDoubleClicked: {
                         if (root.lineModel) root.lineModel.toggleInputMode(root.rowIndex)
-                    }
-                }
-
-                // 分隔竖线
-                Rectangle {
-                    visible: cc.kind === "sep"
-                    width: 1
-                    height: parent.height
-                    anchors.centerIn: parent
-                    color: "#5a5a5a"
-                }
-
-                // 输入/整数分量（可编辑文本框），编辑完成后写回
-                TextField {
-                    id: iifFld
-                    visible: cc.kind === "input" || cc.kind === "int"
-                    anchors.fill: parent
-                    anchors.topMargin: 0
-                    anchors.bottomMargin: 0
-                    text: cc.text || ""
-                    font.pixelSize: root.fontBody
-                    color: "#ce9178"
-                    horizontalAlignment: Text.AlignLeft
-                    verticalAlignment: Text.AlignVCenter
-                    selectByMouse: true
-                    background: Rectangle {
-                        color: "#1e1e1e"  // 与普通 String 输入框样式一致（仅尺寸紧凑）
-                        border.color: "#007acc"
-                        border.width: 1
-                        radius: 2
-                    }
-                    onEditingFinished: {
-                        console.log("[IIF-DIAG] editingFinished row=" + root.rowIndex
-                                    + " compIdx=" + cc.compIdx + " text='" + text + "'")
-                        if (root.lineModel)
-                            root.lineModel.setIifComponentValue(root.rowIndex, cc.compIdx, text)
-                    }
-                }
-
-                // IIF 分量悬停提示：显示该分量的 Hint.Long（对齐 imgui IBR_ToolTip(Hint.Long)）
-                // acceptedButtons NoButton → 不拦截点击，输入框/勾选框仍可正常交互
-                // Link 分量由上方 LinkNodePoint 自持悬停 Hint，此处跳过避免冲突
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
-                    hoverEnabled: true
-                    onContainsMouseChanged: {
-                        if (!containsMouse || cc.kind === "link") {
-                            if (!containsMouse) appToolTip.hide()
-                            return
-                        }
-                        if (!cc.hint || cc.hint.length === 0) return
-                        var g = parent.mapToGlobal(0, parent.height + 2)
-                        appToolTip.show(cc.hint, g.x, g.y)
                     }
                 }
             }
