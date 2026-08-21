@@ -247,6 +247,15 @@ Dialog {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // DescLong 悬停提示（统一用全局 appToolTip，对应 IBR_ToolTip(pModule->DescLong)）
+                        onContainsMouseChanged: {
+                            if (delegateMouse.containsMouse && model.descLong && model.descLong.length > 0) {
+                                var g = delegateMouse.mapToGlobal(delegateMouse.width / 2, delegateMouse.height + 4)
+                                appToolTip.show(model.descLong, g.x, g.y)
+                            } else {
+                                appToolTip.hide()
+                            }
+                        }
                         onClicked: {
                             // 对应 RenderModuleAltSelect 中点击添加模块
                             if (model.moduleKey && model.moduleKey.length > 0) {
@@ -254,11 +263,6 @@ Dialog {
                             }
                         }
                     }
-
-                    // Tooltip 显示 DescLong（对应 IBR_ToolTip(pModule->DescLong)）
-                    ToolTip.visible: delegateMouse.containsMouse && model.descLong && model.descLong.length > 0
-                    ToolTip.text: model.descLong || ""
-                    ToolTip.delay: 0  // 立即显示（统一管理）
                 }
             }
         }

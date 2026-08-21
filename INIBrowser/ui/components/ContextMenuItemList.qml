@@ -115,6 +115,15 @@ Item {
                     enabled: row.rowEnabled
                     onEntered: root.folderHoverChanged(false)
                     onExited: root.hoverLeft()
+                    // 模块描述悬停提示（统一用全局 appToolTip，对应 ImGui IBR_ModuleTree DescLong）
+                    onContainsMouseChanged: {
+                        if (itemMouse.containsMouse && modelData && modelData.desc) {
+                            var g = itemMouse.mapToGlobal(itemMouse.width / 2, itemMouse.height + 4)
+                            appToolTip.show(modelData.desc, g.x, g.y)
+                        } else {
+                            appToolTip.hide()
+                        }
+                    }
                     onClicked: {
                         if (modelData && modelData.checkable) {
                             // checkable：只切换勾选，不关闭菜单（对齐 ImGui RadioButton UseLink）
@@ -124,11 +133,6 @@ Item {
                         }
                     }
                 }
-                // 模块描述 ToolTip（对应 ImGui IBR_ModuleTree 模块项 DescLong 悬停）
-                ToolTip.visible: !!row.isItem && !!modelData && !!modelData.desc
-                                 && itemMouse.containsMouse
-                ToolTip.text: (modelData && modelData.desc) || ""
-                ToolTip.delay: 0  // 立即显示（统一管理）
 
                 // ===== 子菜单项 =====
                 Rectangle {

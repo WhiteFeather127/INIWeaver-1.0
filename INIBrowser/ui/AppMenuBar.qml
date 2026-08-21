@@ -75,22 +75,28 @@ Rectangle {
                     menuController.activeMenu = modelData.menuId
                 }
 
-                // 快捷键 ToolTip（对应 ImGui 菜单按钮的 Alt+X 快捷键提示）
-                ToolTip.text: {
+                // 快捷键提示（统一用全局悬停提示框 appToolTip，暗色方角立即显示，对应 ImGui Alt+X 提示）
+                ToolTip.text: ""
+                ToolTip.visible: false
+                onHoveredChanged: {
+                    var txt = ""
                     switch (modelData.menuId) {
-                        case 0: return (i18n.rev, i18n.tr("GUI_MenuItem_File") + " (Alt+F)")
-                        case 1: return (i18n.rev, i18n.tr("GUI_MenuItem_Modules") + " (Alt+M)")
-                        case 2: return (i18n.rev, i18n.tr("GUI_MenuItem_View") + " (Alt+V)")
-                        case 3: return (i18n.rev, i18n.tr("GUI_MenuItem_List") + " (Alt+L)")
-                        case 4: return (i18n.rev, i18n.tr("GUI_MenuItem_Edit") + " (Alt+E)")
-                        case 5: return (i18n.rev, i18n.tr("GUI_MenuItem_Setting") + " (Alt+S)")
-                        case 6: return (i18n.rev, i18n.tr("GUI_MenuItem_About") + " (Alt+A)")
-                        case 7: return (i18n.rev, i18n.tr("GUI_MenuItem_Debug") + " (Alt+D)")
-                        default: return ""
+                        case 0: txt = (i18n.rev, i18n.tr("GUI_MenuItem_File") + " (Alt+F)"); break
+                        case 1: txt = (i18n.rev, i18n.tr("GUI_MenuItem_Modules") + " (Alt+M)"); break
+                        case 2: txt = (i18n.rev, i18n.tr("GUI_MenuItem_View") + " (Alt+V)"); break
+                        case 3: txt = (i18n.rev, i18n.tr("GUI_MenuItem_List") + " (Alt+L)"); break
+                        case 4: txt = (i18n.rev, i18n.tr("GUI_MenuItem_Edit") + " (Alt+E)"); break
+                        case 5: txt = (i18n.rev, i18n.tr("GUI_MenuItem_Setting") + " (Alt+S)"); break
+                        case 6: txt = (i18n.rev, i18n.tr("GUI_MenuItem_About") + " (Alt+A)"); break
+                        case 7: txt = (i18n.rev, i18n.tr("GUI_MenuItem_Debug") + " (Alt+D)"); break
+                    }
+                    if (hovered) {
+                        var g = btn.mapToGlobal(btn.width / 2, btn.height + 4)
+                        appToolTip.show(txt, g.x, g.y)
+                    } else {
+                        appToolTip.hide()
                     }
                 }
-                ToolTip.visible: hovered
-                ToolTip.delay: 0  // 立即显示（统一管理）
 
                 background: Rectangle {
                     color: btn.checked ? "#007acc"

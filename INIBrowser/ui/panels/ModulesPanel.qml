@@ -203,11 +203,12 @@ Item {
                     }
 
                     onContainsMouseChanged: {
-                        // Tooltip 对应 ImGui SetTooltip（仅模块节点有 DescLong）
+                        // DescLong 悬停提示（统一用全局 appToolTip，对应 ImGui SetTooltip）
                         if (containsMouse && !isFolder && descLong.length > 0) {
-                            ToolTip.show(descLong, 5000)
+                            var g = mapToGlobal(width / 2, height + 4)
+                            appToolTip.show(descLong, g.x, g.y)
                         } else {
-                            ToolTip.hide()
+                            appToolTip.hide()
                         }
                     }
 

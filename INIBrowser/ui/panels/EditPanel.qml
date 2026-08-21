@@ -233,11 +233,17 @@ Item {
                                     color: modelData.missing ? "#f48771" : "#e0e0e0"
                                     font.pixelSize: 13
                                     elide: Text.ElideRight
-                                    ToolTip.text: modelData.hint || ""
-                                    ToolTip.visible: hoverHandler.hovered && (modelData.hint || "").length > 0
-                                    ToolTip.delay: 0  // 立即显示（统一管理）
                                     HoverHandler {
                                         id: hoverHandler
+                                        // 悬停提示（统一用全局 appToolTip，暗色方角立即显示）
+                                        onHoveredChanged: {
+                                            if (hovered && modelData.hint && modelData.hint.length > 0) {
+                                                var g = parent.mapToGlobal(parent.width / 2, parent.height + 4)
+                                                appToolTip.show(modelData.hint, g.x, g.y)
+                                            } else {
+                                                appToolTip.hide()
+                                            }
+                                        }
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -270,9 +276,15 @@ Item {
                                         radius: 2
                                     }
                                     onEditingFinished: editPanelController.setLineValue(modelData.keyName, text)
-                                    ToolTip.text: modelData.hint || ""
-                                    ToolTip.visible: hovered && (modelData.hint || "").length > 0
-                                    ToolTip.delay: 0  // 立即显示（统一管理）
+                                    // 悬停提示（统一用全局 appToolTip，暗色方角立即显示）
+                                    onHoveredChanged: {
+                                        if (hovered && modelData.hint && modelData.hint.length > 0) {
+                                            var g = mapToGlobal(width / 2, height + 4)
+                                            appToolTip.show(modelData.hint, g.x, g.y)
+                                        } else {
+                                            appToolTip.hide()
+                                        }
+                                    }
                                 }
                             }
 

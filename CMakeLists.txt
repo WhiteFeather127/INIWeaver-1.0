@@ -163,6 +163,7 @@ qt_add_qml_module(INIWeaver
         INIBrowser/ui/components/ContextMenuHost.qml
         INIBrowser/ui/components/ContextMenuItemList.qml
         INIBrowser/ui/components/ContextMenuSubLevel.qml
+        INIBrowser/ui/components/AppToolTip.qml
         INIBrowser/ui/dialogs/ConfirmDialog.qml
         INIBrowser/ui/dialogs/ConfirmDialog3.qml
         INIBrowser/ui/dialogs/ExportDialog.qml

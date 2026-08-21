@@ -56,35 +56,14 @@ ApplicationWindow {
         }
     }
 
-    // ===== 全局统一浮动提示框样式（统一管理所有 ToolTip） =====
-    // Qt 的 ToolTip.visible/.text/.show() 全部共享同一个全局 ToolTip.popup，
-    // 在根处一次定制其 background/contentItem 即可统一所有原生浮动框为暗色方角 + 固定字体
-    // （对应 imgui IBR_ToolTip 扁平暗色提示；字体不随工作区缩放变化）
-    Component {
-        id: _globalTipBg
-        Rectangle {
-            anchors.fill: parent
-            color: "#e6242424"
-            radius: 0  // 方角（对齐 imgui 扁平提示）
-            border.color: "#3c3c3c"
-            border.width: 1
-        }
-    }
-    Component {
-        id: _globalTipContent
-        Text {
-            // 固定字体：不乘 ratio，随窗口分辨率而非画布缩放
-            font.pixelSize: 12
-            font.family: window.font.family
-            color: "#d4d4d4"
-            wrapMode: Text.Wrap
-            padding: 6
-            text: ToolTip.popup.text
-        }
-    }
-    Component.onCompleted: {
-        ToolTip.popup.background = _globalTipBg.createObject(ToolTip.popup)
-        ToolTip.popup.contentItem = _globalTipContent.createObject(ToolTip.popup)
+    // ===== 全局统一悬停提示框（统一管理所有"鼠标放上"提示） =====
+    // Qt 原生 ToolTip.popup 定制在此 Qt 版本不可靠（popup 在 onCompleted 为 undefined，
+    // 且替换 contentItem 后不再自动同步 text）。改用与 ContextMenuHost 同架构的
+    // 自定义 AppToolTip Popup 单例：暗色方角 + 固定字号，挂 Overlay.overlay 全局可见，
+    // 各 hover 源统一调用 appToolTip.show/hide()。
+    AppToolTip {
+        id: appToolTip
+        parent: Overlay.overlay
     }
 
     ColumnLayout {
