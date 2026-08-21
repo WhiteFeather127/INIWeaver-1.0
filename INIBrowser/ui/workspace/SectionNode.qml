@@ -245,10 +245,11 @@ Item {
                 width: root.fontSmall * 1.5
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
-                // Ignore → 白色半透明（TempWbg）；否则用白色边框圆点（标题栏已是注册表颜色）
-                color: isIgnored ? "#80ffffff" : "#e0e0e0"
-                border.color: "#1e1e1e"
-                border.width: 1
+                // 颜色（对齐 imgui）：非 Ignore 用默认 CheckMark（深色主题 0.26/0.59/0.98 ≈ #4296fa，
+                // imgui_draw.cpp:213）；Ignore 用 TempWbg 白色（对应 IBR_SectionData.cpp:743/744）
+                color: isIgnored ? "#80ffffff" : "#4296fa"
+                // 对齐 imgui：节点为低一位图层的半透明圆，无边框（半透明填充 = 单次绘制，开销最小）
+                opacity: 0.6
                 visible: !isComment
 
                 // 阶段 1/3：坐标回写（对应 ImGui HeadLineRN → Session.LastCenter）

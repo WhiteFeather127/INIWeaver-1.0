@@ -50,10 +50,10 @@ Item {
         // IsInherit → RoundedSquare（小圆角矩形）；其他 → Circle（全圆）
         radius: root.isInherit ? 2 : (width / 2)
         color: root.linkCol
-        border.color: "#1e1e1e"
-        border.width: 1
-        // 空链接时半透明提示（对应 IllegalLineColor 红色由 linkCol 已传入）
-        opacity: root.isEmpty ? 0.85 : 1.0
+        // 对齐 imgui：节点为低一位图层的半透明圆，无边框。
+        // 半透明填充 = 单次填充绘制，无边框开销最小。
+        // 空链接更淡提示（对应 IllegalLineColor 红色由 linkCol 已传入）
+        opacity: root.isEmpty ? 0.5 : 0.6
     }
 
     // ===== 拖拽代理（对应 ImGui BeginDragDropSource + SetDragDropPayload("IBR_LineDrag")） =====
