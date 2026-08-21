@@ -254,8 +254,10 @@ Item {
                 // 上层：不透明颜色层（对齐 imgui）：非 Ignore 用默认 CheckMark
                 //（深色主题 0.26/0.59/0.98 ≈ #4296fa，imgui_draw.cpp:213）；Ignore 用 TempWbg 白色
                 //（对应 IBR_SectionData.cpp:743/744）
+                // 显式按父中心计算 x/y 居中，保证与底层灰色圆严格同心（不做 anchors 子像素近似）
                 Rectangle {
-                    anchors.centerIn: parent
+                    x: (parent.width - width) / 2
+                    y: (parent.height - height) / 2
                     width: parent.width * 0.7
                     height: width
                     radius: width / 2  // Circle 样式

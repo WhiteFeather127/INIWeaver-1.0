@@ -56,8 +56,10 @@ Item {
     }
     Rectangle {
         // 上层：不透明颜色层（键行用 linkCol，随 AdjustNodeCol 的业务色）
+        // 显式按父中心计算 x/y 居中，保证与底层灰色圆严格同心（不做 anchors 子像素近似）
         id: nodeCircle
-        anchors.centerIn: parent
+        x: (parent.width - width) / 2
+        y: (parent.height - height) / 2
         width: parent.width * 0.7
         height: width
         radius: root.isInherit ? 2 : (width / 2)
