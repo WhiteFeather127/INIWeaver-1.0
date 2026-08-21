@@ -103,15 +103,20 @@ Item {
             }
         }
 
-        ToolTip.visible: onShowLabelMouse.containsMouse && root.descLong.length > 0
-        ToolTip.text: root.descLong
-        ToolTip.delay: 500
-
+        // 长注释提示：用自定义暗色方角浮动框（workspaceView.hoverTip），鼠标放上立即显示，无延迟
+        //（对应 imgui IBR_ToolTip，而非原生 ToolTip）
         MouseArea {
             id: onShowLabelMouse
             anchors.fill: parent
             acceptedButtons: Qt.NoButton
             hoverEnabled: true
+            onEntered: {
+                if (root.descLong.length === 0) return
+                // 提示落在标签下方，映射到 workspace 坐标
+                var p = onShowLabel.mapToItem(workspaceView, 0, onShowLabel.height + 4)
+                workspaceView.hoverTip.showTip(root.descLong, p.x, p.y)
+            }
+            onExited: workspaceView.hoverTip.hideTip()
         }
     }
 

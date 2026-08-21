@@ -462,7 +462,10 @@ Item {
             anchors.fill: parent
             color: "#e6262626"
             radius: 3
-            border.color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
+            // 未命中模块时（仅显示源标签）用白框；命中模块后按目标状态色（绿/红）
+            border.color: workspaceController.dragTargetSectionId
+                         ? (workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050")
+                         : "#ffffff"
             border.width: 1
         }
         Column {
@@ -495,6 +498,45 @@ Item {
                     font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
                 }
             }
+        }
+    }
+
+    // ===== 长注释/悬停提示（对应 imgui IBR_ToolTip；自定义暗色方角，立即显示，非原生 ToolTip） =====
+    // 放在 workspace 最上层（z=200），由各 hover 源（键行 onShowLabel 等）showTip/hideTip 驱动
+    Item {
+        id: hoverTip
+        x: -1000
+        y: -1000
+        z: 200
+        visible: false
+        width: hoverTipText.implicitWidth + 10
+        height: hoverTipText.implicitHeight + 6
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#e6242424"
+            radius: 0  // 方角（对齐 imgui 扁平提示）
+            border.color: "#3c3c3c"
+            border.width: 1
+        }
+        Text {
+            id: hoverTipText
+            anchors.fill: parent
+            anchors.margins: 3
+            color: "#d4d4d4"
+            font.pixelSize: Math.max(1, Math.round(12 * workspaceController.ratio))
+            wrapMode: Text.Wrap
+        }
+        function showTip(text, wx, wy) {
+            hoverTipText.text = text
+            x = wx
+            y = wy
+            visible = true
+        }
+        function hideTip() {
+            visible = false
+            x = -1000
+            y = -1000
         }
     }
 }
