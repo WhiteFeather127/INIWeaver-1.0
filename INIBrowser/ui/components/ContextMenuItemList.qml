@@ -128,7 +128,7 @@ Item {
                 ToolTip.visible: !!row.isItem && !!modelData && !!modelData.desc
                                  && itemMouse.containsMouse
                 ToolTip.text: (modelData && modelData.desc) || ""
-                ToolTip.delay: 500
+                ToolTip.delay: 0  // 立即显示（统一管理）
 
                 // ===== 子菜单项 =====
                 Rectangle {

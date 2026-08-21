@@ -482,7 +482,8 @@ Item {
                 visible: workspaceController.dragSourceText.length > 0
                 text: workspaceController.dragSourceText
                 color: "#d4d4d4"
-                font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+                // 固定字体：不随工作区缩放变化（与全局 ToolTip 统一）
+                font.pixelSize: 10
             }
             // 目标命中行（对勾/叉 + 目标文字），仅悬停在模块上时显示
             Row {
@@ -492,13 +493,13 @@ Item {
                 Text {
                     text: workspaceController.dragTargetColor === "#4fc3f7" ? "✓" : "✕"
                     color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
-                    font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+                    font.pixelSize: 10
                 }
                 // 预览文本（"链接到: Xxx -> Yyy" / "无效链接" / "类型不匹配" 等）
                 Text {
                     text: workspaceController.dragTargetText
                     color: workspaceController.dragTargetColor === "#4fc3f7" ? "#4fc3f7" : "#ff5050"
-                    font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
+                    font.pixelSize: 10
                 }
             }
         }
@@ -528,7 +529,8 @@ Item {
             anchors.topMargin: 3
             anchors.leftMargin: 3
             color: "#d4d4d4"
-            font.pixelSize: Math.max(1, Math.round(12 * workspaceController.ratio))
+            // 固定字体：不随工作区缩放变化（与全局 ToolTip 统一）
+            font.pixelSize: 12
             wrapMode: Text.Wrap
         }
         function showTip(text, wx, wy) {

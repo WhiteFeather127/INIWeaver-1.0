@@ -258,7 +258,7 @@ Dialog {
                     // Tooltip 显示 DescLong（对应 IBR_ToolTip(pModule->DescLong)）
                     ToolTip.visible: delegateMouse.containsMouse && model.descLong && model.descLong.length > 0
                     ToolTip.text: model.descLong || ""
-                    ToolTip.delay: 500
+                    ToolTip.delay: 0  // 立即显示（统一管理）
                 }
             }
         }

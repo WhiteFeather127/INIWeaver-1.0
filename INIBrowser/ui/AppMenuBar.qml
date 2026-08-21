@@ -90,7 +90,7 @@ Rectangle {
                     }
                 }
                 ToolTip.visible: hovered
-                ToolTip.delay: 500
+                ToolTip.delay: 0  // 立即显示（统一管理）
 
                 background: Rectangle {
                     color: btn.checked ? "#007acc"

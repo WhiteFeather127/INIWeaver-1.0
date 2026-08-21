@@ -86,7 +86,7 @@ Item {
     // 显示：ShowReg ? TargetValue 列表 : DisplayName 列表，逗号分隔
     ToolTip.visible: hoverArea.containsMouse && !root.isEmpty && tipText.length > 0
     ToolTip.text: tipText
-    ToolTip.delay: 300
+    ToolTip.delay: 0  // 立即显示（统一管理）
 
     readonly property string tipText: {
         if (root.isEmpty || root.links.length === 0) return ""

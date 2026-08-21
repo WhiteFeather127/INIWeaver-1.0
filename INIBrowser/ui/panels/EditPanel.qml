@@ -235,7 +235,7 @@ Item {
                                     elide: Text.ElideRight
                                     ToolTip.text: modelData.hint || ""
                                     ToolTip.visible: hoverHandler.hovered && (modelData.hint || "").length > 0
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: 0  // 立即显示（统一管理）
                                     HoverHandler {
                                         id: hoverHandler
                                     }
@@ -272,7 +272,7 @@ Item {
                                     onEditingFinished: editPanelController.setLineValue(modelData.keyName, text)
                                     ToolTip.text: modelData.hint || ""
                                     ToolTip.visible: hovered && (modelData.hint || "").length > 0
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: 0  // 立即显示（统一管理）
                                 }
                             }
 

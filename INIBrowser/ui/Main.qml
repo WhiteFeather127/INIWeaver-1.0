@@ -56,6 +56,37 @@ ApplicationWindow {
         }
     }
 
+    // ===== 全局统一浮动提示框样式（统一管理所有 ToolTip） =====
+    // Qt 的 ToolTip.visible/.text/.show() 全部共享同一个全局 ToolTip.popup，
+    // 在根处一次定制其 background/contentItem 即可统一所有原生浮动框为暗色方角 + 固定字体
+    // （对应 imgui IBR_ToolTip 扁平暗色提示；字体不随工作区缩放变化）
+    Component {
+        id: _globalTipBg
+        Rectangle {
+            anchors.fill: parent
+            color: "#e6242424"
+            radius: 0  // 方角（对齐 imgui 扁平提示）
+            border.color: "#3c3c3c"
+            border.width: 1
+        }
+    }
+    Component {
+        id: _globalTipContent
+        Text {
+            // 固定字体：不乘 ratio，随窗口分辨率而非画布缩放
+            font.pixelSize: 12
+            font.family: window.font.family
+            color: "#d4d4d4"
+            wrapMode: Text.Wrap
+            padding: 6
+            text: ToolTip.popup.text
+        }
+    }
+    Component.onCompleted: {
+        ToolTip.popup.background = _globalTipBg.createObject(ToolTip.popup)
+        ToolTip.popup.contentItem = _globalTipContent.createObject(ToolTip.popup)
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
