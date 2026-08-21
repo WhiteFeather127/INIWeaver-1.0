@@ -67,6 +67,9 @@ Canvas {
         // 修复：多选拖动开始/结束时 massDragging 翻转，sectionMap 的 dragging 标志需重算
         //（buildSectionMap 改用 isSectionSelected 实时查询，缓存失效后才会重新查询）
         function onMassDraggingChanged() { cachedSectionMap = null; requestPaint() }
+        // 选中态变化：focusedSectionId 的 NOTIFY 绑在 sectionsChanged 上，单选路径不发射，
+        // 属性值不会刷新。改用选中态实时判断连线高亮，选中变化时重绘。
+        function onSelectedRevisionChanged() { requestPaint() }
     }
 
     // 缩放换算：把端点表快照坐标（基准 ratio/eqCenter 下的屏幕坐标）换算到当前视图。
@@ -279,9 +282,13 @@ Canvas {
 
             if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] onPaint link[" + i + "] srcSess=" + link.sourceSessionId + " destId=" + link.destId + " destKey=" + link.destKey + " pbPrecise=" + pbPrecise + " pa=" + pa.x + "," + pa.y + " pb=" + (pb ? (pb.x + "," + pb.y) : "null") + " dstDragging=" + (dstSec ? dstSec.dragging : "noSec") + " pbEp=" + (ep ? (ep.pbX + "," + ep.pbY + ",valid=" + ep.pbValid) : "noEp"))
 
-            // 颜色（对应 ImGui line 1474-1487）
+            // 颜色（对应 ImGui IBR_WorkSpace.cpp:1497-1504）
+            // ImGui: CurSection.ID == Rsec.ID(目标) || CurSection.ID == SrcModuleID(源) → FocusLineColor
+            // 用选中态实时判断（对齐 CurSection.ID = 当前激活/选中模块），不依赖 focusedSectionId
+            // 快照属性（其 NOTIFY 绑 sectionsChanged，单选路径不刷新会导致 hightlight 停留旧值）
             var col = link.color;
-            var isFocused = (link.sourceId === focusedSectionId || link.destId === focusedSectionId);
+            var isFocused = workspaceController.isSectionSelected(link.sourceId)
+                            || workspaceController.isSectionSelected(link.destId);
             if (isFocused) {
                 col = "#ffffff";  // FocusLineColor（对齐 ImGui 深色主题 255,255,255 = 白，IBR_Misc.cpp:1032）
             } else if (!col || col === "#00000000") {
