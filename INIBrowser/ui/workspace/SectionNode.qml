@@ -442,6 +442,8 @@ Item {
                         keyName: model.lineKey
                         // D14：IICStatus 持久化绑定（从 model role 读取）
                         isInputMode: model.isInputMode
+                        keyType: model.keyType
+                        boolChecked: model.boolChecked
                         // 行级增行按钮 + 右键菜单 SpecialAccept + EditDesc
                         isMultiple: model.isMultiple
                         specialAccept: model.specialAccept

@@ -46,6 +46,8 @@ Item {
     // false=Link 态（显示 RadioButton），true=Input 态（显示文本框）
     // 由 SectionLineModel::rebuildEntries 从业务层 Data 读取，toggleInputMode 写回
     property bool isInputMode: false
+    property int keyType: 0  // 键输入类型：0=String, 1=Bool, 2=IIF
+    property bool boolChecked: false  // Bool 键当前布尔值（keyType==1 时有效）
 
     // 行级增行按钮 + 右键菜单临时态（对应 ImGui WorkSpaceLine 多个会话级标志）
     // isMultiple：InputType.Multiple（"+" 增行按钮显示条件）
@@ -216,7 +218,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.isInputMode
+        visible: root.isInputMode && root.keyType !== 1
         height: root.fontBody * 2
         // 绑定 exportValue：ImGui 每帧用 CurrentValue 重新渲染 InputText
         text: root.exportValue
@@ -257,6 +259,43 @@ Item {
             text = root.exportValue
             if (root.lineModel) {
                 root.lineModel.toggleInputMode(root.rowIndex)
+            }
+        }
+    }
+
+    // ===== Bool 键勾选框（对应 ImGui IIC_Bool 对话框切换，IBB_IniLine.cpp:477-488） =====
+    // Bool 行 Input 态显示勾选框而非文本框：勾取/取消即翻转值（StrBoolType 决定文本格式）
+    // 点击 → lineModel.toggleBoolValue 写回业务层并刷新
+    Rectangle {
+        id: boolEdit
+        visible: root.isInputMode && root.keyType === 1
+        anchors.left: onShowLabel.right
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.fontBody * 1.4 + 4
+        height: root.fontBody * 1.4 + 4
+        radius: 3
+        color: boolMA.containsMouse ? "#3a3a3a" : "#1e1e1e"
+        border.color: root.boolChecked ? "#007acc" : "#5a5a5a"
+        border.width: 1
+
+        // 勾标记
+        Text {
+            visible: root.boolChecked
+            anchors.centerIn: parent
+            text: "✓"
+            color: "#4ec9b0"
+            font.pixelSize: root.fontBody
+            font.bold: true
+        }
+
+        MouseArea {
+            id: boolMA
+            anchors.fill: parent
+            preventStealing: true  // 阻止点击穿透到 nodeMouseArea（避免误选中模块）
+            hoverEnabled: true
+            onClicked: {
+                if (root.lineModel) root.lineModel.toggleBoolValue(root.rowIndex)
             }
         }
     }

@@ -92,7 +92,7 @@ Rectangle {
                     }
                     if (hovered) {
                         var g = btn.mapToGlobal(btn.width / 2, btn.height + 4)
-                        appToolTip.show(txt, g.x, g.y)
+                        appToolTip.show(txt, g.x, g.y, undefined, "below")
                     } else {
                         appToolTip.hide()
                     }
@@ -117,6 +117,37 @@ Rectangle {
             }
         }
     }
+
+    // ===== 顶边栏菜单快捷键（对应 tooltip 中 Alt+X 提示，等同点击对应按钮切换面板） =====
+    // enabled 规则与顶边栏按钮一致：View/List 需项目打开，Edit 永禁，Debug 需 -debugmenu
+    function switchTopMenu(menuId) {
+        switch (menuId) {
+        case 0:
+        case 1:
+        case 5:
+        case 6:
+            menuController.activeMenu = menuId
+            break
+        case 2:
+        case 3:
+            if (projectController.isOpen) menuController.activeMenu = menuId
+            break
+        case 4:
+            if (menuController.canEdit) menuController.activeMenu = menuId
+            break
+        case 7:
+            if (menuController.debugMenuEnabled) menuController.activeMenu = menuId
+            break
+        }
+    }
+    Shortcut { sequence: "Alt+F"; onActivated: root.switchTopMenu(0) }
+    Shortcut { sequence: "Alt+M"; onActivated: root.switchTopMenu(1) }
+    Shortcut { sequence: "Alt+V"; onActivated: root.switchTopMenu(2) }
+    Shortcut { sequence: "Alt+L"; onActivated: root.switchTopMenu(3) }
+    Shortcut { sequence: "Alt+E"; onActivated: root.switchTopMenu(4) }
+    Shortcut { sequence: "Alt+S"; onActivated: root.switchTopMenu(5) }
+    Shortcut { sequence: "Alt+A"; onActivated: root.switchTopMenu(6) }
+    Shortcut { sequence: "Alt+D"; onActivated: root.switchTopMenu(7) }
 
     // 右侧标题信息（对应 MainStage.h:165-167 GUI_TopRightHint）
     // 格式：AppName V版本 平均FPS xx.x（对应 language.ini:197 GUI_TopRightHint=%s V%s 平均FPS %.1f）

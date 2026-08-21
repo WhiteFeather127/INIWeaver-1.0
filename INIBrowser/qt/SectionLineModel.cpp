@@ -67,6 +67,8 @@ QHash<int, QByteArray> SectionLineModel::roleNames() const
         {IsMultipleRole, "isMultiple"},
         {SpecialAcceptRole,"specialAccept"},
         {InputOnShowRole, "inputOnShow"},
+        {KeyTypeRole,    "keyType"},
+        {BoolCheckedRole, "boolChecked"},
     };
     return names;
 }
@@ -102,6 +104,8 @@ QVariant SectionLineModel::data(const QModelIndex &index, int role) const
     case IsMultipleRole:  return e.isMultiple;
     case SpecialAcceptRole: return m_specialAccept.value(e.keyId, false);
     case InputOnShowRole: return m_inputOnShow.value(e.keyId, false);
+    case KeyTypeRole:     return e.keyType;
+    case BoolCheckedRole: return e.boolChecked;
     }
     return {};
 }
@@ -300,6 +304,7 @@ void SectionLineModel::rebuildEntries()
                         auto strData = dataPtr->GetData<IBB_IniLine_Data_String>();
                         if (strData) {
                             e.isInputMode = !(strData->Status_Workspace.InputMethod == IICStatus::Link);
+                            e.keyType = 0;  // String
                         } else {
                             auto iifData = dataPtr->GetData<IBB_IniLine_Data_IIF>();
                             if (iifData && iifData->Value) {
@@ -309,9 +314,17 @@ void SectionLineModel::rebuildEntries()
                                 } else {
                                     e.isInputMode = !(dataPtr->FirstIsLink());
                                 }
+                                e.keyType = 2;  // IIF
                             } else {
                                 // Data_Bool 或未知类型：永远 Input 态
                                 e.isInputMode = true;
+                                auto bData = dataPtr->GetData<IBB_IniLine_Data_Bool>();
+                                if (bData) {
+                                    e.keyType = 1;
+                                    e.boolChecked = bData->Value;
+                                } else {
+                                    e.keyType = 0;  // 未知类型按 String 处理
+                                }
                             }
                         }
                     }
@@ -959,4 +972,37 @@ void SectionLineModel::addLine(int row)
         refresh();
         emit sectionDataChanged(m_sectionId);
     } });
+}
+
+// 键类型：Bool（勾选框）翻转值（对应 ImGui IIC_Bool 对话框切换）
+// 读取对应分量 Data_Bool 当前 bool，翻转后按 StrBoolType 格式写回业务层
+bool SectionLineModel::toggleBoolValue(int row)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
+    const auto &e = m_entries[row];
+
+    ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
+    StrPoolID keyId = e.keyId;
+    int lineMult = e.lineMult;
+
+    IBRF_CoreBump.SendToR({ [srcId, keyId, lineMult, this]() {
+        auto rsec = IBR_Inst_Project.GetSectionFromID(srcId);
+        auto bsec = rsec.GetBack_Unsafe();
+        if (!bsec) return;
+        auto *line = bsec->GetLineFromSubSecs(keyId);
+        if (!line) return;
+        auto dataPtr = line->Indexed(static_cast<size_t>(lineMult));
+        if (!dataPtr) return;
+        auto bData = dataPtr->GetData<IBB_IniLine_Data_Bool>();
+        if (!bData) return;
+        // 翻转 bool，并按 StrBoolType 格式化后写回
+        bool next = !bData->Value;
+        std::string nextStr = StrBoolImpl(next, bData->Type);
+        bData->SetValue(nextStr);
+        bsec->UpdateAll();
+        refresh();
+        emit sectionDataChanged(m_sectionId);
+    } });
+
+    return true;
 }

@@ -48,6 +48,8 @@ public:
         IsMultipleRole,                      // bool: InputType.Multiple（可增行，对应 ImGui "+" 按钮）
         SpecialAcceptRole,                   // bool: SpecialAccept 临时态（行右键菜单切换）
         InputOnShowRole,                     // bool: InputOnShow 编辑态（行右键菜单 EditDesc 切换）
+        KeyTypeRole,                         // int: 键输入类型（0=String, 1=Bool, 2=IIF）
+        BoolCheckedRole,                 // bool: Bool 键当前布尔值（仅 keyType==1 有意义）
     };
     Q_ENUM(Roles)
 
@@ -120,6 +122,10 @@ public:
     // addLine：对 Multiple 行追加新分量（bsec->MergeLine(Key, Index_AlwaysNew, ...))
     Q_INVOKABLE void addLine(int row);
 
+    // 键类型：Bool（勾选框）翻转值（对应 ImGui IIC_Bool 对话框切换）
+    // 读取 Data_Bool 当前 bool，翻转后按 StrBoolType 格式写回
+    Q_INVOKABLE bool toggleBoolValue(int row);
+
 signals:
     void sectionIdChanged();
     void showRegNameChanged();
@@ -156,6 +162,8 @@ private:
         QString exportValue;
         bool isInputMode{ false };  // D14: IICStatus 持久化（true=Input 态，false=Link 态）
         bool isMultiple{ false };   // InputType.Multiple（可增行）
+        int keyType{ 0 };           // 键输入类型（0=String, 1=Bool, 2=IIF）
+        bool boolChecked{ false };  // Bool 键当前布尔值
 
         // 内容比较：refresh() 用快照判断行数据是否变化。
         // 删除/新建模块等全量刷新时，无关节点的行数据未变，跳过
@@ -183,7 +191,9 @@ private:
                 && isCollapsed == o.isCollapsed
                 && exportValue == o.exportValue
                 && isInputMode == o.isInputMode
-                && isMultiple == o.isMultiple;
+                && isMultiple == o.isMultiple
+                && keyType == o.keyType
+                && boolChecked == o.boolChecked;
         }
     };
 

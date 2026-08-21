@@ -77,7 +77,8 @@ Item {
 
     // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
     // source=归属源对象（可选）：相邻条目切换时用它校验滞后的 hide，避免误关提示
-    function show(text, screenX, screenY, source) {
+    // place=摆放方位（可选）："below"→ 居中显示在参考点正下方（顶边栏按钮用）；缺省→ 右偏8px+上方优先
+    function show(text, screenX, screenY, source, place) {
         activeSource = source || null
         tipText.text = text || ""
         hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
@@ -87,13 +88,21 @@ Item {
         var hh = tipText.implicitHeight + 12              // 上5 + 下5 + 边框2
         // 屏幕坐标 → Overlay 坐标
         var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        // 水平：参考点向右偏移 8px（贴近而不遮鼠标），再钳制在窗口内
-        var x = Math.max(2, Math.min(o.x + 8, Math.max(2, Overlay.overlay.width - ww - 2)))
-        // 垂直：优先显示在参考点上方（不遮鼠标前进路径），空间不足才下方
-        var above = o.y - hh - 10
-        var below = o.y + 12
+        var x, y
+        if (place === "below") {
+            // 顶边栏按钮：框水平居中对齐按钮中心，显示在按钮正下方
+            x = Math.max(2, Math.min(o.x - ww / 2, Math.max(2, Overlay.overlay.width - ww - 2)))
+            y = o.y + 4
+            y = Math.min(y, Math.max(4, Overlay.overlay.height - hh - 4))
+        } else {
+            // 默认：水平右偏 8px（贴近而不遮鼠标），垂直优先上方（不遮鼠标前进路径）
+            x = Math.max(2, Math.min(o.x + 8, Math.max(2, Overlay.overlay.width - ww - 2)))
+            var above = o.y - hh - 10
+            var below = o.y + 12
+            y = (above >= 4) ? above : Math.min(below, Overlay.overlay.height - hh - 4)
+        }
         root.x = x
-        root.y = (above >= 4) ? above : Math.min(below, Overlay.overlay.height - hh - 4)
+        root.y = y
         root.width = ww
         root.height = hh
         root.visible = true
