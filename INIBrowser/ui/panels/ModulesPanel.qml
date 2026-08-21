@@ -202,14 +202,17 @@ Item {
                         }
                     }
 
-                    onContainsMouseChanged: {
-                        // DescLong 悬停提示（统一用全局 appToolTip，对应 ImGui SetTooltip）
-                        if (containsMouse && !isFolder && descLong.length > 0) {
+                    // ===== Hover 提示（统一用全局 appToolTip，对应 ImGui SetTooltip） =====
+                    // 用 onEntered/onExited：相邻 delegate 切换时 onContainsMouseChanged 可能
+                    // 不重新触发导致新模块提示不显示（旧 hide 后新 show 丢失）
+                    onEntered: {
+                        if (!isFolder && descLong.length > 0) {
                             var g = mapToGlobal(width / 2, height + 4)
                             appToolTip.show(descLong, g.x, g.y)
-                        } else {
-                            appToolTip.hide()
                         }
+                    }
+                    onExited: {
+                        appToolTip.hide()
                     }
 
                     // 拖拽支持：左键按住模块节点拖动到工作区

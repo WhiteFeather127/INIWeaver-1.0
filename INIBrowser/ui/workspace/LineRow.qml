@@ -103,8 +103,8 @@ Item {
             }
         }
 
-        // 长注释提示：用自定义暗色方角浮动框（workspaceView.hoverTip），鼠标放上立即显示，无延迟
-        //（对应 imgui IBR_ToolTip，而非原生 ToolTip）
+        // 长注释提示：统一用全局悬停提示框 appToolTip，鼠标放上立即显示，无延迟
+        //（对应 imgui IBR_ToolTip）
         // 用 onContainsMouseChanged 而非 onEntered/onExited：
         // LineRow 常因数据 refresh 被重建，重建后若鼠标已悬停其上，新 MouseArea 的
         // onEntered 不会重新触发（只有 enter 事件），而 containsMouse 会在重建后
@@ -117,11 +117,11 @@ Item {
             onContainsMouseChanged: {
                 if (onShowLabelMouse.containsMouse) {
                     if (root.descLong.length === 0) return
-                    // 提示落在标签下方，映射到 workspace 坐标
-                    var p = onShowLabel.mapToItem(workspaceView, 0, onShowLabel.height + 4)
-                    workspaceView.hoverTipItem.showTip(root.descLong, p.x, p.y)
+                    // 提示落在标签下方（屏幕坐标）
+                    var g = onShowLabel.mapToGlobal(0, onShowLabel.height + 4)
+                    appToolTip.show(root.descLong, g.x, g.y)
                 } else {
-                    workspaceView.hoverTipItem.hideTip()
+                    appToolTip.hide()
                 }
             }
         }

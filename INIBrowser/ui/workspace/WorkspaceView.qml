@@ -17,9 +17,6 @@ Item {
     // QML 中 id 不能通过 "." 从其他组件文件访问，子组件（LinkNodePoint/SectionNode）
     // 必须经此属性更新预览框位置（跟随鼠标）
     property alias dragPreviewItem: dragPreview
-    // 长注释提示框暴露为属性（QML 无法通过 id 从外部组件访问子 Item，
-    // 必须用 property alias；LineRow 经此访问 showTip/hideTip）
-    property alias hoverTipItem: hoverTip
 
     // 缩放补间动画（QML 端驱动，渲染线程与帧同步）
     // 参考 GraphFlow（Qt/QML 节点图编辑器）：缩放动画放 QML 侧由 QQuickWindow
@@ -502,58 +499,6 @@ Item {
                     font.pixelSize: Math.max(1, Math.round(10 * workspaceController.ratio))
                 }
             }
-        }
-    }
-
-    // ===== 长注释/悬停提示（对应 imgui IBR_ToolTip；自定义暗色方角，立即显示，非原生 ToolTip） =====
-    // 放在 workspace 最上层（z=200），由各 hover 源（键行 onShowLabel 等）showTip/hideTip 驱动
-    Item {
-        id: hoverTip
-        x: -1000
-        y: -1000
-        z: 200
-        visible: false
-        // 提示框最大宽度（超出则文本换行，避免长注释把框拉宽到屏幕外）
-        property int maxTipWidth: 420
-
-        Rectangle {
-            anchors.fill: parent
-            color: "#e6242424"
-            radius: 0  // 方角（对齐 imgui 扁平提示）
-            border.color: "#3c3c3c"
-            border.width: 1
-        }
-        Text {
-            id: hoverTipText
-            // 不 fill：宽度由 showTip 按文本自然宽/上限显式计算（避免 anchors+implicitWidth 循环）
-            anchors.topMargin: 3
-            anchors.leftMargin: 3
-            color: "#d4d4d4"
-            // 固定字体：不随工作区缩放变化（与全局 ToolTip 统一）
-            font.pixelSize: 12
-            wrapMode: Text.Wrap
-        }
-        function showTip(text, wx, wy) {
-            hoverTipText.text = text
-            // 计算目标宽度：文本自然宽，超出 maxTipWidth 则限宽并使 Text 换行
-            var innerW = hoverTipText.implicitWidth
-            if (innerW > maxTipWidth - 6) {
-                hoverTipText.width = maxTipWidth - 6
-                width = maxTipWidth
-            } else {
-                hoverTipText.width = innerW
-                width = innerW + 10
-            }
-            // Text 限宽后 implicitHeight 反映换行后的实际高度
-            height = hoverTipText.implicitHeight + 6
-            x = Math.min(wx, workspaceView.width - width - 2)  // 防超出右边界
-            y = wy
-            visible = true
-        }
-        function hideTip() {
-            visible = false
-            x = -1000
-            y = -1000
         }
     }
 }
