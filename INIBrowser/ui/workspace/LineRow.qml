@@ -105,18 +105,25 @@ Item {
 
         // 长注释提示：用自定义暗色方角浮动框（workspaceView.hoverTip），鼠标放上立即显示，无延迟
         //（对应 imgui IBR_ToolTip，而非原生 ToolTip）
+        // 用 onContainsMouseChanged 而非 onEntered/onExited：
+        // LineRow 常因数据 refresh 被重建，重建后若鼠标已悬停其上，新 MouseArea 的
+        // onEntered 不会重新触发（只有 enter 事件），而 containsMouse 会在重建后
+        // 自动求值为 true 并触发 onContainsMouseChanged → 提示稳定显示（类原生绑定式）
         MouseArea {
             id: onShowLabelMouse
             anchors.fill: parent
             acceptedButtons: Qt.NoButton
             hoverEnabled: true
-            onEntered: {
-                if (root.descLong.length === 0) return
-                // 提示落在标签下方，映射到 workspace 坐标
-                var p = onShowLabel.mapToItem(workspaceView, 0, onShowLabel.height + 4)
-                workspaceView.hoverTip.showTip(root.descLong, p.x, p.y)
+            onContainsMouseChanged: {
+                if (onShowLabelMouse.containsMouse) {
+                    if (root.descLong.length === 0) return
+                    // 提示落在标签下方，映射到 workspace 坐标
+                    var p = onShowLabel.mapToItem(workspaceView, 0, onShowLabel.height + 4)
+                    workspaceView.hoverTip.showTip(root.descLong, p.x, p.y)
+                } else {
+                    workspaceView.hoverTip.hideTip()
+                }
             }
-            onExited: workspaceView.hoverTip.hideTip()
         }
     }
 
