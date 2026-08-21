@@ -80,6 +80,7 @@ Item {
         var list = root.lineModel.iifComponents(root.rowIndex)
         var row = 0
         var best = 0
+        var hasLink = false
         for (var i = 0; i < list.length; i++) {
             var cc = list[i]
             if (cc.kind === "newl") {
@@ -92,11 +93,16 @@ Item {
             else if (cc.kind === "bool") w = root.fontBody * 1.4 + 4
             else if (cc.kind === "sep") w = 2
             else if (cc.kind === "text") w = (cc.text ? cc.text.length * root.fontBody * 0.6 : 0)
-            else w = 0  // samel / link（link 靠右对齐，不占用模块宽）无宽
+            else if (cc.kind === "link") { hasLink = true; w = 0 }  // link 靠右对齐，不占流程宽
+            else w = 0  // samel 无宽
             row += (row > 0 ? 4 : 0) + w  // 分量间 4px 间距
         }
         best = Math.max(best, row)
-        root.iifNaturalWidth = best
+        // 右侧链接节点区（节点宽 + 右 margin8）
+        var nodeW = hasLink ? (root.fontSmall * 1.5 + 8) : 0
+        // 整行自适应宽 = 左侧标签自然宽 + 6 + max(流程宽, 节点区)。供模块 implicitWidth 随内容伸缩，
+        // 保证 IIF 行的标签/输入框/靠右节点在模块内完整显示、不被截断。
+        root.iifNaturalWidth = root.onShowLabel.implicitWidth + 6 + Math.max(best, nodeW)
     }
     onIsInputModeChanged: root.recomputeIifNaturalWidth()
     onKeyTypeChanged: root.recomputeIifNaturalWidth()
@@ -154,9 +160,12 @@ Item {
         // Input 态：文本占自然宽度（随字体等比缩放），输入框占剩余宽度
         //   对应 ImGui: TextEx(Hint.Short) 自然宽度 + SameLine + SetNextItemWidth(剩余)
         //   用 implicitWidth（Text 全文本自然宽度，不依赖布局完成，避免 contentWidth 初始为 0 导致塌缩）
+        //   IIF 行：模块宽度已按"标签自然宽+分量宽"自适应预留，标签直接取全自然宽（不截断）；
+        //   其他 Input 态（String）仍需 0.7 上限给输入框/圆点留空间。
         // Link 态：文本占满左侧，留出 LinkNode 空间
-        width: root.isInputMode ? Math.min(implicitWidth, parent.width * 0.7)
-                                : parent.width - linkNode.width - 24
+        width: root.isInputMode
+               ? (root.keyType === 2 ? implicitWidth : Math.min(implicitWidth, parent.width * 0.7))
+               : parent.width - linkNode.width - 24
         text: root.onShowText
         color: "#d4d4d4"
         font.pixelSize: root.fontBody
