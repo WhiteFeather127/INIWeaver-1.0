@@ -303,7 +303,8 @@ Canvas {
             if (link.isSrcDragging) alpha = base * 0.625;
 
             ctx.strokeStyle = col;
-            ctx.lineWidth = isFocused ? lineWidth + 2.0 : lineWidth;
+            // 高亮仅改颜色不变粗细（用户要求去除 isFocused 时的 +2.0 加粗）
+            ctx.lineWidth = lineWidth;
             ctx.globalAlpha = alpha;
 
             var midX = (pa.x + pb.x) / 2.0;
