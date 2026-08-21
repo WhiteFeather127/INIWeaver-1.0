@@ -205,14 +205,15 @@ Item {
                     // ===== Hover 提示（统一用全局 appToolTip，对应 ImGui SetTooltip） =====
                     // 用 onEntered/onExited：相邻 delegate 切换时 onContainsMouseChanged 可能
                     // 不重新触发导致新模块提示不显示（旧 hide 后新 show 丢失）
+                    // 传 mouseArea 作为 source，抵御切换时滞后的 onExited 误关提示
                     onEntered: {
                         if (!isFolder && descLong.length > 0) {
                             var g = mapToGlobal(width / 2, height + 4)
-                            appToolTip.show(descLong, g.x, g.y)
+                            appToolTip.show(descLong, g.x, g.y, mouseArea)
                         }
                     }
                     onExited: {
-                        appToolTip.hide()
+                        appToolTip.hide(mouseArea)
                     }
 
                     // 拖拽支持：左键按住模块节点拖动到工作区

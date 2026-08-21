@@ -15,6 +15,10 @@
 //      避免 popup 闪烁/瞬间消失（旧 hide 后新 show 的时序竞争）。
 //   2. 优先显示在参考点上方（空间不足才下方）：popup 不落在鼠标前进路径上，
 //      避免从上往下滑动时 popup 出现在鼠标即将经过的区域造成"不显示"。
+//   3. 源身份校验（source 参数）：相邻条目快速切换、或跨区域串扰时，旧条目滞后的
+//      onExited(hide) 可能晚于新条目 onEntered(show) 到达，会误把刚显示的提示关掉。
+//      规定：带 source 的 hide 仅在 source == 当前显示源时才生效；无源的提示
+//      （如侧边栏按钮）不受任何带源 hide 的影响。
 import QtQuick
 import QtQuick.Controls
 
@@ -26,6 +30,10 @@ Popup {
     // 提示框最大宽度（超出则文本换行，避免长文本把框拉宽到屏幕外）
     property int maxTipWidth: 420
 
+    // 当前提示归属的源对象（show 时记录）；hide(source) 仅当 source 与之一致才生效，
+    // 用于抵御相邻条目切换时滞后的 onExited 事件
+    property var activeSource: null
+
     // 防抖隐藏：鼠标快速滑过多个源时，onExited 高频触发；延迟一定时间再 close，
     // 若期间又有新 show 则取消，避免 popup 闪烁/切换丢显
     Timer {
@@ -34,6 +42,7 @@ Popup {
         onTriggered: {
             root.close()
             tipText.text = ""
+            root.activeSource = null
         }
     }
 
@@ -62,7 +71,9 @@ Popup {
     }
 
     // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
-    function show(text, screenX, screenY) {
+    // source=归属源对象（可选）：相邻条目切换时用它校验滞后的 hide，避免误关提示
+    function show(text, screenX, screenY, source) {
+        activeSource = source || null
         tipText.text = text || ""
         var cap = maxTipWidth - 12
         tipText.width = (tipText.implicitWidth > cap) ? cap : tipText.implicitWidth
@@ -78,7 +89,18 @@ Popup {
         root.open()
     }
 
-    function hide() {
+    // source=归属源对象（可选）。带 source 的 hide 仅在 source 为当前显示源时才生效，
+    // 防御相邻条目切换/跨区域串扰时滞后的 onExited；无源 hide（侧边栏等旧调用）恒生效。
+    function hide(source) {
+        if (source) {
+            // 当前显示无源提示（或源不匹配）时，忽略此带源 hide —— 属滞后/串扰事件
+            if (activeSource === null && tipText.text.length > 0) {
+                return
+            }
+            if (activeSource !== null && source !== activeSource) {
+                return
+            }
+        }
         hideTimer.start()
     }
 }
