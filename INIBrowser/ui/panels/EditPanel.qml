@@ -261,10 +261,11 @@ Item {
                                     font.pixelSize: 13
                                 }
 
-                                // 值编辑控件（缺失行不显示；当前注册类型无 Multiple，同名多值键不存在，仅单值框）
+                                // 值编辑控件（缺失行、多值键不显示；多值键由下方 Repeater 依次渲染各值）
                                 TextField {
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
+                                             && !(modelData.isMultiple || false)
                                     text: modelData.value || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
@@ -282,6 +283,45 @@ Item {
                                         if (hovered && modelData.hint && modelData.hint.length > 0) {
                                             var g = mapToGlobal(width / 2, height + 4)
                                             appToolTip.show(modelData.hint, g.x, g.y)
+                                        } else {
+                                            appToolTip.hide()
+                                        }
+                                    }
+                                }
+}
+
+                            // 同名多值键（isMultiple）：每个值独立一行编辑，按分量索引写回（对应 imgui ForEachWithIdx 逐行渲染）
+                            Repeater {
+                                id: valueRows
+                                // 捕获外层 ListView 键条目（Repeater delegate 内 modelData 会被整型 model 遮蔽）
+                                property var entry: modelData
+                                visible: (entry.isMultiple || false)
+                                         && !(entry.missing || false)
+                                model: entry.values ? entry.values.length : 0
+                                // Repeater 的 delegate 不是布局直接子项，不会自动纵向堆叠/撑开高度，
+                                // 需用 y 逐行定位，并显式给出整体高度
+                                height: (entry.values ? entry.values.length : 0) * 28
+                                delegate: TextField {
+                                    // 每行一个值，height=28 对齐普通输入框
+                                    y: index * 28
+                                    width: linesListView.width - 4
+                                    height: 28
+                                    text: valueRows.entry.values[index] || ""
+                                    color: "#e0e0e0"
+                                    placeholderTextColor: "#909090"
+                                    font.pixelSize: 13
+                                    background: Rectangle {
+                                        color: "#2d2d2d"
+                                        border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
+                                        border.width: 1
+                                        radius: 2
+                                    }
+                                    onEditingFinished: editPanelController.setLineValueAt(valueRows.entry.keyName, index, text)
+                                    onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=multiValue key='" + valueRows.entry.keyName + "' index=" + index + " value=['" + text + "']")
+                                    onHoveredChanged: {
+                                        if (hovered && valueRows.entry.hint && valueRows.entry.hint.length > 0) {
+                                            var g = mapToGlobal(width / 2, height + 4)
+                                            appToolTip.show(valueRows.entry.hint, g.x, g.y)
                                         } else {
                                             appToolTip.hide()
                                         }

@@ -68,6 +68,8 @@ public:
 
     // 设置行值（对应 SidebarLine::RenderUI → IBB_IniLine::RenderUI 的值编辑控件）
     Q_INVOKABLE void setLineValue(const QString &key, const QString &value);
+    // 按分量索引设置行值（同名多行键 isMultiple 的每个值独立编辑）
+    Q_INVOKABLE void setLineValueAt(const QString &key, int index, const QString &value);
 
     // 切换到文本编辑模式（对应 IBR_EditFrame::SwitchToText，IBR_Misc.cpp:649-661）
     Q_INVOKABLE void switchToText();
