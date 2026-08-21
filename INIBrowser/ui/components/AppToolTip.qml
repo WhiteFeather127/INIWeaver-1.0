@@ -30,7 +30,11 @@ Popup {
         // 固定字号：不乘 ratio，不随工作区缩放变化
         font.pixelSize: 12
         wrapMode: Text.Wrap
-        text: ""
+        // 换行上限：隐式宽超过此值时才按上限换行（否则自然单行）
+        onImplicitWidthChanged: {
+            var cap = root.maxTipWidth
+            width = (implicitWidth > cap - 12) ? (cap - 12) : implicitWidth
+        }
     }
 
     background: Rectangle {
@@ -43,13 +47,12 @@ Popup {
     // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
     function show(text, screenX, screenY) {
         tipText.text = text || ""
-        if (root.tipText.implicitWidth > root.maxTipWidth - 12) {
-            // 文本超宽：限宽换行（contentItem 宽度先按上限钳制，Popup 按 contentItem 隐式宽铺开）
-            root.contentItem.width = root.maxTipWidth - 12
-        }
+        // 强制按当前文本重新计算换行宽度（text 变化会触发 onImplicitWidthChanged）
+        var tw = tipText.implicitWidth > (maxTipWidth - 12) ? (maxTipWidth - 12) : tipText.implicitWidth
+        tipText.width = tw
         var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        var w = root.tipText.implicitWidth
-        root.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - w - 12))
+        var w = tw + tipText.leftPadding + tipText.rightPadding
+        root.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - w - 2))
         root.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - root.implicitHeight - 4))
         root.open()
     }
