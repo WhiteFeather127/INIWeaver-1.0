@@ -309,6 +309,14 @@ Item {
                     headDragProxy.x = headLineRN.x
                     headDragProxy.y = headLineRN.y
                 }
+                // 标题栏拖拽激活时设置源预览标签（对应 ImGui IBR_SectionData.cpp:767
+                // BeginDragDropSource 源文本 "Ini -> DisplayName"，无 ": KeyName" 后缀）
+                drag.onActiveChanged: {
+                    if (drag.active) {
+                        workspaceController.setDragSourceText(
+                            workspaceController.headDragSourcePreview(root.sectionData.sectionId || 0))
+                    }
+                }
                 // 滚轮转发：合并拖拽期间 grab 在本 MouseArea，转发滚轮保证拖动中可缩放
                 onWheel: {
                     var wsPt = mapToItem(workspaceView, wheel.x, wheel.y)

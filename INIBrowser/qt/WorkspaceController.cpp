@@ -3689,6 +3689,17 @@ QString WorkspaceController::lineDragSourcePreview(qulonglong sectionId, const Q
     return QString::fromUtf8(full.c_str());
 }
 
+QString WorkspaceController::headDragSourcePreview(qulonglong sectionId)
+{
+    // 对应 ImGui IBR_SectionData.cpp:767 标题栏拖拽源文本 "Ini -> DisplayName"
+    //（与连线拖拽不同：无 ": KeyName" 后缀，用于模块合并拖拽的源标签）
+    ModuleID_t id = static_cast<ModuleID_t>(sectionId);
+    auto sec = IBR_Inst_Project.GetSectionFromID(id);
+    auto data = sec.GetSectionData();
+    if (!data) return QString();
+    return QString::fromUtf8((std::string(data->Desc.Ini) + " -> " + std::string(data->DisplayName)).c_str());
+}
+
 // ===== 阶段 12.5：节点右键菜单项补齐实现 =====
 
 void WorkspaceController::toggleIgnore(qulonglong sectionId)

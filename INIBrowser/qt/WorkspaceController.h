@@ -230,6 +230,9 @@ public:
     // 获取连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 源文本，IBR_LinkNode.cpp:570-573）
     // 返回 "Ini -> DisplayName : KeyName"（继承连为 GUI_InheritTo 格式）
     Q_INVOKABLE QString lineDragSourcePreview(qulonglong sectionId, const QString &keyName);
+    // 标题栏节点拖拽源预览（对应 ImGui IBR_SectionData.cpp:767 "Ini -> DisplayName"，
+    // 与 lineDragSourcePreview 不同：无 ": KeyName" 后缀，用于合并拖拽的源标签）
+    Q_INVOKABLE QString headDragSourcePreview(qulonglong sectionId);
 
     // ===== 阶段 12.5：节点右键菜单项补齐 =====
     // 智能切换 Ignore/Freeze/Hide（对应 IBR_SectionData.cpp:629-676 的智能互斥逻辑）
