@@ -52,7 +52,7 @@ Item {
         anchors.fill: parent
         // IsInherit → RoundedSquare（小圆角矩形）；其他 → Circle（全圆）
         radius: root.isInherit ? 2 : (width / 2)
-        color: hoverArea.containsMouse ? "#b0c8c8c8" : "#62a0a0a0"
+        color: hoverArea.containsMouse ? "#c0c8c8c8" : "#77a0a0a0"
     }
     Rectangle {
         // 上层：不透明颜色层（键行用 linkCol，随 AdjustNodeCol 的业务色）
