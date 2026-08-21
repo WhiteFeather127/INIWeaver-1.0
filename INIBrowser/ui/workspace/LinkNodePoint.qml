@@ -84,15 +84,7 @@ Item {
 
     // ===== Hover 提示（统一用全局悬停提示框 appToolTip，对应 IBR_LinkNode.cpp:541-564） =====
     // 显示：ShowReg ? TargetValue 列表 : DisplayName 列表，逗号分隔
-    onContainsMouseChanged: {
-        if (root.isEmpty || root.tipText.length === 0) return
-        if (hoverArea.containsMouse) {
-            var g = hoverArea.mapToGlobal(hoverArea.width / 2, hoverArea.height + 4)
-            appToolTip.show(root.tipText, g.x, g.y)
-        } else {
-            appToolTip.hide()
-        }
-    }
+    // handler 挂在内部 hoverArea 上（用 hoverArea.containsMouse），见下方 MouseArea
 
     readonly property string tipText: {
         if (root.isEmpty || root.links.length === 0) return ""
@@ -213,6 +205,17 @@ Item {
                     workspaceController.setDragInvalidLink(false)
                     workspaceController.setDragTarget(0, "", "")
                 }
+            }
+        }
+
+        // 悬停提示（统一用全局 appToolTip，对应 IBR_LinkNode.cpp:541-564 IsItemHovered && !Empty）
+        onContainsMouseChanged: {
+            if (root.isEmpty || root.tipText.length === 0) return
+            if (hoverArea.containsMouse) {
+                var g = hoverArea.mapToGlobal(hoverArea.width / 2, hoverArea.height + 4)
+                appToolTip.show(root.tipText, g.x, g.y)
+            } else {
+                appToolTip.hide()
             }
         }
     }
