@@ -54,6 +54,8 @@ Item {
     // IIF 分量列表刷新计数：写回共享 ValueID 后递增，强制 Repeater 重读 iifComponents，
     // 使共享同一 ValueID 的多个分量一起更新显示
     property int iifRevision: 0
+    // IIF 首行是否为链接节点行（Multiple "+" 需避开首行右端的链接节点，对齐首行左移）
+    property bool iifFirstRowHasNode: false
 
     // 监听模型写回通知：刷新本行 IIF 分量列表与自然宽度
     Connections {
@@ -107,9 +109,16 @@ Item {
     function recomputeIifNaturalWidth() {
         if (!(root.isInputMode && root.keyType === 2) || !root.lineModel) {
             root.iifNaturalWidth = 0
+            root.iifFirstRowHasNode = false
+            return
+        }
+        // 组件构造/回收瞬间 onShowLabel 子对象可能尚为 null，延迟到布局后重试，避免 TypeError
+        if (!root.onShowLabel) {
+            Qt.callLater(() => root.recomputeIifNaturalWidth())
             return
         }
         var rows = root.iifRows()
+        root.iifFirstRowHasNode = (rows.length > 0) && (rows[0].node != null)
         var maxRow = 0
         for (var r = 0; r < rows.length; r++) {
             var row = rows[r]
@@ -132,6 +141,19 @@ Item {
         }
         root.iifNaturalWidth = root.onShowLabel.implicitWidth + 6 + maxRow
     }
+    // IIF 分量总高：每个分量/分隔都作为占空间的渲染行，模块高度随行数自适应。
+    // 逐行累加（分隔线 6px，普通行 fontBody*2）+ 行间距；非 IIF 返回 0。
+    function iifTotalHeight() {
+        if (!(root.isInputMode && root.keyType === 2) || !root.lineModel) return 0
+        var rows = root.iifRows()
+        var h = 0
+        for (var i = 0; i < rows.length; i++)
+            h += rows[i].isSep ? 6 : root.fontBody * 2
+        if (rows.length > 1) h += (rows.length - 1) * 2   // Column spacing
+        if (workspaceController.diagLogEnabled())
+            console.log("[IIF-DIAG] totalHeight row=" + root.rowIndex + " key='" + root.keyName + "' rows=" + rows.length + " h=" + h)
+        return h
+    }
     onIsInputModeChanged: root.recomputeIifNaturalWidth()
     onKeyTypeChanged: root.recomputeIifNaturalWidth()
     onRowIndexChanged: root.recomputeIifNaturalWidth()
@@ -152,9 +174,12 @@ Item {
     property bool isDragging: false
 
     // 行高随字体等比缩放（fontBody 已按 ratio 缩放）
-    // IIF 行：多个链接分量靠右各自堆叠一行时需加高以容纳整列（iifEdit 为 Column 递归高度）
-    height: (root.isInputMode && root.keyType === 2 && root.lineModel)
-            ? Math.max(root.fontBody * 2, root.iifEdit.height)
+    // IIF 行：多个链接分量靠右各自堆叠一行时需加高以容纳整列
+    // 注意：不能引用子对象 root.iifEdit.height —— 组件构造首轮求值 iifEdit 尚为 null，
+    //       绑定抛异常被禁用，之后 iifEdit.height 变化也不会触发重算 → 高度恒 0 → IIF 溢出重叠。
+    //       改为直接调 iifTotalHeight()，并把 rowIndex/iifRevision 纳入依赖触发重算。
+    height: (root.isInputMode && root.keyType === 2 && root.lineModel && root.rowIndex >= 0 && root.iifRevision >= 0)
+            ? Math.max(root.fontBody * 2, root.iifTotalHeight())
             : root.fontBody * 2
 
     // 布局完成后回写（解决 Component.onCompleted 时布局未完成导致 LastCenter=0）
@@ -408,6 +433,12 @@ Item {
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         spacing: 2
+        // 每个分量都作为占空间的渲染部分：显式高度 = 行数×行高，模块随分量自适应
+        // 绑定依赖 lineModel/rowIndex/keyType/iifRevision，三者在数据就绪或变化时都会重算
+        height: (root.lineModel && root.keyType === 2 && root.rowIndex >= 0 && root.iifRevision >= 0)
+                ? root.iifTotalHeight() : 0
+        onHeightChanged: { if (root.lineModel && workspaceController.diagLogEnabled())
+            console.log("[IIF-DIAG] iifEdit.height row=" + root.rowIndex + " key='" + root.keyName + "' h=" + height + " rootH=" + root.height) }
 
         Repeater {
             model: (root.keyType === 2 && root.iifRevision >= 0) ? root.iifRows() : []
@@ -416,6 +447,12 @@ Item {
                 property var rowData: modelData
                 width: iifEdit.width
                 height: (rowData && rowData.isSep) ? 6 : root.fontBody * 2
+                Component.onCompleted: if (workspaceController.diagLogEnabled())
+                    console.log("[IIF-DIAG] rowCreate row=" + root.rowIndex + " key='" + root.keyName + "' idx=" + index
+                                + " isSep=" + (rowData && rowData.isSep) + " cells=" + ((rowData && rowData.comps) ? rowData.comps.length : 0)
+                                + " h=" + height)
+                onYChanged: if (workspaceController.diagLogEnabled())
+                    console.log("[IIF-DIAG] rowY row=" + root.rowIndex + " idx=" + index + " y=" + y + " h=" + height + " parentH=" + iifEdit.height)
 
                 // 分隔线行（对应 IIC_Separator）
                 Rectangle {
@@ -619,10 +656,17 @@ Item {
         // IIF 行（keyType==2）或 Input 态无行级 LinkNode 时，"+" 放在模块右端对齐节点。
         x: (root.isImport && root.keyType !== 2)
            ? (parent.width / 2 - width - 4)
-           : (root.keyType === 2 || root.isInputMode)
-             ? (parent.width - width - 4)
-             : (linkNode.x - width - 4)
-        anchors.verticalCenter: parent.verticalCenter
+           : (root.keyType === 2)
+             // IIF 行：加号靠模块左侧、与第一行分量对齐（imgui 放 BaseCursorY=首行，EndCursor.x=左侧）
+             ? 6
+             : (root.isInputMode
+                ? (parent.width - width - 4)
+                : (linkNode.x - width - 4))
+        // IIF 行已按分量加高（多行堆叠），"+" 垂直居中会落到整个块中央，应对齐顶部第一行；
+        // 非 IIF 行保持垂直居中（行高即一行）。
+        y: root.keyType === 2
+           ? Math.round((root.fontBody * 2 - height) / 2)
+           : (parent.height - height) / 2
         width: root.fontSmall * 1.4
         height: root.fontSmall * 1.4
         radius: 2

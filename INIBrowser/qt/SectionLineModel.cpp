@@ -678,6 +678,9 @@ bool SectionLineModel::createLinkAt(int row, int compIdx, qulonglong destSection
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] createLinkAt key='%s' comp=%d dst=%llu", PoolCStr(e.keyId), compIdx, (unsigned long long)destSectionId);
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID srcKeyId = e.keyId;
@@ -757,6 +760,9 @@ void SectionLineModel::deleteAllLinksAt(int row, int compIdx)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] deleteAllLinksAt key='%s' comp=%d", PoolCStr(e.keyId), compIdx);
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID srcKeyId = e.keyId;
@@ -859,6 +865,9 @@ void SectionLineModel::deleteAllLinks(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] deleteAllLinks key='%s'", PoolCStr(e.keyId));
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID srcKeyId = e.keyId;
@@ -894,6 +903,9 @@ bool SectionLineModel::applyLinkStates(int row, QVariantList keepLinkIdxs)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] applyLinkStates key='%s' keep=%d", PoolCStr(e.keyId), (int)keepLinkIdxs.size());
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID srcKeyId = e.keyId;
@@ -958,6 +970,9 @@ bool SectionLineModel::modifyValue(int row, const QString &newText)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] modifyValue key='%s' new='%s'", PoolCStr(e.keyId), newText.toUtf8().constData());
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID srcKeyId = e.keyId;
@@ -1138,6 +1153,9 @@ bool SectionLineModel::toggleBoolValue(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return false;
     const auto &e = m_entries[row];
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] toggleBoolValue key='%s'", PoolCStr(e.keyId));
+#endif
 
     ModuleID_t srcId = static_cast<ModuleID_t>(m_sectionId);
     StrPoolID keyId = e.keyId;
@@ -1294,6 +1312,12 @@ QVariantList SectionLineModel::iifComponents(int row) const
             m["links"] = compLinks;
             m["lineMult"] = static_cast<int>(e.lineMult);
             m["sessionId"] = QString::number(static_cast<qulonglong>(sessionIdFor(row, static_cast<int>(i))));
+#ifdef INIWEAVER_DIAG
+            qDebug("[IIF-SEL] key='%s' mult=%d comp=%d isEmpty=%d links=%d hasNode=%d sess=%s",
+                   PoolCStr(e.keyId), static_cast<int>(e.lineMult), static_cast<int>(i),
+                   static_cast<int>(empty), static_cast<int>(compLinks.size()),
+                   static_cast<int>(hasNode), m["sessionId"].toString().toUtf8().constData());
+#endif
         }
 
         out << m;

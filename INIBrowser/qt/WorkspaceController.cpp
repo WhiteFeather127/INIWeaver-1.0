@@ -3267,6 +3267,10 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
     // 对应 ImGui lin.pSession->NotifyValueToMerge 路径（IBR_LinkNode.cpp:596-631）
     // 在源行上走 ModifyAndShow：收集现有链接 + 追加新目标 + 遵守 LinkLimit
     // 与 SectionLineModel::createLink 逻辑一致，但通过 sourceKeyName 在 C++ 侧定位源行
+#ifdef INIWEAVER_DIAG
+    qDebug("[IIF-WRITE] createLinkFromDrag src=%s key='%s' dst=%llu",
+           qUtf8Printable(QString::number(sourceId)), qUtf8Printable(sourceKeyName), (unsigned long long)destSectionId);
+#endif
     ModuleID_t srcId = static_cast<ModuleID_t>(sourceId);
     ModuleID_t dstId = static_cast<ModuleID_t>(destSectionId);
     auto srcSec = IBR_Inst_Project.GetSectionFromID(srcId);

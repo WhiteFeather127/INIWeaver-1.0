@@ -12,6 +12,8 @@ Item {
     // 数据属性（由 WorkspaceView 的 Repeater 传入）
     property var sectionData: ({})
     property bool isSelected: false
+    onIsSelectedChanged: if (workspaceController.diagLogEnabled())
+        console.log("[IIF-SEL] module sel=" + isSelected + " id=" + sectionData.sectionId)
 
     // 计算属性
     readonly property bool isFrozen: sectionData.frozen || false

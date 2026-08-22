@@ -70,6 +70,10 @@ public:
     Q_INVOKABLE void setLineValue(const QString &key, const QString &value);
     // 按分量索引设置行值（同名多行键 isMultiple 的每个值独立编辑）
     Q_INVOKABLE void setLineValueAt(const QString &key, int index, const QString &value);
+    // IIF 分量写回（对齐 imgui mf：写该分量 V.Value 后 RegenFormattedString），idx=edge 分量索引
+    Q_INVOKABLE void setIifValue(const QString &key, int mult, int idx, const QString &v);
+    // IIF bool 分量写回（IIS_Bool + IIC_Bool::FmtType）
+    Q_INVOKABLE void setIifBool(const QString &key, int mult, int idx, bool v);
 
     // 切换到文本编辑模式（对应 IBR_EditFrame::SwitchToText，IBR_Misc.cpp:649-661）
     Q_INVOKABLE void switchToText();

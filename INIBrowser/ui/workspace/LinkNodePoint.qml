@@ -46,6 +46,11 @@ Item {
     // IIF 分量节点布局完成门控：Flow 重排期间跳过中间坐标写回（对齐 LineRow.layoutDone），
     // onCompleted 延迟到事件循环末尾置 true 并回写一次最终坐标，之后再随 onX/onY 实时回写。
     property bool iifReady: false
+    // 选中/链接态诊断：flow 节点 isEmpty/links 变化（帮助定位"选中时值变0"）
+    onIsEmptyChanged: if (root.iifNode && workspaceController.diagLogEnabled())
+        console.log("[IIF-SEL] node isEmpty=" + isEmpty + " links=" + links.length + " comp=" + compIdx)
+    onLinksChanged: if (root.iifNode && workspaceController.diagLogEnabled())
+        console.log("[IIF-SEL] node links=" + links.length + " isEmpty=" + isEmpty + " comp=" + compIdx)
 
     // 是否确实发生过连线拖拽（避免普通点击圆点松手时误建自连）
     // 自连（拖动连线落回本模块）= targetId == sourceId，对应 ImGui Link.IsSelfLinked
@@ -132,12 +137,11 @@ Item {
         onClicked: {
             if (mouse.button === Qt.LeftButton) {
                 // 单击行为（对应 IBR_LinkNode.cpp:474-478 Clicked && !Empty && LinkLimit==1）
-                if (!root.isEmpty && root.linkLimit === 1) {
-                    // ModifyAndShow("") → 解除唯一链接
-                    if (root.lineModel) {
-                        if (root.iifNode) root.lineModel.deleteAllLinksAt(root.rowIndex, root.compIdx)
-                        else root.lineModel.deleteAllLinks(root.rowIndex)
-                    }
+                // 修复：IIF 流式分量节点（iifNode）单击不执行断开——模块被选中/点击时常落在这些
+                // 靠右的分量圆点上，原逻辑会误删单链接 → 值变 0、连的线消失。断开改由右键菜单完成。
+                if (!root.isEmpty && root.linkLimit === 1 && !root.iifNode) {
+                    // ModifyAndShow("") → 解除唯一链接（row 级节点；flow 节点不做）
+                    if (root.lineModel) root.lineModel.deleteAllLinks(root.rowIndex)
                 }
             } else if (mouse.button === Qt.RightButton) {
                 // 右键菜单（对应 IBR_LinkNode.cpp:479-540 RightClicked && !Empty）
