@@ -322,18 +322,16 @@ Item {
                                     font.pixelSize: 13
                                 }
 
-                                // 值编辑控件（缺失行、多值键不显示；多值键由下方 Repeater 依次渲染各值）
-                                // 互斥规则：主值框 与 多值 Repeater 严格二选一，绝不并存
-                                //  - 非 Multiple 键：主值框显示（多值 Repeater 恒 0）
-                                //  - Multiple 但仅 1 个值：主值框显示（无第二框）
-                                //  - Multiple 且值 > 1：主值框隐藏，Repeater 逐值渲染
+                                // 值编辑控件（缺失行、多值键不显示；同名多值键由下方 valueRows 逐值渲染）
+                                // 互斥规则：主值框 与 多值 Column(valueRows) 严格二选一，绝不并存
+                                //  - 非 Multiple 键：主值框显示（valueRows 恒 0）
+                                //  - Multiple 键：无主值框概念，每个同名键都由 valueRows 自己的框渲染
                                 TextField {
                                     id: mainValueField
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
                                              && ((modelData.keyType || 0) !== 2)   // IIF 键改由下方分量区逐分量渲染
-                                             && !((modelData.isMultiple || false)
-                                                  && ((modelData.values ? modelData.values.length : 0) > 1))
+                                             && !(modelData.isMultiple || false)
                                     text: modelData.value || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
@@ -358,43 +356,43 @@ Item {
                                 }
 }
 
-                            // 同名多值键（isMultiple 且值 > 1）：每个值独立一行编辑，按分量索引写回（对应 imgui ForEachWithIdx 逐行渲染）
-                            // 与主值框严格互斥（主值框仅在非 Multiple / 单值 Multiple 时显示）；非 Multiple 键 values 为空 → model 恒 0
-                            Repeater {
+                            // 同名多值键（isMultiple）：无主值框概念，每个同名键都有自己的值框
+                            // 每值一个输入框，按值索引写回（对应 imgui ForEachWithIdx 逐行渲染）
+                            // 只要 isMultiple 就逐值显示（含仅 1 个值的情形）；非 Multiple 键 values 为空 → model 恒 0
+                            // 高度由 Column 天然堆叠自适应（不引 mainValueField——Multiple 键主值框已隐藏，不可作为参考）
+                            Column {
                                 id: valueRows
+                                Layout.fillWidth: true
+                                spacing: 2
                                 // 捕获外层 ListView 键条目（Repeater delegate 内 modelData 会被整型 model 遮蔽）
                                 property var entry: modelData
                                 visible: (entry.isMultiple || false)
                                          && ((entry.keyType || 0) !== 2)   // IIF 键改由下方逐分量渲染
-                                         && ((entry.values ? entry.values.length : 0) > 1)
                                          && !(entry.missing || false)
-                                model: entry.values ? entry.values.length : 0
-                                // 高度不固定，跟随普通单值框自适应（mainValueField.height 为其自然高度）
-                                readonly property real rowH: Math.max(24, mainValueField.height) + 2
-                                height: (entry.values ? entry.values.length : 0) * rowH
-                                delegate: TextField {
-                                    // 每行一个值，宽高随普通输入框自适应
-                                    y: index * valueRows.rowH
-                                    width: linesListView.width - 4
-                                    height: Math.max(24, mainValueField.height)
-                                    text: valueRows.entry.values[index] || ""
-                                    color: "#e0e0e0"
-                                    placeholderTextColor: "#909090"
-                                    font.pixelSize: 13
-                                    background: Rectangle {
-                                        color: "#2d2d2d"
-                                        border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
-                                        border.width: 1
-                                        radius: 2
-                                    }
-                                    onEditingFinished: editPanelController.setLineValueAt(valueRows.entry.keyName, index, text)
-                                    onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=multiValue key='" + valueRows.entry.keyName + "' index=" + index + " value=['" + text + "']")
-                                    onHoveredChanged: {
-                                        if (hovered && valueRows.entry.hint && valueRows.entry.hint.length > 0) {
-                                            var g = mapToGlobal(width / 2, height + 4)
-                                            appToolTip.show(valueRows.entry.hint, g.x, g.y)
-                                        } else {
-                                            appToolTip.hide()
+                                Repeater {
+                                    model: entry.values ? entry.values.length : 0
+                                    delegate: TextField {
+                                        // 每行一个值，高度走 TextField 默认 implicitHeight，与普通单值框一致
+                                        width: linesListView.width - 4
+                                        text: valueRows.entry.values[index] || ""
+                                        color: "#e0e0e0"
+                                        placeholderTextColor: "#909090"
+                                        font.pixelSize: 13
+                                        background: Rectangle {
+                                            color: "#2d2d2d"
+                                            border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
+                                            border.width: 1
+                                            radius: 2
+                                        }
+                                        onEditingFinished: editPanelController.setLineValueAt(valueRows.entry.keyName, index, text)
+                                        onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=multiValue key='" + valueRows.entry.keyName + "' index=" + index + " value=['" + text + "']")
+                                        onHoveredChanged: {
+                                            if (hovered && valueRows.entry.hint && valueRows.entry.hint.length > 0) {
+                                                var g = mapToGlobal(width / 2, height + 4)
+                                                appToolTip.show(valueRows.entry.hint, g.x, g.y)
+                                            } else {
+                                                appToolTip.hide()
+                                            }
                                         }
                                     }
                                 }
