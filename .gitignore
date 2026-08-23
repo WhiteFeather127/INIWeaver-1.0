@@ -377,3 +377,7 @@ FodyWeavers.xsd
 # AI 助手工作区规则文件（仅本地使用，不进 git）
 CLAUDE.md
 claude.md
+
+# AI 助手工具目录（本地会话/配置，不进 git)
+.codebuddy/
+.trae/
