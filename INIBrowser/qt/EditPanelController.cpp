@@ -123,7 +123,7 @@ void EditPanelController::setActive(qulonglong sectionId)
     if (it == IBR_Inst_Project.IBR_SectionMap.end()) {
         // 无效 ID，清空状态
         if (!m_isEmpty) {
-            m_currentSectionId = 0;
+            m_currentSectionId = INVALID_MODULE_ID;  // 哨兵用 INVALID_MODULE_ID，0 是合法模块 ID
             emit currentSectionIdChanged();
             m_displayName.clear();
             emit displayNameChanged();
@@ -171,7 +171,7 @@ void EditPanelController::clear()
     // Empty=true → RenderUI 直接 return，侧边栏不显示编辑内容
     if (m_isEmpty) return;
 
-    m_currentSectionId = 0;
+    m_currentSectionId = INVALID_MODULE_ID;  // 哨兵用 INVALID_MODULE_ID，0 是合法模块 ID
     emit currentSectionIdChanged();
     m_displayName.clear();
     emit displayNameChanged();

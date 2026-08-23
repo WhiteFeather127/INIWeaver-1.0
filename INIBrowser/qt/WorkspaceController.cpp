@@ -1906,7 +1906,9 @@ void WorkspaceController::refreshFromTimer()
     // 全量重建分支仅在项目数据变化时进入（增删必变计数），检查成本一次 map 查找
     if (m_editPanelController) {
         qulonglong curId = m_editPanelController->currentSectionId();
-        if (curId != 0
+        // "无激活"哨兵是 INVALID_MODULE_ID，不能用 0（0 是合法模块 ID，否则选中模块 0 时
+        // 该模块被删除也不会清空编辑侧边栏）。
+        if (curId != INVALID_MODULE_ID
             && IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(curId))
                    == IBR_Inst_Project.IBR_SectionMap.end()) {
             clearEditSelection();
@@ -1983,10 +1985,10 @@ void WorkspaceController::refreshSections()
 void WorkspaceController::refreshSectionLines(qulonglong sectionId)
 {
     // 修复：不能用 sectionId==0 判断无效。模块 ID=0 是合法的（第一个模块），
-    // m_currentSectionId 初始化/clear 时用 0 作"无激活"标记，但 0 同时是合法 ID，
-    // 导致激活模块 ID=0 时 OnShow 开关失效（emit sectionDataChanged(0) → 此处 return →
-    // 画布 SectionLineModel 不刷新 → 键行不显示/隐藏 → "点了没反应"）。
-    // 改用 IBR_SectionMap.find 判断：存在则刷新，不存在（含无激活的 0）才跳过。
+    // "无激活"哨兵是 INVALID_MODULE_ID，但这里必须用 IBR_SectionMap.find 判断而非比对哨兵：
+    // 激活模块 ID=0 时若误判无效 → emit sectionDataChanged(0) → 此处 return →
+    // 画布 SectionLineModel 不刷新 → 键行不显示/隐藏 → "点了没反应"。
+    // 用 map 查找：存在则刷新，不存在（真正的无效/删除了）才跳过。
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
     auto mapIt = IBR_Inst_Project.IBR_SectionMap.find(id);
     if (mapIt == IBR_Inst_Project.IBR_SectionMap.end()) return;

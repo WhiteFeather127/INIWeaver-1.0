@@ -3,6 +3,7 @@
 #include <QVariantList>
 #include <QString>
 #include <QtQmlIntegration/qqmlintegration.h>
+#include "IBR_Project.h"  // ModuleID_t, INVALID_MODULE_ID（"无激活" 哨兵不能用 0，0 是合法模块 ID）
 
 // EditPanelController：编辑面板桥接层
 // 对应 ImGui 版本 IBR_EditFrame 命名空间（IBR_Misc.cpp:587-940）
@@ -97,7 +98,9 @@ signals:
     void sectionDataChanged(qulonglong sectionId);
 
 private:
-    qulonglong m_currentSectionId{0};
+    // "无激活"哨兵用 INVALID_MODULE_ID(UINT64_MAX)，不能用 0——首个新建模块 ID 就是 0，
+    // 用 0 会导致"选中模块 0"与"无激活"混淆（模块 0 无法正确显示编辑行/无法判断取消选中）。
+    qulonglong m_currentSectionId{INVALID_MODULE_ID};
     QString m_displayName;
     bool m_isEmpty{true};
     QVariantList m_editLines;
