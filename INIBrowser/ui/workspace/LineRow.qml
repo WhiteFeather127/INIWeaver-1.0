@@ -486,6 +486,9 @@ Item {
     Column {
         id: iifEdit
         visible: root.isInputMode && root.keyType === 2
+        // z 提到行级右键 MouseArea（lineRightClickMA）之上：分量节点的右键（弹节点菜单）
+        // 不能被行级右键拦截（同 z 时后声明的 lineRightClickMA 覆盖整行会抢走分量圆点的右键）
+        z: 2
         anchors.left: onShowLabel.right
         anchors.leftMargin: 6
         anchors.right: parent.right
@@ -500,6 +503,7 @@ Item {
             console.log("[IIF-DIAG] iifEdit.height row=" + root.rowIndex + " key='" + root.keyName + "' h=" + height + " rootH=" + root.height) }
 
         Repeater {
+            id: iifRowsRepeater
             model: (root.keyType === 2 && root.iifRevision >= 0) ? root.iifRows() : []
             delegate: Item {
                 id: iifRow
@@ -1115,6 +1119,32 @@ Item {
     // 行重建期间的中间坐标由 layoutDone 门控拦截（见 onXChanged/onYChanged）。
     function updateLinkNodeCenter(force) {
         doUpdateLinkNodeCenter(force)
+    }
+
+    // IIF 分量节点坐标强制回写（模块移动/拖拽/缩放/平移结束后由 SectionNode.updateAllCenters
+    // 级联调用）。分量节点的 onX/onY 是相对 IIF Flow 的（父移动不触发），若只靠它回写，
+    // 模块移动到位后 LastCenter 停留在布局初期旧坐标 → 连线跑到画布外。
+    function pushCompNodesRecursive(obj, force) {
+        if (!obj || !obj.children) return
+        for (var i = 0; i < obj.children.length; ++i) {
+            var child = obj.children[i]
+            if (!child) continue
+            if (child.iifNode && child.pushCompCenter) {
+                child.pushCompCenter(force)
+            } else {
+                pushCompNodesRecursive(child, force)
+            }
+        }
+    }
+
+    function updateIifCompCenters(force) {
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
+        if (!iifRowsRepeater) return
+        var rep = iifRowsRepeater
+        for (var r = 0; r < rep.count; ++r) {
+            // LinkNodePoint 在 RowLayout 内（iifRow 深层），递归查找
+            pushCompNodesRecursive(rep.itemAt(r), force)
+        }
     }
 
     function doUpdateLinkNodeCenter(force) {

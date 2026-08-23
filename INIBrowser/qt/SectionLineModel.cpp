@@ -477,6 +477,30 @@ void SectionLineModel::setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal 
     emit linkNodeCenterChanged();
 }
 
+void SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMult, int compIdx, qreal x, qreal y)
+{
+    // 按 keyName 稳定查 lineIdx（row 索引在 rebuildEntries 重建后可能错位，
+    // sessionIdFor(row) 会取到错误 entry 算错 sessionId → 连线端点漂移）
+    if (lineMult < 0 || compIdx < 0) return;
+    StrPoolID K = NewPoolStr(keyName.toUtf8().toStdString());
+    ModuleID_t sid = static_cast<ModuleID_t>(m_sectionId);
+    auto bsec = IBR_Inst_Project.GetSectionFromID(sid).GetBack_Unsafe();
+    if (!bsec) return;
+    for (auto subIdx : bsec->SubSecOrder) {
+        auto &sub = bsec->SubSecs[subIdx];
+        if (!sub.CanOwnKey(K)) continue;
+        for (size_t i = 0; i < sub.Lines_ByName.size(); ++i) {
+            if (sub.Lines_ByName[i] != K) continue;
+            auto sess = IBR_NodeSession::GetSessionIdx(
+                bsec->GetThisID(), sub.Default->Name, i,
+                static_cast<size_t>(lineMult), static_cast<size_t>(compIdx));
+            IBR_NodeSession::SetSessionStatus(sess, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
+            emit linkNodeCenterChanged();
+            return;
+        }
+    }
+}
+
 qulonglong SectionLineModel::sessionIdFor(int row, int compIdx) const
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return 0;

@@ -2447,11 +2447,18 @@ void WorkspaceController::rebuildLinkEndpoints()
 #endif
         }
 
-        // 优先级 1：源行圆点（按 FromKey 查行级接受点，与 QML 回写同源）。
-        // 修复：LastCenter 按 SessionID 索引，IIF 行链接的 SessionID 用 Comp=cidx（UpdateAll），
-        // 而 QML 圆点回写用 Comp=0（rebuildEntries），两者不匹配 → LastCenter=0 → pa 回退标题栏（起点错）。
-        // 按源行 key 查询直接取该行圆点坐标，免疫 SessionID 不匹配。
-        if (srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
+        // 优先级 1：QML 回写的 LastCenter（分量节点经 pushCompCenter → setLinkNodeCenterAt
+        // 按分量 sessionId（Comp=cidx）回写，与 UpdateAll 建链的 SourceID 一致；行级节点
+        // Comp=0 的链接同样命中）。LastCenter 优先可保证分量连线起点落在分量圆点上。
+        if (srcLineVisible && !srcCollapsed && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        {
+            paX = static_cast<qreal>(sv.LastCenter.x);
+            paY = static_cast<qreal>(sv.LastCenter.y);
+            paValid = true;
+        }
+        // 优先级 2：行级接受点兜底（按 FromKey 查行级圆点坐标）。
+        // 仅当 LastCenter 未回写时使用（首帧/行级节点 Comp 不匹配时），避免覆盖分量圆点坐标。
+        if (!paValid && srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -2465,13 +2472,6 @@ void WorkspaceController::rebuildLinkEndpoints()
                     paValid = true;
                 }
             }
-        }
-        // 优先级 2：QML 回写的 LastCenter（非 0 才用，0 表示尚未回写；源行隐藏时跳过）
-        if (!paValid && srcLineVisible && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
-        {
-            paX = static_cast<qreal>(sv.LastCenter.x);
-            paY = static_cast<qreal>(sv.LastCenter.y);
-            paValid = true;
         }
         // 隐藏行专用：源行隐藏（非折叠态）时连线起点落到标题栏最右端。
         // EqSize 由 QML reportSectionSize 回写，EqSize.x*ratio = 节点实际屏幕宽度，

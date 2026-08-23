@@ -333,8 +333,6 @@ Item {
                               && workspaceController.isSectionSelected(root.sectionData.sectionId)))
         var dx = isDragging ? workspaceController.dragOffset.x : 0
         var dy = isDragging ? workspaceController.dragOffset.y : 0
-        if (root.keyName === "TeamBuff")
-            console.log("[PUSHCOMP] key=" + root.keyName + " comp=" + root.compIdx + " pos=(" + pos.x.toFixed(1) + "," + pos.y.toFixed(1) + ") drag=(" + dx.toFixed(1) + "," + dy.toFixed(1) + ") storing=(" + (pos.x-dx).toFixed(1) + "," + (pos.y-dy).toFixed(1) + ") isDragging=" + isDragging + " state=" + workspaceController.inputState)
         // 按 keyName 稳定定位：rowIndex 在 rebuildEntries 重建后可能错位，
         // setLinkNodeCenterAt(row) 会算错 sessionId → 连线端点漂移
         root.lineModel.setLinkNodeCenterAtKey(root.keyName, root.lineMult, root.compIdx, pos.x - dx, pos.y - dy)

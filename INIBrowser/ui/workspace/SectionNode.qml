@@ -152,6 +152,11 @@ Item {
             if (item && item.updateLinkNodeCenter) {
                 item.updateLinkNodeCenter(force)
             }
+            // IIF 分量节点同样强制回写：模块移动/拖拽/缩放后分量圆点坐标必须刷新，
+            // 否则 LastCenter 停留在旧位置 → 分量连线跑到画布外
+            if (item && item.updateIifCompCenters) {
+                item.updateIifCompCenters(force)
+            }
         }
         // 折叠子模块：嵌套在父虚拟块 Column 内，父块移动/变化时其自身 onXChanged 不触发，
         // 必须由父块级联回写 headLineRN/RadioButton 坐标，否则折叠子模块的连线与拖拽/伸缩不同步。
