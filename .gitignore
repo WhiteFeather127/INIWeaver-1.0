@@ -374,6 +374,9 @@ FodyWeavers.xsd
 # CMake binary directory（cmake 自动生成 .vcxproj + Qt6 代码生成 + .obj 中间产物，可随时删除由 cmake+MSBuild 重建）
 /build/
 
+# deploy.ps1 的发布输出目录（windeployqt 生成的 Qt 运行库产物，不入库）
+/publish/
+
 # AI 助手工作区规则文件（仅本地使用，不进 git）
 CLAUDE.md
 claude.md

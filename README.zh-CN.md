@@ -1,4 +1,4 @@
-﻿# INI Weaver（INI 织网者）
+# INI Weaver（INI 织网者）
 
 [English version](README.md) | 简体中文
 
@@ -85,6 +85,21 @@ CMake cache、Qt6 自动生成代码和导入库都留在 `build\` 下。
 把 `Release\INIWeaver.exe` 复制到一个已经放了 Qt6 运行时 DLL 的目录
 （即发行包目录）。只替换 EXE 就够了。
 
+> Qt6 运行库（Qt6*.dll + QML 插件目录）**不进入 git 仓库**——它属于部署产物，
+> 按需生成。用 [`deploy.ps1`](deploy.ps1) 从本机 Qt 安装目录借助 `windeployqt`
+> 打出一个自包含的发布目录：
+>
+> ```powershell
+> # 先编译，再：
+> .\deploy.ps1                                  # 最小包：仅 EXE + Qt 运行库
+> .\deploy.ps1 -AppData "<安装目录>" -OutZip ".\INIWeaver-Release.zip"
+> ```
+>
+> - 默认：Qt 在 `C:/Qt6/6.8.1/msvc2022_64`，输出到 `publish\`。
+> - `-AppData <目录>`：从已有安装目录把应用数据（`Global/` 模块库 + `Resources/` 配置）一起拷进包。
+> - `-OutZip <路径>`：额外把所有内容打包成 zip。
+> - 若 `windeployqt.exe` 不在此 Qt 目录，用 `-QtBin` 指定。
+
 ## 文档
 
 - [`docs/Info.md`](docs/Info.md) —— 完整英文用户手册（截图 + GIF 演示）。
@@ -106,6 +121,7 @@ docs/                  Sphinx 文档源（英文 + zh_CN 翻译）
 pic/                   文档与本 README 引用的截图和 GIF
 CMakeLists.txt         CMake 源
 sync-sln.ps1           从 build\INIWeaver.sln 重新生成根 INIWeaver.sln
+deploy.ps1             windeployqt 一键打包（EXE + Qt 运行库 + 应用数据）
 INIWeaver.sln          派生包装 sln（被 git 忽略）
 Release\               Release 配置的 EXE 输出目录（被 git 忽略）
 build\                 CMake 构建目录（被 git 忽略）

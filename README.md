@@ -1,4 +1,4 @@
-﻿# INI Weaver
+# INI Weaver
 
 [中文版本](README.zh-CN.md) | English
 
@@ -93,6 +93,23 @@ Copy `Release\INIWeaver.exe` into a folder that already has the Qt6 runtime
 DLLs (the deployment folder in your distribution). Replacing just the EXE is
 enough.
 
+> The Qt6 runtime (Qt6*.dll + QML plugin directories) is **not** committed to
+> the repository — it is a deploy artifact generated on demand. Use
+> [`deploy.ps1`](deploy.ps1) to produce a self-contained publish folder from
+> your local Qt installation via `windeployqt`:
+>
+> ```powershell
+> # build first, then:
+> .\deploy.ps1                                  # minimal: EXE + Qt runtime only
+> .\deploy.ps1 -AppData "<install dir>" -OutZip ".\INIWeaver-Release.zip"
+> ```
+>
+> - Defaults: Qt at `C:/Qt6/6.8.1/msvc2022_64`, output to `publish\`.
+> - `-AppData <dir>` copies the app data (`Global/` modules + `Resources/`
+>   config) from an existing install into the package.
+> - `-OutZip <path>` additionally packs everything into a zip.
+> - Point `-QtBin` at your `windeployqt.exe` if it differs.
+
 ## Documentation
 
 - [`docs/Info.md`](docs/Info.md) — full English user manual with screenshots
@@ -115,6 +132,7 @@ docs/                  Sphinx documentation source (English + zh_CN translations
 pic/                   screenshots and GIFs referenced by the docs and this README
 CMakeLists.txt         CMake source
 sync-sln.ps1           regenerates the root INIWeaver.sln from build\INIWeaver.sln
+deploy.ps1             windeployqt-based release packager (EXE + Qt runtime + app data)
 INIWeaver.sln          derived wrapper sln (git-ignored)
 Release\               EXE output directory for Release builds (git-ignored)
 build\                 CMake binary directory (git-ignored)
