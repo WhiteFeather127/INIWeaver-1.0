@@ -77,6 +77,9 @@ public:
     // IIF 分量节点坐标回写：compIdx 定位分量，sessionId 按 compIdx 重算（对应 UpdateAll 用 Comp=cidx）
     // 写回后连线端点表经 priority 2（sv.LastCenter）解析到正确分量圆点
     Q_INVOKABLE void setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal y);
+    // IIF 分量节点坐标回写（按 keyName 稳定定位）：row 索引在 rebuildEntries 重建后可能错位，
+    // 用 keyName 查 lineIdx（稳定）避免 sessionId 算错导致连线端点漂移
+    Q_INVOKABLE void setLinkNodeCenterAtKey(const QString &keyName, int lineMult, int compIdx, qreal x, qreal y);
     // 行级接受点回写（对应 ImGui ActiveLines[key].AcceptCenter[mult]）
     // 该坐标作为连线终点 pb 的行精确值，由 LineRow.updateLinkNodeCenter 同步回写
     Q_INVOKABLE void setAcceptCenter(int row, qreal x, qreal y);
