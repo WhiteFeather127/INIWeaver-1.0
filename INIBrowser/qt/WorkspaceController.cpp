@@ -1973,6 +1973,10 @@ void WorkspaceController::refreshSectionLines(qulonglong sectionId)
     auto it = m_lineModels.find(id);
     if (it != m_lineModels.end() && *it) {
         (*it)->refresh();
+        // 侧边栏改 IIF 值：refresh() 只发 dataChanged，模块 IIF 显示靠 iifRevision 门控的
+        // iifComponents() 重读，须在此稳定入口（写后 QTimer 已落盘）补发 iifDataChanged，
+        // 让画布模块与侧边栏同步。不放进 refresh() 内部以免在写入/toggle 暂态重读 0。
+        (*it)->notifyIifDataChanged();
     }
     // 行值/OnShow 变化可能影响连线，标记端点脏
     m_linkEndpointsDirty = true;

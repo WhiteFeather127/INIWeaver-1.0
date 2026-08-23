@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QDebug>
 #include <unordered_map>
+#include <cstdlib>
 
 // IBR_EditFrame 命名空间的成员声明（定义在 IBR_Misc.cpp:587-594）
 // EditBuf 大小固定为 100000（对应 IBR_Misc.cpp:592 的 char EditBuf[100000]）
@@ -577,24 +578,34 @@ void EditPanelController::setIifValue(const QString &key, int mult, int idx, con
             qDebug("[SET-IIF]   BEFORE comp=%d type=%s vid=%d state=%s stTxt='%s' raw='%s' dirty=%d",
                    (int)ci, typeid(*comps[ci]).name(), cvid, stType.c_str(), stTxt.c_str(), cv.Value.c_str(), (int)cv.Dirty);
         }
-        // 对齐 ImGui 原版写回：直接在原始 Value 上改目标分量 State，
-        // 然后 GetFormattedString（只对 Dirty 目标分量 FormatValue）+ UpdateAll（重建链接）。
-        // 不 Duplicate / 不 RegenFormattedString（强制全量 FormatValue，会把 IIS_Int 态链接分量
-        // 目标名格式化成数字）/ 不 SetValue（不触发 ParseFromString 全量重解析）。
-        auto &newV = form.GetValue(vid);
+        // 统一写入（对齐已验证可靠的 bool 路径）：在 Duplicate 副本上改目标分量状态 →
+        // 先 IifSyncLinkTargets 从链接表恢复链接分量目标名 → RegenFormattedString 得新整行串
+        // → 原版 SetValue 应用到原始行（ParseFromString 从正确新串重解析，同步链接目标名）。
+        // 修复：原实现用 GetFormattedString()，因 IBG_InputForm::Dirty 未置位返回缓存旧串，
+        // 行值串永不回写 → 之后保存/重开/切换从旧串重解析把编辑值还原成 0（画布与侧边栏同变 0）。
+        IBB_SubSec* sub = nullptr;
+        size_t lineIdx = 0;
+        for (auto subIdx : pbk->SubSecOrder) {
+            auto &ss = pbk->SubSecs[subIdx];
+            if (!ss.CanOwnKey(K)) continue;
+            sub = &ss;
+            for (size_t k = 0; k < ss.Lines_ByName.size(); ++k)
+                if (ss.Lines_ByName[k] == K) { lineIdx = k; break; }
+            break;
+        }
+        auto newForm = ii->Value->Duplicate();
+        if (!newForm) return;
+        if (sub) IifSyncLinkTargets(*newForm, sub, lineIdx, static_cast<size_t>(mult));
+        auto &newV = newForm->GetValue(vid);
         if (auto st = newV.StateValue<IIS_String>()) st->Text = valStr;
+        else if (auto st = newV.StateValue<IIS_Int>()) st->Value = std::atoi(valStr.c_str());
+        else if (auto st = newV.StateValue<IIS_Bool>()) st->Value = !(valStr.empty() || valStr[0] == '0');
         else newV.ResetState<IIS_String>(valStr);
-        newV.Value = valStr;
-        newV.NeedsUpdate(form.GetValues(), *comp);
+        newV.NeedsUpdate(newForm->GetValues(), *comp);
         qDebug("[SET-IIF]   OnExport=%d Key=%.20s exportingLine=%p exportingSec=%p",
                (int)ExportContext::OnExport, PoolStr(ExportContext::Key), (void*)ExportContext::ExportingLine, (void*)ExportContext::ExportingSection);
-        qDebug("[SET-IIF]   P1-afterset vid=%d stTxt='%s' raw='%s'", vid,
-               (newV.StateValue<IIS_String>() ? newV.StateValue<IIS_String>()->Text.c_str() : "?"), newV.Value.c_str());
-        form.GetFormattedString();        // 只格式化 Dirty 的目标分量（其余用缓存 V.Value，不截断）
-        auto &gv = form.GetValue(vid);
-        qDebug("[SET-IIF]   P2-aftfmt vid=%d stTxt='%s' raw='%s'", vid,
-               (gv.StateValue<IIS_String>() ? gv.StateValue<IIS_String>()->Text.c_str() : "?"), gv.Value.c_str());
-        qDebug("[SET-IIF]   LINE='%s'", form.GetFormattedString().c_str());
+        const std::string newLine = newForm->RegenFormattedString();
+        d->SetValue(newLine);            // 原版 SetValue → ParseFromString + CurSub->UpdateAll()
         pbk->UpdateAll();                // 重建链接表
         IBR_Inst_Project.RefreshLinkList = true;
         {
@@ -605,6 +616,7 @@ void EditPanelController::setIifValue(const QString &key, int mult, int idx, con
             else if (auto st = v2.StateValue<IIS_Bool>()) stTxt = st->Value ? "true" : "false";
             qDebug("[SET-IIF]   P3-aftupdall vid=%d state=%s stTxt='%s' raw='%s'", vid, stType.c_str(), stTxt.c_str(), v2.Value.c_str());
         }
+        qDebug("[SET-IIF]   LINE='%s'", newLine.c_str());
     } });
     QTimer::singleShot(30, this, [this]() {
         rebuildEditLines();

@@ -138,6 +138,10 @@ public:
     //       link 分量附节点元数据(hasLinkNode/linkLimit/linkCol/isEmpty/links/linkType/sessionId/lineMult)
     Q_INVOKABLE QVariantList iifComponents(int row) const;
 
+    // 通知 QML 重读本行 IIF 分量（驱动 LineRow.iifRevision 递增）。供侧边栏改值后
+    // 的稳定入口（refreshSectionLines）调用，不在 refresh() 内部触发。
+    void notifyIifDataChanged();
+
     // IIF 分量值写回（阶段一核心：input/int 分量文本编辑）
     // 修改该分量 state 后按格式化串重建整行并写回业务层
     Q_INVOKABLE void setIifComponentValue(int row, int compIdx, const QString &rawText);

@@ -19,6 +19,7 @@
 #include "IBG_InputType_Derived.h"  // IIC_* 输入组件类型（IIF 多分量导出/渲染）
 #include "IifComponentHelper.h"    // 画布/侧边栏共用 IIF 分量导出辅助（统一类型判定）
 #include "IBB_Components.h"        // IBB_Section_Desc
+#include <cstdlib>
 #include <algorithm>
 #include <ranges>
 #include <set>
@@ -140,17 +141,6 @@ void SectionLineModel::refresh()
     const int oldCount = static_cast<int>(m_entries.size());
     rebuildEntries();
 
-    // IIF 行在 QML 侧走 iifComponents()（函数式 + iifRevision 门控），内容来自实时
-    // 读 form 分量状态，只有 iifDataChanged 能触发 QML 重读。而侧边栏改 IIF 值只变更
-    // form 内分量状态、不改行值串（GetString/format 不变），快照 diff 检测不到 →
-    // 必须无条件对每个 IIF 行补发 iifDataChanged，否则“侧边栏改值→画布模块不同步”。
-    // 对齐画布直接改值路径（setIifComponentValue 尾部也显式 emit），二者互补不冲突。
-    for (size_t i = 0; i < m_entries.size(); ++i) {
-        if (m_entries[i].keyType == 2) {
-            emit iifDataChanged(static_cast<int>(i));
-        }
-    }
-
     // 性能优化：行内容未变时跳过信号。
     // 删除/新建模块等触发全量 refreshSections 时，无关节点的行数据不变，
     // 不发 dataChanged/resetModel 可避免 QML 行绑定重新求值（全量重建卡顿主因）
@@ -175,6 +165,19 @@ void SectionLineModel::refresh()
     else if (newCount > 0)
     {
         emit dataChanged(index(0), index(newCount - 1));
+    }
+}
+
+// 侧边栏改值后通知 QML 重读 IIF 分量：模块 IIF 显示走 iifComponents()（函数式 +
+// iifRevision 门控），仅靠 refresh() 的 dataChanged 不会触发 QML 重读。
+// 只在该稳定入口（refreshSectionLines，写后 QTimer 已落盘）调用，避免在 refresh() 内部
+// 无条件触发——那会在写入/切换等 form 暂态（分量暂为 0）时被重读而污染显示。
+void SectionLineModel::notifyIifDataChanged()
+{
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].keyType == 2) {
+            emit iifDataChanged(static_cast<int>(i));
+        }
     }
 }
 
@@ -1345,18 +1348,23 @@ void SectionLineModel::setIifComponentValue(int row, int compIdx, const QString 
                 if (ss.Lines_ByName[k] == keyId) { lineIdx = k; break; }
             break;
         }
-        // 对齐 ImGui 原版写回：直接在原始 Value 上改目标分量 State，
-        // 然后 GetFormattedString（只对 Dirty 目标分量 FormatValue）+ UpdateAll（重建链接）。
-        // 不 Duplicate / 不 RegenFormattedString（强制全量 FormatValue，会把 IIS_Int 态链接分量
-        // 目标名格式化成数字）/ 不 SetValue（不触发 ParseFromString 全量重解析）。
-        (void)sub; (void)lineIdx;   // 不再需要链接表同步（ImGui 原版不这么做）
-        auto &newV = form.GetValue(vid);
+        // 统一写入（对齐已验证可靠的 bool 路径）：在 Duplicate 副本上改目标分量状态 →
+        // 先 IifSyncLinkTargets 从链接表恢复各链接分量目标名 → RegenFormattedString 得新整行串
+        // → 原版 SetValue 应用到原始行（ParseFromString 从正确新串重解析，同步链接目标名）。
+        // 修复：原实现用 GetFormattedString()，因 IBG_InputForm::Dirty 未置位返回缓存旧串，
+        // 行值串永不回写 → 之后保存/重开/切换从旧串重解析把编辑值还原成 0（画布与侧边栏同变 0）。
+        auto newForm = ii->Value->Duplicate();
+        if (!newForm) return;
+        if (sub) IifSyncLinkTargets(*newForm, sub, lineIdx, static_cast<size_t>(mult));
+        auto &newV = newForm->GetValue(vid);
         if (auto st = newV.StateValue<IIS_String>()) st->Text = text;
+        else if (auto st = newV.StateValue<IIS_Int>()) st->Value = std::atoi(text.c_str());
+        else if (auto st = newV.StateValue<IIS_Bool>()) st->Value = !(text.empty() || text[0] == '0');
         else newV.ResetState<IIS_String>(text);
-        newV.Value = text;
-        newV.NeedsUpdate(form.GetValues(), *comp);
-        form.GetFormattedString();        // 只格式化 Dirty 的目标分量（其余用缓存 V.Value，不截断）
-        qDebug("[CANVAS-SET]   LINE='%s'", form.GetFormattedString().c_str());
+        newV.NeedsUpdate(newForm->GetValues(), *comp);
+        const std::string newLine = newForm->RegenFormattedString();
+        dataPtr->SetValue(newLine);      // 原版 SetValue → ParseFromString + CurSub->UpdateAll()
+        qDebug("[CANVAS-SET]   LINE='%s'", newLine.c_str());
         bsec->UpdateAll();               // 重建链接表
         {
             auto &v2 = form.GetValue(vid);
