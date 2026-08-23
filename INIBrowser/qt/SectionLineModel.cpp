@@ -140,6 +140,17 @@ void SectionLineModel::refresh()
     const int oldCount = static_cast<int>(m_entries.size());
     rebuildEntries();
 
+    // IIF 行在 QML 侧走 iifComponents()（函数式 + iifRevision 门控），内容来自实时
+    // 读 form 分量状态，只有 iifDataChanged 能触发 QML 重读。而侧边栏改 IIF 值只变更
+    // form 内分量状态、不改行值串（GetString/format 不变），快照 diff 检测不到 →
+    // 必须无条件对每个 IIF 行补发 iifDataChanged，否则“侧边栏改值→画布模块不同步”。
+    // 对齐画布直接改值路径（setIifComponentValue 尾部也显式 emit），二者互补不冲突。
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].keyType == 2) {
+            emit iifDataChanged(static_cast<int>(i));
+        }
+    }
+
     // 性能优化：行内容未变时跳过信号。
     // 删除/新建模块等触发全量 refreshSections 时，无关节点的行数据不变，
     // 不发 dataChanged/resetModel 可避免 QML 行绑定重新求值（全量重建卡顿主因）
