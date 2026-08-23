@@ -172,8 +172,9 @@ Item {
     // 命中 → checkMergePreview/mergePreviewText 生成预览 → setDragTarget 通知目标节点显示预览框
     // 未命中或命中源自身 → setDragTarget(0) 清除预览
     function updateDragTarget(toX, toY, srcId, linkType, isLinkDrag) {
-        var targetId = workspaceController.hitTestSection(toX, toY)
-        if (targetId && targetId !== srcId) {
+        var targetStr = workspaceController.hitTestSectionStr(toX, toY)
+        if (targetStr !== "" && Number(targetStr) !== srcId) {
+            var targetId = Number(targetStr)
             var code = workspaceController.checkMergePreview(srcId, targetId, linkType, isLinkDrag)
             var text = workspaceController.mergePreviewText(srcId, targetId, linkType, isLinkDrag)
             // 颜色规则沿用原 DropArea onEntered 逻辑：
@@ -184,7 +185,7 @@ Item {
                                     : (code === 2 ? "#d6a23b" : "#d63b3b"))
             workspaceController.setDragTarget(targetId, color, text)
         } else {
-            workspaceController.setDragTarget(0, "", "")
+            workspaceController.clearDragTarget()
         }
     }
 
@@ -337,8 +338,9 @@ Item {
                 onReleased: {
                     // 用拖拽终点（或按下位置）命中目标节点，命中则合并（对应 IBR_SecDrag 落点）
                     var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
-                    var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
-                    if (targetId && targetId !== (root.sectionData.sectionId || 0)) {
+                    var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+                    if (targetStr !== "" && Number(targetStr) !== (root.sectionData.sectionId || 0)) {
+                        var targetId = Number(targetStr)
                         workspaceController.mergeSectionToSection(root.sectionData.sectionId, targetId)
                     }
                     workspaceController.clearDraggingLink()

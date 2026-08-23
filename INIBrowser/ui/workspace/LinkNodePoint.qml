@@ -180,8 +180,9 @@ Item {
             // 允许自连：targetId == sourceId 时链接回本模块（DLK），对应 ImGui Link.IsSelfLinked
             // 仅当确实拖拽过才建链，普通点击圆点（无拖动）松手不误建自连
             var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
-            var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
-            if (root.linkWasDragged && targetId && root.linkLimit !== 0) {
+            var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+            if (root.linkWasDragged && targetStr !== "" && root.linkLimit !== 0) {
+                var targetId = Number(targetStr)
                 if (root.iifNode) {
                     // IIF 分量节点：写入该分量 Value（compIdx）建链
                     root.lineModel.createLinkAt(root.rowIndex, root.compIdx, targetId, "")
@@ -209,8 +210,9 @@ Item {
                 workspaceView.dragPreviewItem.x = toPos.x + 8
                 workspaceView.dragPreviewItem.y = toPos.y + 8
                 // 目标命中 + 预览（lineDrag：建链；允许自连，拖动中悬停本模块也给出预览）
-                var targetId = workspaceController.hitTestSection(toPos.x, toPos.y)
-                if (targetId) {
+                var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+                if (targetStr !== "") {
+                    var targetId = Number(targetStr)
                     if (root.linkLimit === 0) {
                         // LinkLimit=0 无法建链：源端红叉"无效链接" + 目标红色预览
                         // 对应 ImGui DrawDragPreviewIcon_LinkLim0（IBR_SectionData.cpp:96-106）
@@ -226,7 +228,7 @@ Item {
                     }
                 } else {
                     workspaceController.setDragInvalidLink(false)
-                    workspaceController.setDragTarget(0, "", "")
+                    workspaceController.clearDragTarget()
                 }
             }
         }

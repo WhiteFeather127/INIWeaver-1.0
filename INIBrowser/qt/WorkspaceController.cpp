@@ -137,7 +137,15 @@ qulonglong WorkspaceController::hitTestSection(qreal screenX, qreal screenY) con
             mouseEq.y() >= y && mouseEq.y() <= y + h)
             return id;
     }
-    return 0;
+    return INVALID_MODULE_ID;
+}
+
+// 命中测试的字符串版本：QML 判断"是否命中"用空串（未命中），id 用 Number(str) 转回。
+// 避免 INVALID_MODULE_ID(UINT64_MAX) 传给 QML 时超出 double 精度而失真。
+QString WorkspaceController::hitTestSectionStr(qreal screenX, qreal screenY) const
+{
+    qulonglong id = hitTestSection(screenX, screenY);
+    return (id == INVALID_MODULE_ID) ? QString() : QString::number(id);
 }
 
 void WorkspaceController::onMousePress(qreal x, qreal y, int button)
@@ -335,7 +343,7 @@ void WorkspaceController::onMouseRelease(qreal x, qreal y, int button)
                                                   std::numeric_limits<qreal>::max());
                 // 命中模块 → 多选操作菜单（保持选中）；空白处 → 取消选中 + 空白右键菜单
                 // （背景 MouseArea 只能收到空白处右键，命中检测为防御性兜底）
-                if (hitTestSection(x, y) != 0) {
+                if (hitTestSection(x, y) != INVALID_MODULE_ID) {
                     showMassContextMenu(x, y);
                 } else {
                     clearSelection();
@@ -1617,8 +1625,8 @@ void WorkspaceController::clearDraggingLink()
         emit dragInvalidLinkChanged(false);
     }
     // 拖拽结束同时清拖拽目标预览（拖拽源 onReleased 已执行建链/合并，这里兜底清理）
-    if (m_dragTargetSectionId != 0 || !m_dragTargetColor.isEmpty() || !m_dragTargetText.isEmpty() || !m_dragSourceText.isEmpty()) {
-        m_dragTargetSectionId = 0;
+    if (m_dragTargetSectionId != INVALID_MODULE_ID || !m_dragTargetColor.isEmpty() || !m_dragTargetText.isEmpty() || !m_dragSourceText.isEmpty()) {
+        m_dragTargetSectionId = INVALID_MODULE_ID;
         m_dragTargetColor.clear();
         m_dragTargetText.clear();
         m_dragSourceText.clear();
@@ -1642,6 +1650,18 @@ void WorkspaceController::setDragTarget(qulonglong targetId, const QString &colo
     m_dragTargetSectionId = targetId;
     m_dragTargetColor = color;
     m_dragTargetText = text;
+    emit dragTargetChanged();
+}
+
+void WorkspaceController::clearDragTarget()
+{
+    if (m_dragTargetSectionId == INVALID_MODULE_ID && m_dragTargetColor.isEmpty()
+        && m_dragTargetText.isEmpty() && m_dragSourceText.isEmpty())
+        return;
+    m_dragTargetSectionId = INVALID_MODULE_ID;
+    m_dragTargetColor.clear();
+    m_dragTargetText.clear();
+    m_dragSourceText.clear();
     emit dragTargetChanged();
 }
 

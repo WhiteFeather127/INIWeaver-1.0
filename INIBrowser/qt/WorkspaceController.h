@@ -74,6 +74,7 @@ class WorkspaceController : public QObject
     Q_PROPERTY(bool dragInvalidLink READ dragInvalidLink NOTIFY dragInvalidLinkChanged)
     // 拖拽目标命中：鼠标命中测试选中的目标节点（0=未命中），驱动目标节点预览框显示
     Q_PROPERTY(qulonglong dragTargetSectionId READ dragTargetSectionId NOTIFY dragTargetChanged)
+    Q_PROPERTY(bool hasDragTarget READ hasDragTarget NOTIFY dragTargetChanged)
     Q_PROPERTY(QString dragTargetColor READ dragTargetColor NOTIFY dragTargetChanged)
     Q_PROPERTY(QString dragTargetText READ dragTargetText NOTIFY dragTargetChanged)
     // 连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 里的源文本，IBR_LinkNode.cpp:570-573）
@@ -138,14 +139,20 @@ public:
     // 坐标转换（对应 IBR_WorkSpace::EqPosToRePos / RePosToEqPos）
     Q_INVOKABLE QPointF eqToScreen(QPointF eqPos) const;
     Q_INVOKABLE QPointF screenToEq(QPointF screenPos) const;
-    // 鼠标命中测试：返回鼠标屏幕坐标命中的顶层 sectionId（0=未命中）；从后向前遍历（上层优先）
+    // 鼠标命中测试：返回鼠标屏幕坐标命中的顶层 sectionId（INVALID_MODULE_ID=未命中）；从后向前遍历（上层优先）
     // 复用 updateSelection 的 eq 矩形 contains 模式，基于 sections 模型自带 eqX/eqY/eqW/eqH
     Q_INVOKABLE qulonglong hitTestSection(qreal screenX, qreal screenY) const;
-    // 拖拽目标预览（拖拽源在 onPositionChanged 中调用；结束/离开时传 id=0 清除）
+    // 命中测试的字符串版本：命中返回 QString::number(id)，未命中返回空串。供 QML 判断"是否命中"，
+    // 避免 INVALID_MODULE_ID(UINT64_MAX) 传给 QML 时超出 double 精度而失真；id 取 Number(str) 转回。
+    Q_INVOKABLE QString hitTestSectionStr(qreal screenX, qreal screenY) const;
+    // 拖拽目标预览（拖拽源在 onPositionChanged 中调用；结束/离开时用 clearDragTarget() 清除）
     Q_INVOKABLE void setDragTarget(qulonglong targetId, const QString &color, const QString &text);
+    // 清除拖拽目标预览（终止拖拽/离开模块悬停时调用）
+    Q_INVOKABLE void clearDragTarget();
     // 设置连线拖拽的源预览标签（由 LinkNodePoint 拖动时调用，imgui BeginDragDropSource 源文本）
     Q_INVOKABLE void setDragSourceText(const QString &text);
     qulonglong dragTargetSectionId() const { return m_dragTargetSectionId; }
+    bool hasDragTarget() const { return m_dragTargetSectionId != INVALID_MODULE_ID; }
     QString dragTargetColor() const { return m_dragTargetColor; }
     QString dragTargetText() const { return m_dragTargetText; }
     QString dragSourceText() const { return m_dragSourceText; }
@@ -529,7 +536,7 @@ private:
     // v3 批次 1.4：拖拽 LinkLimit=0 节点时 DropArea 接收状态
     bool m_dragInvalidLink{false};
     // 拖拽目标命中状态（命中测试驱动，拖拽源 onPositionChanged 更新，clearDraggingLink 清零）
-    qulonglong m_dragTargetSectionId{0};
+    qulonglong m_dragTargetSectionId{INVALID_MODULE_ID};
     QString m_dragTargetColor;
     QString m_dragTargetText;
     QString m_dragSourceText;
