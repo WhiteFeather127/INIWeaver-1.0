@@ -320,14 +320,24 @@ Item {
     // 用 setLinkNodeCenterAt 按分量 sessionId（Comp=cidx）写 LastCenter，
     // rebuildLinkEndpoints 的 priority 2 读到该分量圆点坐标 → 连线起点/终点正确。
     // 减 dragOffset 与 LineRow 一致：存储原位置，LinkRenderer 叠加拖拽位移动态修正。
-    function pushCompCenter() {
+    function pushCompCenter(force) {
         if (!root.iifNode || !root.iifReady) return
-        if (!root.lineModel || root.rowIndex < 0 || root.compIdx < 0) return
-        if (workspaceController.inputState === 1 || workspaceController.zoomPending) return
+        if (!root.lineModel || root.compIdx < 0) return
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
         var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
-        var dx = workspaceController.dragOffset.x
-        var dy = workspaceController.dragOffset.y
-        root.lineModel.setLinkNodeCenterAt(root.rowIndex, root.compIdx, pos.x - dx, pos.y - dy)
+        // 对齐 LineRow.doUpdateLinkNodeCenter：仅拖拽中减去 dragOffset（存储原位置，
+        // 由 LinkRenderer 叠加 dragOffset 实时跟随）；松手后 dragOffset 不清零但模块已
+        // 到最终位置，此时若仍减去会存回"旧位置"→ 重建端点表后源端点 pa 偏移。
+        var isDragging = (workspaceController.draggingSectionId === root.sectionData.sectionId
+                          || (workspaceController.massDragging
+                              && workspaceController.isSectionSelected(root.sectionData.sectionId)))
+        var dx = isDragging ? workspaceController.dragOffset.x : 0
+        var dy = isDragging ? workspaceController.dragOffset.y : 0
+        if (root.keyName === "TeamBuff")
+            console.log("[PUSHCOMP] key=" + root.keyName + " comp=" + root.compIdx + " pos=(" + pos.x.toFixed(1) + "," + pos.y.toFixed(1) + ") drag=(" + dx.toFixed(1) + "," + dy.toFixed(1) + ") storing=(" + (pos.x-dx).toFixed(1) + "," + (pos.y-dy).toFixed(1) + ") isDragging=" + isDragging + " state=" + workspaceController.inputState)
+        // 按 keyName 稳定定位：rowIndex 在 rebuildEntries 重建后可能错位，
+        // setLinkNodeCenterAt(row) 会算错 sessionId → 连线端点漂移
+        root.lineModel.setLinkNodeCenterAtKey(root.keyName, root.lineMult, root.compIdx, pos.x - dx, pos.y - dy)
     }
 
     onXChanged: root.pushCompCenter()
