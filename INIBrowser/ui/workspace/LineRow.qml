@@ -740,6 +740,7 @@ Item {
                             // 下拉组合框（combo）
                             ComboBox {
                                 visible: cc.type === "combo"
+                                id: comboCtrl
                                 x: iifCell.ctlX
                                 width: parent.width - x
                                 height: root.fontBody * 2
@@ -761,7 +762,7 @@ Item {
                                     radius: 2
                                 }
                                 contentItem: Text {
-                                    text: currentText
+                                    text: comboCtrl.currentText
                                     color: "#ce9178"
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
