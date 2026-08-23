@@ -831,8 +831,11 @@ Item {
                                     height: root.fontBody * 2
                                     width: Math.max(80, parent.width - parent.spacing - root.fontBody * 4)
                                     anchors.verticalCenter: parent.verticalCenter
-                                    onValueChanged: {
-                                        if (!pressed && cc.value !== "" + sliderCtrl.value && root.lineModel)
+                                    // 死循环修复：写回必须绑定"用户拖动"（onMoved），不能用 onValueChanged——
+                                    // onValueChanged 在模型刷新重设 value 时也会触发，pressed 已为 false，
+                                    // 形成 加载/重建→写回→重建 每30ms 一轮的无限循环。
+                                    onMoved: {
+                                        if (root.lineModel)
                                             root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, "" + parseInt(sliderCtrl.value, 10))
                                     }
                                 }
