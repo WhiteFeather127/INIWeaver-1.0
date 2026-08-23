@@ -291,7 +291,10 @@ Canvas {
                             || workspaceController.isSectionSelected(link.destId);
             if (isFocused) {
                 col = "#ffffff";  // FocusLineColor（对齐 ImGui 深色主题 255,255,255 = 白，IBR_Misc.cpp:1032）
-            } else if (!col || col === "#00000000") {
+            } else if (!col || col.a === 0) {
+                // 对齐 ImGui IBR_WorkSpace.cpp:1506-1507：LinkColW=(Link.Color>>A)&0xFF; Col = LinkColW>0 ? Link.Color : LegalLineColor。
+                // 用 alpha 字节判断"是否有业务色"（不能只比对 "#00000000"——QColor(alpha=0, RGB 非零) 会
+                // 序列化成 "#RRGGBB00" 形式的透明色，画出来完全不可见导致"平时看不到连线、选中才见白线"）。
                 col = "#cccccc";  // LegalLineColor（默认）
             }
 
