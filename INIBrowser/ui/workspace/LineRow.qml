@@ -542,7 +542,6 @@ Item {
                             Layout.preferredWidth: root.iifCellNaturalWidth(cc)
                             Layout.minimumWidth: 30
                             height: root.fontBody * 2
-                            clipHeight: false
 
                             // Short 标签（imgui TextEx(Hint.Short)）——每个交互分量都有的可见 Hint
                             Text {
