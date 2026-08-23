@@ -400,11 +400,8 @@ public:
     // 诊断模式开关：编译时由 INIWEAVER_DIAG 宏决定，QML 用它门控 console.log
     Q_INVOKABLE bool diagLogEnabled() const
     {
-#ifdef INIWEAVER_DIAG
-        return true;
-#else
+        // 关闭所有 QML 诊断（REFRESH/LINK/ONSHOW/IIF-DIAG 高频刷屏，淹没 C++ 写回诊断）
         return false;
-#endif
     }
 
 signals:

@@ -1760,16 +1760,6 @@ QPointF WorkspaceController::globalToViewport(qreal gx, qreal gy) const
 void WorkspaceController::refreshFromTimer()
 {
     bool isOpen = IBR_ProjectManager::IsOpen();
-    size_t smapSize = IBR_Inst_Project.IBR_SectionMap.size();
-#ifdef INIWEAVER_DIAG
-    qDebug() << "[REFRESH-DIAG] refreshFromTimer isOpen=" << isOpen
-             << "smapSize=" << smapSize
-             << "m_lastIsOpen=" << m_lastIsOpen
-             << "m_lastSectionCount=" << m_lastSectionCount
-             << "m_lastLinkCount=" << m_lastLinkCount
-             << "m_dirty=" << m_dirty
-             << "RefreshLinkList=" << IBR_Inst_Project.RefreshLinkList;
-#endif
     if (!isOpen) {
         if (!m_sections.isEmpty()) {
             m_sectionsModel->updateFrom(QVariantList{});  // 同步清空增量模型
@@ -1980,9 +1970,6 @@ void WorkspaceController::refreshSectionLines(qulonglong sectionId)
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
     auto mapIt = IBR_Inst_Project.IBR_SectionMap.find(id);
     if (mapIt == IBR_Inst_Project.IBR_SectionMap.end()) return;
-#ifdef INIWEAVER_DIAG
-    qDebug() << "[ONSHOW-DIAG] refreshSectionLines sectionId=" << sectionId;
-#endif
     auto it = m_lineModels.find(id);
     if (it != m_lineModels.end() && *it) {
         (*it)->refresh();
@@ -2002,9 +1989,6 @@ void WorkspaceController::refreshSectionLines(qulonglong sectionId)
         && !m_massDragging && !m_zoomPending) {
         if (!m_pendingRebuild) {
             m_pendingRebuild = true;
-#ifdef INIWEAVER_DIAG
-            qDebug() << "[ONSHOW-DIAG] refreshSectionLines QUEUED rebuild sectionId=" << sectionId;
-#endif
             QMetaObject::invokeMethod(this, [this]() {
                 m_pendingRebuild = false;
                 rebuildLinkEndpoints();
@@ -2136,12 +2120,6 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
             connect(modelPtr, &SectionLineModel::linkNodeCenterChanged,
                     this, [this]() {
                 auto *self = const_cast<WorkspaceController*>(this);
-#ifdef INIWEAVER_DIAG
-                qDebug() << "[ONSHOW-DIAG] linkNodeCenterChanged suppress=" << self->m_suppressLinkRebuild
-                         << "state=" << self->m_inputState << "dragSec=" << self->m_dragSectionId
-                         << "massDrag=" << self->m_massDragging << "zoomPending=" << self->m_zoomPending
-                         << "pendingRebuild=" << self->m_pendingRebuild;
-#endif
                 if (self->m_suppressLinkRebuild || self->m_inputState == 1
                     || self->m_dragSectionId != INVALID_MODULE_ID || self->m_massDragging
                     || self->m_zoomPending) {
@@ -2646,15 +2624,6 @@ void WorkspaceController::rebuildLinkEndpoints()
         // destId 用实际 ID（GetSection 返回的 ID），字符串传递
         ep["destId"] = QString::number(static_cast<qulonglong>(dstActualId));
         endpoints.append(ep);
-#ifdef INIWEAVER_DIAG
-        qDebug() << "[LINK-DIAG] rebuild src=" << static_cast<qulonglong>(link.SrcModuleID)
-                 << "dest=" << static_cast<qulonglong>(dstActualId)
-                 << "paValid=" << paValid << "pa=(" << paX << "," << paY << ")"
-                 << "pbValid=" << pbValid << "pb=(" << pbX << "," << pbY << ")"
-                 << "srcCollapsed=" << srcCollapsed
-                 << "dstCollapsed=" << dstCollapsed
-                 << "isCollapsed(src)=" << sv.Collapsed;
-#endif
 
         // D21：构建 map（key = "sessionId:destId"）
         // 字符串 key，与 QML 端 link.sourceSessionId + ":" + link.destId 拼接结果一致

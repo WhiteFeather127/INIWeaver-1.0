@@ -17,6 +17,7 @@
 #include "IBB_PropStringPool.h"    // PoolCStr 宏
 #include "FromEngine/global_tool_func.h"  // UTF8toUnicode/UnicodetoUTF8
 #include "IBG_InputType_Derived.h"  // IIC_* 输入组件类型（IIF 多分量导出/渲染）
+#include "IifComponentHelper.h"    // 画布/侧边栏共用 IIF 分量导出辅助（统一类型判定）
 #include "IBB_Components.h"        // IBB_Section_Desc
 #include <algorithm>
 #include <ranges>
@@ -139,10 +140,6 @@ void SectionLineModel::refresh()
     const int oldCount = static_cast<int>(m_entries.size());
     rebuildEntries();
 
-#ifdef INIWEAVER_DIAG
-    qDebug() << "[ONSHOW-DIAG] SectionLineModel::refresh sid=" << m_sectionId
-             << "oldCount=" << oldCount << "newCount=" << m_entries.size();
-#endif
     // 性能优化：行内容未变时跳过信号。
     // 删除/新建模块等触发全量 refreshSections 时，无关节点的行数据不变，
     // 不发 dataChanged/resetModel 可避免 QML 行绑定重新求值（全量重建卡顿主因）
@@ -151,9 +148,6 @@ void SectionLineModel::refresh()
     {
         // 内容相同：快照同步（新 entries 与旧等价），直接返回
         m_entriesSnapshot = m_entries;
-#ifdef INIWEAVER_DIAG
-        qDebug() << "[ONSHOW-DIAG] SectionLineModel::refresh sid=" << m_sectionId << "SKIP (content same)";
-#endif
         return;
     }
     m_entriesSnapshot = m_entries;
@@ -293,8 +287,11 @@ void SectionLineModel::rebuildEntries()
                     e.linkCol = computeNodeColor(ln.LinkCol, e.isEmpty, e.isInherit,
                                                  e.hasLinkNode, sectionIgnored);
 
-                    // 导出值（Input 态用，按分量索引）
-                    e.exportValue = QString::fromUtf8(line->FinalExportString(static_cast<int>(mult)));
+                    // 显示值（Input 态用，按分量索引）：GetString 无副作用。
+                    // FinalExportString 是导出专用，内部 OnExport Regen + SetValue
+                    // + UpdateAll/LimitFix 会把链接分量目标名污染成 NaN/截断数字
+                    if (auto evData = line->Indexed(mult))
+                        e.exportValue = QString::fromUtf8(evData->GetString().c_str());
 
                     // D14：IICStatus 持久化（从业务层 Data 读取，对应 ImGui Status_Workspace/ComponentStatus）
                     // Data_String: Status_Workspace.InputMethod（所有分量共享）
@@ -1217,11 +1214,6 @@ QVariantList SectionLineModel::iifComponents(int row) const
     if (!ii || !ii->Value) return out;
 
     IBG_InputForm &form = *ii->Value;
-    // 先确保各分量 Value 已按格式化串就绪（Dirty 时重算）
-    form.GetFormattedString();
-    auto &cs = form.GetComponentStatus();
-    auto &comps = *form.InputComponents;
-
     // 节点元数据所需的 SubSec / lineIdx / sectionIgnored（链接列表、颜色、坐标用）
     IBB_SubSec *sub = nullptr;
     size_t lineIdx = 0;
@@ -1237,65 +1229,26 @@ QVariantList SectionLineModel::iifComponents(int row) const
     auto sd = rsec.GetSectionData();
     if (sd) sectionIgnored = sd->Ignore;
 
-    for (size_t i = 0; i < comps.size(); ++i) {
+    // 与侧边栏一致：先恢复链接分量目标名（对齐 ImGui RenderUI_Node 每帧从链接表读目标名），
+    // 避免 GetFormattedString/FormatValue 用 IIS_Int 态或错误格式把混合目标名截断成数字。
+    if (sub)
+        IifSyncLinkTargets(form, sub, lineIdx, static_cast<size_t>(e.lineMult));
+    // 先确保各分量 Value 已按格式化串就绪（Dirty 时重算）
+    form.GetFormattedString();
+    auto &comps = *form.InputComponents;
+
+    // 统一导出（按 ImGui 原版组件驱动模型，画布/侧边栏共用）：输出分量类型/值/参数/链接目标名。
+    // 链接分量值从 StateValPtr 目标名读取（IifExportComponents 内部），不读 raw 覆盖。
+    out = IifExportComponents(ii, sub, lineIdx, static_cast<size_t>(e.lineMult), /*isWorkSpace=*/true);
+
+    // 画布补充链接节点元数据（连线列表/颜色/坐标/会话键），对应 ImGui IBR_LinkNode::RenderUI_Node
+    for (size_t i = 0; i < comps.size() && i < static_cast<size_t>(out.size()); ++i) {
         auto &p = comps[i];
-        int vid = p->GetCurrentTargetValueID();
-        bool isLink = (i < cs.size()) && (cs[i].InputMethod == IICStatus::Link);
-        auto H = IIC_Hint(p.get());
-
-        QVariantMap m;
-        m["compIdx"] = static_cast<int>(i);
-        m["idx"] = static_cast<int>(i);
-        m["isLink"] = isLink;
-        m["readOnly"] = false;
-        m["disabled"] = p->Disabled;
-        m["label"] = QString::fromUtf8(H.Short.c_str());
-        m["tooltip"] = QString::fromUtf8(H.Long.empty() ? H.Short.c_str() : H.Long.c_str());
-
-        QString disp;
-        if (vid >= 0) disp = QString::fromUtf8(form.GetValue(vid).Value.c_str());
-        m["value"] = disp;
-
-        if (auto t = dynamic_cast<IIC_PureText*>(p.get())) {
-            m["type"] = "text";   m["value"] = QString::fromUtf8(t->Text.c_str()); m["readOnly"] = true;
-        } else if (auto t = dynamic_cast<IIC_LocalizedText*>(p.get())) {
-            m["type"] = "locale"; m["value"] = QString::fromUtf8(t->FallbackText.c_str()); m["readOnly"] = true;
-        } else if (auto t = dynamic_cast<IIC_Setter_String*>(p.get())) {
-            m["type"] = "setter"; m["value"] = QString::fromUtf8(t->Value.c_str()); m["readOnly"] = true;
-        } else if (dynamic_cast<IIC_SameLine*>(p.get())) {
-            m["type"] = "samel"; m["readOnly"] = true;
-        } else if (dynamic_cast<IIC_NewLine*>(p.get())) {
-            m["type"] = "newl"; m["readOnly"] = true;
-        } else if (dynamic_cast<IIC_Separator*>(p.get())) {
-            m["type"] = "sep"; m["readOnly"] = true;
-        } else if (dynamic_cast<IIC_Bool*>(p.get())) {
-            m["type"] = "bool";
-        } else if (dynamic_cast<IIC_InputInt*>(p.get())) {
-            m["type"] = "int";
-        } else if (dynamic_cast<IIC_MultipleChoice*>(p.get())) {
-            m["type"] = "choice";
-        } else if (dynamic_cast<IIC_EnumCombo*>(p.get())) {
-            m["type"] = "combo";
-        } else if (dynamic_cast<IIC_EnumRadio*>(p.get())) {
-            m["type"] = "radio";
-        } else if (dynamic_cast<IIC_ColorPanel*>(p.get())) {
-            m["type"] = "color";
-        } else if (dynamic_cast<IIC_SliderInt*>(p.get())) {
-            m["type"] = "slider";
-        } else {
-            m["type"] = "input";   // IIC_InputText 及未识别分量按输入框
-        }
-
-        // 纯文本类分量无 Hint：tooltip 回退为其自身文本，悬停可见
-        if (m["tooltip"].toString().isEmpty()
-            && (m["type"] == "text" || m["type"] == "locale" || m["type"] == "setter"))
-            m["tooltip"] = m["value"];
-
-        // Link 态分量（支持链接）：渲染为链接节点（对应 RenderUI_Node：Short 标签 + 行末节点）
+        auto m = out[static_cast<int>(i)].toMap();
+        bool isLink = m["isLink"].toBool();
         if (isLink && p->SupportLinks() && m["type"] != "text") {
             m["type"] = "link";
-            m["value"] = QString();
-
+            m["value"] = QString();   // 链接节点显示由 links 表驱动，不用文本值
             auto hasNode = IBB_DefaultRegType::HasRegType(p->NodeSetting.LinkType);
             bool empty = true;
             QVariantList compLinks;
@@ -1319,8 +1272,7 @@ QVariantList SectionLineModel::iifComponents(int row) const
                    static_cast<int>(hasNode), m["sessionId"].toString().toUtf8().constData());
 #endif
         }
-
-        out << m;
+        out[static_cast<int>(i)] = m;
     }
     return out;
 }
@@ -1353,23 +1305,56 @@ void SectionLineModel::setIifComponentValue(int row, int compIdx, const QString 
         auto *comp = comps[static_cast<size_t>(compIdx)].get();
         int vid = comp->GetCurrentTargetValueID();
         if (vid < 0) { qDebug("[IIF-DIAG] vid<0 compIdx=%d kind=%d", compIdx, (int)row); return; }
+        qDebug("[CANVAS-SET] ENTER row=%d key=%s mult=%d compIdx=%d INPUT='%s' vid=%d compType=%s",
+               row, PoolStr(keyId), mult, compIdx, text.c_str(), vid, typeid(*comp).name());
+        for (size_t ci = 0; ci < comps.size(); ++ci) {
+            int cvid = comps[ci]->GetCurrentTargetValueID();
+            if (cvid < 0) continue;
+            auto &cv = form.GetValue(cvid);
+            std::string stTxt, stType = cv.StateValPtr ? typeid(*cv.StateValPtr).name() : "(null)";
+            if (auto st = cv.StateValue<IIS_String>()) stTxt = st->Text;
+            else if (auto st = cv.StateValue<IIS_Int>()) stTxt = std::to_string(st->Value);
+            else if (auto st = cv.StateValue<IIS_Bool>()) stTxt = st->Value ? "true" : "false";
+            qDebug("[CANVAS-SET]   BEFORE comp=%d type=%s vid=%d state=%s stTxt='%s' raw='%s' dirty=%d",
+                   (int)ci, typeid(*comps[ci]).name(), cvid, stType.c_str(), stTxt.c_str(), cv.Value.c_str(), (int)cv.Dirty);
+        }
 
-        auto &V = form.GetValue(vid);
-        const std::string &before = V.Value;
-        auto stBefore = V.StateValue<IIS_String>();
-        qDebug("[IIF-DIAG] BEFORE vid=%d V.Value='%s' state=%s", vid, before.c_str(),
-               (stBefore ? stBefore->Text.c_str() : "(null)"));
-
-        // 按分量类型写回（对齐 imgui IIC_InputText / IIC_InputInt::RenderUI 的 mf）：
-        // input/int 分量均以 IIS_String 令牌态存储；bool 分量经 setIifComponentValueBool 走 IIS_Bool
-        if (auto st = V.StateValue<IIS_String>()) st->Text = text;
-        else V.ResetState<IIS_String>(text);
-        V.Value = text;                 // 同步 Value，供 GetFormattedString 直接读取
-        V.NeedsUpdate(form.GetValues(), *comp);   // 标记需重算，确保 GetFormattedString 读到新值
-        form.RegenFormattedString();
-        const std::string &_fmt = form.GetFormattedString();
-        qDebug("[IIF-DIAG] after regen formatted='%s' (len=%zu)", _fmt.c_str(), _fmt.size());
-        bsec->UpdateAll();
+        // 统一写入：在 Duplicate 副本上改目标分量 → RegenFormattedString 得新整行值串，
+        // 再用原版 IBB_IniLine_Data_IIF::SetValue → ParseFromString 应用到原始行，
+        // 由 ImGui 原版解析逻辑同步所有分量的 StateValPtr/V.Value（链接分量按链接目标名解析，
+        // 不再被 FormatValue/ProcessOnExport 错误覆盖为 NaN/0）。
+        // 找 sub/lineIdx（链接分量目标名从链接表同步需要）
+        IBB_SubSec* sub = nullptr;
+        size_t lineIdx = 0;
+        for (auto subIdx : bsec->SubSecOrder) {
+            auto &ss = bsec->SubSecs[subIdx];
+            if (!ss.CanOwnKey(keyId)) continue;
+            sub = &ss;
+            for (size_t k = 0; k < ss.Lines_ByName.size(); ++k)
+                if (ss.Lines_ByName[k] == keyId) { lineIdx = k; break; }
+            break;
+        }
+        // 对齐 ImGui 原版写回：直接在原始 Value 上改目标分量 State，
+        // 然后 GetFormattedString（只对 Dirty 目标分量 FormatValue）+ UpdateAll（重建链接）。
+        // 不 Duplicate / 不 RegenFormattedString（强制全量 FormatValue，会把 IIS_Int 态链接分量
+        // 目标名格式化成数字）/ 不 SetValue（不触发 ParseFromString 全量重解析）。
+        (void)sub; (void)lineIdx;   // 不再需要链接表同步（ImGui 原版不这么做）
+        auto &newV = form.GetValue(vid);
+        if (auto st = newV.StateValue<IIS_String>()) st->Text = text;
+        else newV.ResetState<IIS_String>(text);
+        newV.Value = text;
+        newV.NeedsUpdate(form.GetValues(), *comp);
+        form.GetFormattedString();        // 只格式化 Dirty 的目标分量（其余用缓存 V.Value，不截断）
+        qDebug("[CANVAS-SET]   LINE='%s'", form.GetFormattedString().c_str());
+        bsec->UpdateAll();               // 重建链接表
+        {
+            auto &v2 = form.GetValue(vid);
+            std::string stTxt, stType = v2.StateValPtr ? typeid(*v2.StateValPtr).name() : "(null)";
+            if (auto st = v2.StateValue<IIS_String>()) stTxt = st->Text;
+            else if (auto st = v2.StateValue<IIS_Int>()) stTxt = std::to_string(st->Value);
+            else if (auto st = v2.StateValue<IIS_Bool>()) stTxt = st->Value ? "true" : "false";
+            qDebug("[CANVAS-SET]   AFTER vid=%d state=%s stTxt='%s' raw='%s'", vid, stType.c_str(), stTxt.c_str(), v2.Value.c_str());
+        }
         refresh();
         emit iifDataChanged(row);        // 通知 QML 重读 IIF 分量（refresh 快照可能 SKIP）
         emit sectionDataChanged(m_sectionId);
@@ -1404,15 +1389,28 @@ void SectionLineModel::setIifComponentValueBool(int row, int compIdx, bool val)
         int vid = b->GetCurrentTargetValueID();
         if (vid < 0) return;
 
-        auto &V = form.GetValue(vid);
-        qDebug("[IIF-DIAG] bool BEFORE vid=%d V.Value='%s' newVal=%d", vid, V.Value.c_str(), (int)val);
-        if (auto st = V.StateValue<IIS_Bool>()) { st->Value = val; st->FmtType = b->FmtType; }
-        else V.ResetState<IIS_Bool>(val, b->FmtType);
-        V.NeedsUpdate(form.GetValues(), *b);   // 触发 UpdateValue→IIS_Bool::Format 生成 FmtType 文本
-        form.RegenFormattedString();
-        const std::string &_fmt = form.GetFormattedString();
-        qDebug("[IIF-DIAG] bool after regen formatted='%s' (len=%zu)", _fmt.c_str(), _fmt.size());
-        bsec->UpdateAll();
+        // 找 sub/lineIdx（链接分量目标名从链接表同步需要）
+        IBB_SubSec* sub = nullptr;
+        size_t lineIdx = 0;
+        for (auto subIdx : bsec->SubSecOrder) {
+            auto &ss = bsec->SubSecs[subIdx];
+            if (!ss.CanOwnKey(keyId)) continue;
+            sub = &ss;
+            for (size_t k = 0; k < ss.Lines_ByName.size(); ++k)
+                if (ss.Lines_ByName[k] == keyId) { lineIdx = k; break; }
+            break;
+        }
+        // 统一写入：副本上改 bool 分量 → RegenFormattedString 得新整行串 → dataPtr->SetValue
+        auto newForm = ii->Value->Duplicate();
+        if (!newForm) return;
+        // 从链接表恢复链接分量的目标名（对齐 ImGui RenderUI_Node），避免链接分量被污染成 0/NaN
+        IifSyncLinkTargets(*newForm, sub, lineIdx, static_cast<size_t>(mult));
+        auto &newV = newForm->GetValue(vid);
+        if (auto st = newV.StateValue<IIS_Bool>()) { st->Value = val; st->FmtType = b->FmtType; }
+        else newV.ResetState<IIS_Bool>(val, b->FmtType);
+        newV.NeedsUpdate(newForm->GetValues(), *b);
+        const std::string newLine = newForm->RegenFormattedString();
+        dataPtr->SetValue(newLine);      // 原版 SetValue → ParseFromString + CurSub->UpdateAll()
         refresh();
         emit iifDataChanged(row);        // 通知 QML 重读 IIF 分量（refresh 快照可能 SKIP）
         emit sectionDataChanged(m_sectionId);

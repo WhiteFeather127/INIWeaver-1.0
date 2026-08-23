@@ -7,6 +7,8 @@
 #include <ranges>
 #include "IBR_Misc.h"
 #include "IBG_UndoTree.h"
+#include <QDebug>
+#include <typeinfo>
 
 extern bool InputStdStringActive;
 
@@ -68,7 +70,26 @@ void IBB_InputValue::UpdateValue(IBB_ValueContainer& Cont, const IBB_InputFormat
     Dirty = false;
     if (LastUpdate.Cont && LastUpdate.Source)
     {
+#ifdef INIWEAVER_DIAG
+        std::string before = Value;
+        const char* stTypeBefore = StateValPtr ? typeid(*StateValPtr).name() : "(null)";
+        std::string stTxtBefore;
+        if (auto st = StateValue<IIS_String>()) stTxtBefore = st->Text;
+        else if (auto st = StateValue<IIS_Int>()) stTxtBefore = std::to_string(st->Value);
+        else if (auto st = StateValue<IIS_Bool>()) stTxtBefore = st->Value ? "true" : "false";
+        qDebug("[UPDVAL-TYPE] fmt=%d before='%s' stType=%s stTxt='%s' srcType=%s",
+               (int)Format.Type, before.c_str(), stTypeBefore, stTxtBefore.c_str(),
+               typeid(*LastUpdate.Source).name());
         Value = LastUpdate.Source->FormatValue(Cont, *this, Format);
+        const char* stTypeAfter = StateValPtr ? typeid(*StateValPtr).name() : "(null)";
+        std::string stTxtAfter;
+        if (auto st = StateValue<IIS_String>()) stTxtAfter = st->Text;
+        else if (auto st = StateValue<IIS_Int>()) stTxtAfter = std::to_string(st->Value);
+        else if (auto st = StateValue<IIS_Bool>()) stTxtAfter = st->Value ? "true" : "false";
+        qDebug("[UPDVAL-TYPE]   after='%s' stType=%s stTxt='%s'", Value.c_str(), stTypeAfter, stTxtAfter.c_str());
+#else
+        Value = LastUpdate.Source->FormatValue(Cont, *this, Format);
+#endif
     }
 }
 
@@ -1160,7 +1181,14 @@ std::string IIS_String::Format(const IBB_InputFormat& Format) {
 }
 
 void IIS_String::Parse(const IBB_InputFormat& Format, const std::string& Val) {
+#ifdef INIWEAVER_DIAG
+    std::string before = Text;
+    IIC_Parser_String(Val, Format, Text);
+    if (Text.find("NaN") != std::string::npos || Val.find("NaN") != std::string::npos)
+        qDebug("[STPARSE] fmt=%d val='%s' before='%s' -> text='%s'", (int)Format.Type, Val.c_str(), before.c_str(), Text.c_str());
+#else
     return IIC_Parser_String(Val, Format, Text);
+#endif
 }
 
 std::string IIS_String::TryAccept(const IBB_InputFormat& Format, std::string& Value) {
@@ -1492,6 +1520,12 @@ std::string IIC_InputText::FormatValue(IBB_ValueContainer& Cont, IBB_InputValue&
 {
     if (!Val.StateValPtr)Val.ResetState<IIS_String>();
     auto V = Val.StateValPtr->Format(Format);
+#ifdef INIWEAVER_DIAG
+    std::string txt;
+    if (auto st = Val.StateValue<IIS_String>()) txt = st->Text;
+    qDebug("[INPUTFMT] fmt=%d fmtStr='%s' text='%s' -> out='%s' dirty=%d",
+           (int)Format.Type, Format.String.c_str(), txt.c_str(), V.c_str(), (int)Val.Dirty);
+#endif
     if (ProcessOnExport(V))
         Val.NeedsUpdate(Cont, *this);
     return V;

@@ -105,6 +105,72 @@ Item {
         return rows
     }
 
+    // ===== IIF 分量通用辅助（对齐侧边栏 EditPanel.qml） =====
+    // 选项数组（combo/radio/choice 的 opts：[{key,label,desc}...]）
+    function iifOptArr(comp) { return (comp && comp.opts) ? comp.opts : [] }
+    // combo 当前选中索引（以 opts[i].key 与 value 匹配）
+    function iifComboIndex(comp) {
+        var arr = iifOptArr(comp)
+        var v = (comp && comp.value) || ""
+        for (var i = 0; i < arr.length; i++) if (arr[i].key === v) return i
+        return arr.length > 0 ? 0 : -1
+    }
+    // choice 已选 key 集合（按 delim 切分当前值）
+    function iifChoiceSelected(comp) {
+        var set = {}
+        var v = (comp && comp.value) || ""
+        var d = (comp && comp.delim) || ","
+        var parts = String(v).split(d)
+        for (var i = 0; i < parts.length; i++) if (parts[i]) set[parts[i]] = true
+        return set
+    }
+    // choice 勾选切换写回：重算 delim 连接串
+    function iifSetChoice(comp, key, on) {
+        var d = (comp && comp.delim) || ","
+        var set = iifChoiceSelected(comp)
+        if (on) set[key] = true; else delete set[key]
+        var out = []
+        for (var k in set) if (set[k] === true) out.push(k)
+        if (root.lineModel) root.lineModel.setIifComponentValue(root.rowIndex, comp.idx || comp.compIdx || 0, out.join(d))
+    }
+    // color 值 → QML 色串：#RRGGBB（支持 "255,0,0" Int 模式与 "#xxx" 十六进制）
+    function iifColorToHex(v) {
+        if (!v) return "#000000"
+        var s = "" + v
+        s = s.trim()
+        if (s.charAt(0) === "#") return s
+        var parts = s.split(",")
+        if (parts.length >= 3) {
+            var r = parseInt(parts[0], 10), g = parseInt(parts[1], 10), b = parseInt(parts[2], 10)
+            if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+                function h(n) { var x = n.toString(16); return x.length === 1 ? "0" + x : x }
+                return "#" + h(Math.max(0, Math.min(255, r))) + h(Math.max(0, Math.min(255, g))) + h(Math.max(0, Math.min(255, b)))
+            }
+        }
+        return s
+    }
+    // 单个计量分量（非 fillWidth）的自然宽：text/locale/setter/bool/radio/choice
+    function iifCellNaturalWidth(cc) {
+        if (!cc) return 30
+        var t = cc.type
+        if (t === "bool") return (cc.label ? cc.label.length * root.fontBody * 0.6 + 4 : 0) + root.fontBody * 1.4 + 4 + 4
+        if (t === "text" || t === "locale" || t === "setter")
+            return (cc.label ? cc.label.length * root.fontBody * 0.6 + 4 : 0)
+                   + (cc.value ? cc.value.length * root.fontBody * 0.6 : 0) + 4
+        if (t === "radio" || t === "choice") {
+            var w = (cc.label ? cc.label.length * root.fontBody * 0.6 + 4 : 0)
+            var arr = iifOptArr(cc)
+            for (var i = 0; i < arr.length; i++) {
+                w += (arr[i].label || arr[i].key || "").length * root.fontBody * 0.6
+                     + (t === "radio" ? (root.fontBody * 1.4 + 4) : (root.fontBody * 1.4 + 4 + 2)) + 3
+                if (i > 0) w += 6
+            }
+            return w + 4
+        }
+        // fillWidth 类：输入/整数/下拉/色板/滑条 给一个基础宽
+        return root.fontBody * 12
+    }
+
     // IIF 整行自然宽：onShow 标签 + 各建模行（label+控件 / 节点区）最大宽
     function recomputeIifNaturalWidth() {
         if (!(root.isInputMode && root.keyType === 2) || !root.lineModel) {
@@ -126,14 +192,7 @@ Item {
             var w = 0
             for (var k = 0; k < row.cells.length; k++) {
                 var c = row.cells[k]
-                var lw = c.label ? c.label.length * root.fontBody * 0.6 : 0
-                w += lw + 4
-                if (c.type === "input" || c.type === "int" || c.type === "choice"
-                    || c.type === "combo" || c.type === "radio" || c.type === "color" || c.type === "slider")
-                    w += root.fontBody * 12
-                else if (c.type === "bool") w += root.fontBody * 1.4 + 4
-                else if (c.type === "text" || c.type === "locale" || c.type === "setter")
-                    w += (c.value ? c.value.length * root.fontBody * 0.6 : 0)
+                w += root.iifCellNaturalWidth(c)
             }
             if (row.node) w += ((row.node.label ? row.node.label.length * root.fontBody * 0.6 : 0)
                                + root.fontSmall * 1.5 + 8)   // 节点 Short 标签 + 节点区
@@ -476,13 +535,14 @@ Item {
                         delegate: Item {
                             id: iifCell
                             property var cc: modelData
-                            // input 类 cell 填满可用宽；其余按内容自然宽
-                            Layout.fillWidth: (cc.type === "input" || cc.type === "int" || cc.type === "choice"
-                                              || cc.type === "combo" || cc.type === "radio" || cc.type === "color" || cc.type === "slider")
-                            Layout.preferredWidth: cellLabel.implicitWidth + (cc.type === "text" || cc.type === "locale" || cc.type === "setter"
-                                               ? cellTxtVal.implicitWidth : (cc.type === "bool" ? (root.fontBody * 1.4 + 4) : root.fontBody * 6)) + 4
+                            // fillWidth 类填满可用宽；measure 类（text/locale/setter/bool/radio/choice）按内容自然宽
+                            property bool isFlex: (cc.type === "input" || cc.type === "int" || cc.type === "combo"
+                                                  || cc.type === "color" || cc.type === "slider")
+                            Layout.fillWidth: isFlex
+                            Layout.preferredWidth: root.iifCellNaturalWidth(cc)
                             Layout.minimumWidth: 30
                             height: root.fontBody * 2
+                            clipHeight: false
 
                             // Short 标签（imgui TextEx(Hint.Short)）——每个交互分量都有的可见 Hint
                             Text {
@@ -495,6 +555,9 @@ Item {
                                 font.pixelSize: root.fontBody
                                 elide: Text.ElideRight
                             }
+
+                            // 内容左偏移（label 之后）
+                            property real ctlX: cellLabel.visible ? cellLabel.width + 3 : 0
 
                             // 纯文本/本地化/赋值串（只读，本身就是内容，无 label）
                             Text {
@@ -513,8 +576,7 @@ Item {
                                 visible: cc.type === "bool"
                                 width: root.fontBody * 1.4 + 4
                                 height: width
-                                anchors.left: cellLabel.right
-                                anchors.leftMargin: 3
+                                x: iifCell.ctlX
                                 anchors.verticalCenter: parent.verticalCenter
                                 radius: 3
                                 color: cbMA.containsMouse ? "#3a3a3a" : "#1e1e1e"
@@ -540,12 +602,121 @@ Item {
                                 }
                             }
 
-                            // 输入分量（input/int/choice/combo/radio/color/slider）：label + 占满剩余宽的输入框
+                            // 枚举单选组（radio）：一组互斥圆点
+                            Row {
+                                visible: cc.type === "radio"
+                                x: iifCell.ctlX
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+                                Repeater {
+                                    model: root.iifOptArr(cc)
+                                    delegate: Row {
+                                        property var opt: modelData
+                                        spacing: 3
+                                        Rectangle {
+                                            width: root.fontBody * 1.4 + 4
+                                            height: width
+                                            radius: width / 2
+                                            color: (opt.key === cc.value) ? "#2d6db5" : "#1e1e1e"
+                                            border.color: (opt.key === cc.value) ? "#007acc" : "#5a5a5a"
+                                            border.width: 1
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    if (root.lineModel)
+                                                        root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, opt.key)
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            text: opt.label || opt.key || ""
+                                            color: "#d4d4d4"
+                                            font.pixelSize: root.fontBody
+                                            verticalAlignment: Text.AlignVCenter
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                acceptedButtons: Qt.NoButton
+                                                hoverEnabled: true
+                                                onContainsMouseChanged: {
+                                                    if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                        var gr = mapToGlobal(width / 2, height + 2)
+                                                        appToolTip.show(opt.desc, gr.x, gr.y)
+                                                    } else appToolTip.hide()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 多选组（choice）：每选项一个勾选框（当前值按 delim 切分）
+                            Row {
+                                visible: cc.type === "choice"
+                                x: iifCell.ctlX
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+                                Repeater {
+                                    model: root.iifOptArr(cc)
+                                    delegate: Row {
+                                        property var opt: modelData
+                                        property var sel: root.iifChoiceSelected(cc)
+                                        spacing: 3
+                                        Rectangle {
+                                            id: choiceBox
+                                            width: root.fontBody * 1.4 + 4
+                                            height: width
+                                            radius: 3
+                                            color: cbChk.containsMouse ? "#3a3a3a" : "#1e1e1e"
+                                            border.color: (opt.key.length > 0 && sel[opt.key] === true) ? "#007acc" : "#5a5a5a"
+                                            border.width: 1
+                                            Text {
+                                                visible: opt.key.length > 0 && sel[opt.key] === true
+                                                anchors.centerIn: parent
+                                                text: "✓"
+                                                color: "#4ec9b0"
+                                                font.pixelSize: root.fontBody
+                                                font.bold: true
+                                            }
+                                            MouseArea {
+                                                id: cbChk
+                                                anchors.fill: parent
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    var on = !(sel[opt.key] === true)
+                                                    root.iifSetChoice(cc, opt.key, on)
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            text: opt.label || opt.key || ""
+                                            color: "#d4d4d4"
+                                            font.pixelSize: root.fontBody
+                                            verticalAlignment: Text.AlignVCenter
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                acceptedButtons: Qt.NoButton
+                                                hoverEnabled: true
+                                                onContainsMouseChanged: {
+                                                    if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                        var g1 = mapToGlobal(width / 2, height + 2)
+                                                        appToolTip.show(opt.desc, g1.x, g1.y)
+                                                    } else appToolTip.hide()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 输入/整数分量：label + 占满剩余宽的输入框
                             TextField {
                                 id: cellInput
-                                visible: (cc.type === "input" || cc.type === "int" || cc.type === "choice"
-                                      || cc.type === "combo" || cc.type === "radio" || cc.type === "color" || cc.type === "slider")
-                                x: cellLabel.visible ? cellLabel.width + 3 : 0
+                                visible: (cc.type === "input" || cc.type === "int")
+                                x: iifCell.ctlX
                                 width: parent.width - x
                                 height: root.fontBody * 2
                                 anchors.verticalCenter: parent.verticalCenter
@@ -564,6 +735,113 @@ Item {
                                 onEditingFinished: {
                                     if (root.lineModel)
                                         root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, text)
+                                }
+                            }
+
+                            // 下拉组合框（combo）
+                            ComboBox {
+                                visible: cc.type === "combo"
+                                x: iifCell.ctlX
+                                width: parent.width - x
+                                height: root.fontBody * 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                model: root.iifOptArr(cc)
+                                textRole: "label"
+                                currentIndex: root.iifComboIndex(cc)
+                                font.pixelSize: root.fontBody
+                                onActivated: {
+                                    var arr = root.iifOptArr(cc)
+                                    var o = (index >= 0 && index < arr.length) ? arr[index] : null
+                                    if (o && root.lineModel)
+                                        root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, o.key)
+                                }
+                                background: Rectangle {
+                                    color: "#1e1e1e"
+                                    border.color: "#007acc"
+                                    border.width: 1
+                                    radius: 2
+                                }
+                                contentItem: Text {
+                                    text: currentText
+                                    color: "#ce9178"
+                                    font.pixelSize: root.fontBody
+                                    verticalAlignment: Text.AlignVCenter
+                                    horizontalAlignment: Text.AlignLeft
+                                    leftPadding: 4
+                                    elide: Text.ElideRight
+                                }
+                                indicator: Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 4
+                                    width: 0; height: 0
+                                }
+                            }
+
+                            // 色板（color）：色块 + 值输入（label + 占满剩余宽）
+                            Row {
+                                visible: cc.type === "color"
+                                x: iifCell.ctlX
+                                width: parent.width - x
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 4
+                                Rectangle {
+                                    width: root.fontBody * 1.6
+                                    height: width
+                                    radius: 3
+                                    color: root.iifColorToHex(cc.value)
+                                    border.color: "#5a5a5a"
+                                    border.width: 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                TextField {
+                                    text: cc.value || ""
+                                    height: root.fontBody * 2
+                                    width: parent.width - parent.spacing - (root.fontBody * 1.6)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.pixelSize: root.fontBody
+                                    color: "#ce9178"
+                                    verticalAlignment: Text.AlignVCenter
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        color: "#1e1e1e"
+                                        border.color: "#007acc"
+                                        border.width: 1
+                                        radius: 2
+                                    }
+                                    onEditingFinished: {
+                                        if (root.lineModel)
+                                            root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, text)
+                                    }
+                                }
+                            }
+
+                            // 整型滑条（slider）：滑条 + 当前值
+                            Row {
+                                visible: cc.type === "slider"
+                                x: iifCell.ctlX
+                                width: parent.width - x
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+                                Slider {
+                                    id: sliderCtrl
+                                    from: cc.min || 0
+                                    to: cc.max || 100
+                                    value: parseInt(cc.value || "0", 10)
+                                    height: root.fontBody * 2
+                                    width: Math.max(80, parent.width - parent.spacing - root.fontBody * 4)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    onValueChanged: {
+                                        if (!pressed && cc.value !== "" + sliderCtrl.value && root.lineModel)
+                                            root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, "" + parseInt(sliderCtrl.value, 10))
+                                    }
+                                }
+                                Text {
+                                    text: cc.value || "0"
+                                    color: "#ce9178"
+                                    font.pixelSize: root.fontBody
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
                             }
 

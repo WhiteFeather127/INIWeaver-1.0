@@ -9,6 +9,7 @@
 #include "IBG_UndoTree.h"
 #include "IBG_InputType.h"
 #include "IBG_InputType_Derived.h"
+#include "IifComponentHelper.h"    // 画布/侧边栏共用 IIF 分量导出辅助（统一类型判定）
 #include "IBB_IniLine.h"
 #include "FromEngine/RFBump.h"
 #include "FromEngine/global_tool_func.h"
@@ -92,91 +93,16 @@ static QString ExportIifLinkText(IBB_SubSec *sub, size_t lineIdx, size_t mult, s
     return names.join(QStringLiteral(", "));
 }
 
-// 导出单个值(mult)的 IIF 分量列表
+// 导出单个值(mult)的 IIF 分量列表（统一走 IifExportComponents，侧边栏 isWorkSpace=false）
 static QVariantList ExportIifComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub = nullptr,
                                         size_t lineIdx = 0, size_t mult = 0)
 {
-    QVariantList out;
-    if (!ii || !ii->Value) return out;
-    IBG_InputForm &form = *ii->Value;
-    form.GetFormattedString();
-    auto &cs = form.GetComponentStatus();
-    auto &comps = *form.InputComponents;
-    const bool showReg = IBR_WorkSpace::ShowRegName;
-    for (size_t i = 0; i < comps.size(); ++i) {
-        auto &p = comps[i];
-        int vid = p->GetCurrentTargetValueID();
-        bool isLink = (i < cs.size()) && (cs[i].InputMethod == IICStatus::Link);
-        QVariantMap m;
-        m["idx"] = static_cast<int>(i);
-        m["isLink"] = isLink;
-        m["readOnly"] = p->Disabled;
-        IICDescStr H;
-        if (auto t = dynamic_cast<IIC_InputText*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_InputInt*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_Bool*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_MultipleChoice*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_EnumCombo*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_EnumRadio*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_ColorPanel*>(p.get())) H = t->Hint;
-        else if (auto t = dynamic_cast<IIC_SliderInt*>(p.get())) H = t->Hint;
-        m["label"] = QString::fromUtf8(H.Short.c_str());
-        m["tooltip"] = QString::fromUtf8(H.Long.empty() ? H.Short.c_str() : H.Long.c_str());
-        QString val = (vid >= 0) ? QString::fromUtf8(form.GetValue(vid).Value.c_str()) : QString();
-        m["value"] = val;
-
-        if (auto t = dynamic_cast<IIC_PureText*>(p.get())) {
-            m["type"]="text";   m["value"]=QString::fromUtf8(t->Text.c_str()); m["readOnly"]=true;
-        } else if (auto t = dynamic_cast<IIC_LocalizedText*>(p.get())) {
-            m["type"]="locale"; m["value"]=QString::fromUtf8(t->FallbackText.c_str()); m["readOnly"]=true;
-        } else if (auto t = dynamic_cast<IIC_Setter_String*>(p.get())) {
-            m["type"]="setter"; m["value"]=QString::fromUtf8(t->Value.c_str()); m["readOnly"]=true;
-        } else if (dynamic_cast<IIC_SameLine*>(p.get())) {
-            m["type"]="samel"; m["readOnly"]=true;
-        } else if (dynamic_cast<IIC_NewLine*>(p.get())) {
-            m["type"]="newl"; m["readOnly"]=true;
-        } else if (dynamic_cast<IIC_Separator*>(p.get())) {
-            m["type"]="sep"; m["readOnly"]=true;
-        } else if (auto t = dynamic_cast<IIC_Bool*>(p.get())) {
-            m["type"]="bool"; m["boolVal"]=IifStrTrue(val.toUtf8().toStdString());
-        } else if (auto t = dynamic_cast<IIC_InputInt*>(p.get())) {
-            m["type"]="int"; m["min"]=t->Min; m["max"]=t->Max;
-        } else if (auto t = dynamic_cast<IIC_MultipleChoice*>(p.get())) {
-            m["type"]="choice"; m["delim"]=QString::fromUtf8(t->Delim.c_str());
-            m["opts"]=ExportIifOpts(t->Options, t->OptionOrder, showReg);
-        } else if (auto t = dynamic_cast<IIC_EnumCombo*>(p.get())) {
-            m["type"]="combo"; m["opts"]=ExportIifOpts(t->Options, t->OptionOrder, showReg);
-        } else if (auto t = dynamic_cast<IIC_EnumRadio*>(p.get())) {
-            m["type"]="radio"; m["opts"]=ExportIifOpts(t->Options, t->OptionOrder, showReg);
-        } else if (auto t = dynamic_cast<IIC_ColorPanel*>(p.get())) {
-            m["type"]="color";
-        } else if (auto t = dynamic_cast<IIC_SliderInt*>(p.get())) {
-            m["type"]="slider"; m["min"]=t->Min; m["max"]=t->Max;
-        } else {
-            m["type"]="input";
-        }
-
-        // 纯文本类无 Hint：tooltip 回退为其自身文本
-        if (m["tooltip"].toString().isEmpty()
-            && (m["type"]=="text" || m["type"]=="locale" || m["type"]=="setter"))
-            m["tooltip"] = m["value"];
-
-        // Link 态分量（支持链接）→ 侧边栏显示 Short 标签 + 真实链接目标文本（不做拖拽建链）
-        if (isLink && p->SupportLinks() && ((m["type"]=="input") || (m["type"]=="int"))) {
-            m["type"] = "link";
-            // 用链接表解析目标，覆盖 value 容器里可能残留的 "0"/占位值（画布用 links 表，侧边栏此前误读原始值）
-            QString resolved = ExportIifLinkText(sub, lineIdx, mult, i);
-#ifdef INIWEAVER_DIAG
-            qDebug("[LINKVAL] keyComp comp=%d raw='%s' -> resolved='%s' sub=%p lineIdx=%zu mult=%zu",
-                   static_cast<int>(i), val.toUtf8().constData(), resolved.toUtf8().constData(),
-                   (void*)sub, lineIdx, mult);
-#endif
-            m["value"] = resolved;
-        }
-
-        out << m;
-    }
-    return out;
+    // 先恢复链接分量目标名（对齐 ImGui RenderUI_Node 每帧从链接表读目标名），
+    // 避免 GetFormattedString 的 UpdateValue 用错误 FormatValue 覆盖 link 分量（>100→100、文本→0）。
+    if (ii && ii->Value && sub)
+        IifSyncLinkTargets(*ii->Value, sub, lineIdx, mult);
+    // 统一导出（按 ImGui 原版组件驱动模型，画布/侧边栏共用）：链接分量只读目标名。
+    return IifExportComponents(ii, sub, lineIdx, mult, /*isWorkSpace=*/false);
 }
 
 EditPanelController::EditPanelController(QObject *parent)
@@ -327,10 +253,6 @@ void EditPanelController::rebuildEditLines()
         entry["keyName"] = QString::fromUtf8(PoolCStr(K));
         entry["keyId"] = static_cast<qulonglong>(K);
         entry["onShow"] = pbk->IsOnShow(K);
-#ifdef INIWEAVER_DIAG
-        qDebug() << "[ONSHOW-DIAG] rebuildEditLines sid=" << m_currentSectionId
-                 << "key=" << PoolCStr(K) << "onShow=" << pbk->IsOnShow(K);
-#endif
         std::string onShowDesc = pbk->GetOnShow(K);
         if (onShowDesc == EmptyOnShowDesc) onShowDesc.clear();
         entry["onShowDesc"] = QString::fromUtf8(onShowDesc.c_str());
@@ -362,10 +284,6 @@ void EditPanelController::rebuildEditLines()
         }
         entry["isMultiple"] = pLine->IsMultiple();
         entry["lineCount"] = static_cast<int>(pLine->Count());
-#ifdef INIWEAVER_DIAG
-        qDebug("[SIDEBAR-DIAG] rebuildLine key='%s' isMultiple=%d lineCount=%d", PoolCStr(K),
-               (int)pLine->IsMultiple(), (int)pLine->Count());
-#endif
 
         // keyType + IIF 分量导出（对齐画布 SectionLineModel）：
         // 0=String, 1=Bool, 2=IIF；IIF 键的 iifValues 按每个值(mult)导出分量列表，供侧边栏逐分量编辑。
@@ -396,14 +314,18 @@ void EditPanelController::rebuildEditLines()
         if (pLine->IsMultiple()) {
             QVariantList values;
             for (size_t i = 0; i < pLine->Count(); ++i) {
-                values.append(QString::fromUtf8(pLine->FinalExportString(static_cast<int>(i)).c_str()));
+                // 显示用 GetString（无副作用）：FinalExportString 是导出专用，
+                // 内部 OnExport Regen + SetValue + UpdateAll/LimitFix 会污染链接分量目标名
+                auto dm = pLine->Indexed(i);
+                values.append(QString::fromUtf8(dm ? dm->GetString().c_str() : ""));
             }
             entry["values"] = values;
             entry["value"] = values.isEmpty() ? QString() : values.first().toString();
         } else {
             // 非多值键：只填单值，不设 values（空 → 侧边栏多值 Repeater model 恒 0，
             // 从根上杜绝该 Repeater 对非 Multiple 键产生额外输入框）
-            QString val = QString::fromUtf8(pLine->FinalExportString(0).c_str());
+            auto dm0 = pLine->Indexed(0);
+            QString val = QString::fromUtf8(dm0 ? dm0->GetString().c_str() : "");
             entry["value"] = val;
             entry["values"] = QVariantList();
         }
@@ -627,7 +549,7 @@ void EditPanelController::setIifValue(const QString &key, int mult, int idx, con
     IBB_Section* pbk = it->second.GetBack_Inl();
     if (!pbk) return;
 
-    IBRF_CoreBump.SendToR({ [pbk, K, mult, idx, valStr]() {
+    IBRF_CoreBump.SendToR({ [pbk, K, mult, idx, valStr, keyStr]() {
         IBG_Undo.SomethingShouldBeHere();
         auto *line = pbk->GetLineFromSubSecs(K);
         if (!line) return;
@@ -641,14 +563,48 @@ void EditPanelController::setIifValue(const QString &key, int mult, int idx, con
         auto *comp = comps[static_cast<size_t>(idx)].get();
         int vid = comp->GetCurrentTargetValueID();
         if (vid < 0) return;
-        auto &V = form.GetValue(vid);
-        if (auto st = V.StateValue<IIS_String>()) st->Text = valStr;
-        else V.ResetState<IIS_String>(valStr);
-        V.Value = valStr;
-        V.NeedsUpdate(form.GetValues(), *comp);
-        form.RegenFormattedString();
-        pbk->UpdateAll();
+        qDebug("[SET-IIF] ENTER key=%s mult=%d idx=%d INPUT='%s' vid=%d compType=%s",
+               keyStr.c_str(), mult, idx, valStr.c_str(), vid, typeid(*comp).name());
+        // 全链路诊断：打印所有分量的 StateValPtr/Value/Dirty
+        for (size_t ci = 0; ci < comps.size(); ++ci) {
+            int cvid = comps[ci]->GetCurrentTargetValueID();
+            if (cvid < 0) continue;
+            auto &cv = form.GetValue(cvid);
+            std::string stTxt, stType = cv.StateValPtr ? typeid(*cv.StateValPtr).name() : "(null)";
+            if (auto st = cv.StateValue<IIS_String>()) stTxt = st->Text;
+            else if (auto st = cv.StateValue<IIS_Int>()) stTxt = std::to_string(st->Value);
+            else if (auto st = cv.StateValue<IIS_Bool>()) stTxt = st->Value ? "true" : "false";
+            qDebug("[SET-IIF]   BEFORE comp=%d type=%s vid=%d state=%s stTxt='%s' raw='%s' dirty=%d",
+                   (int)ci, typeid(*comps[ci]).name(), cvid, stType.c_str(), stTxt.c_str(), cv.Value.c_str(), (int)cv.Dirty);
+        }
+        // 对齐 ImGui 原版写回：直接在原始 Value 上改目标分量 State，
+        // 然后 GetFormattedString（只对 Dirty 目标分量 FormatValue）+ UpdateAll（重建链接）。
+        // 不 Duplicate / 不 RegenFormattedString（强制全量 FormatValue，会把 IIS_Int 态链接分量
+        // 目标名格式化成数字）/ 不 SetValue（不触发 ParseFromString 全量重解析）。
+        auto &newV = form.GetValue(vid);
+        if (auto st = newV.StateValue<IIS_String>()) st->Text = valStr;
+        else newV.ResetState<IIS_String>(valStr);
+        newV.Value = valStr;
+        newV.NeedsUpdate(form.GetValues(), *comp);
+        qDebug("[SET-IIF]   OnExport=%d Key=%.20s exportingLine=%p exportingSec=%p",
+               (int)ExportContext::OnExport, PoolStr(ExportContext::Key), (void*)ExportContext::ExportingLine, (void*)ExportContext::ExportingSection);
+        qDebug("[SET-IIF]   P1-afterset vid=%d stTxt='%s' raw='%s'", vid,
+               (newV.StateValue<IIS_String>() ? newV.StateValue<IIS_String>()->Text.c_str() : "?"), newV.Value.c_str());
+        form.GetFormattedString();        // 只格式化 Dirty 的目标分量（其余用缓存 V.Value，不截断）
+        auto &gv = form.GetValue(vid);
+        qDebug("[SET-IIF]   P2-aftfmt vid=%d stTxt='%s' raw='%s'", vid,
+               (gv.StateValue<IIS_String>() ? gv.StateValue<IIS_String>()->Text.c_str() : "?"), gv.Value.c_str());
+        qDebug("[SET-IIF]   LINE='%s'", form.GetFormattedString().c_str());
+        pbk->UpdateAll();                // 重建链接表
         IBR_Inst_Project.RefreshLinkList = true;
+        {
+            auto &v2 = form.GetValue(vid);
+            std::string stTxt, stType = v2.StateValPtr ? typeid(*v2.StateValPtr).name() : "(null)";
+            if (auto st = v2.StateValue<IIS_String>()) stTxt = st->Text;
+            else if (auto st = v2.StateValue<IIS_Int>()) stTxt = std::to_string(st->Value);
+            else if (auto st = v2.StateValue<IIS_Bool>()) stTxt = st->Value ? "true" : "false";
+            qDebug("[SET-IIF]   P3-aftupdall vid=%d state=%s stTxt='%s' raw='%s'", vid, stType.c_str(), stTxt.c_str(), v2.Value.c_str());
+        }
     } });
     QTimer::singleShot(30, this, [this]() {
         rebuildEditLines();
@@ -682,12 +638,17 @@ void EditPanelController::setIifBool(const QString &key, int mult, int idx, bool
         if (!b) return;
         int vid = b->GetCurrentTargetValueID();
         if (vid < 0) return;
-        auto &V = form.GetValue(vid);
-        if (auto st = V.StateValue<IIS_Bool>()) { st->Value = val; st->FmtType = b->FmtType; }
-        else V.ResetState<IIS_Bool>(val, b->FmtType);
-        V.NeedsUpdate(form.GetValues(), *b);
-        form.RegenFormattedString();
-        pbk->UpdateAll();
+        // 统一写入：副本上改 bool 分量 → RegenFormattedString 得新整行串 → d->SetValue
+        // 注意：输入值不做任何检测/筛选，直接写回（不做链接表同步，避免覆盖用户输入）。
+        auto newForm = ii->Value->Duplicate();
+        if (!newForm) return;
+        auto &newV = newForm->GetValue(vid);
+        if (auto st = newV.StateValue<IIS_Bool>()) { st->Value = val; st->FmtType = b->FmtType; }
+        else newV.ResetState<IIS_Bool>(val, b->FmtType);
+        newV.NeedsUpdate(newForm->GetValues(), *b);
+        const std::string newLine = newForm->RegenFormattedString();
+        d->SetValue(newLine);            // SetValue 内部 ParseFromString（CurSub 非空时 UpdateAll）
+        pbk->UpdateAll();                // 确保链接重建
         IBR_Inst_Project.RefreshLinkList = true;
     } });
     QTimer::singleShot(30, this, [this]() {
