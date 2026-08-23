@@ -104,11 +104,12 @@ enough.
 > .\deploy.ps1 -AppData "<install dir>" -OutZip ".\INIWeaver-Release.zip"
 > ```
 >
-> - Defaults: Qt at `C:/Qt6/6.8.1/msvc2022_64`, output to `publish\`.
-> - `-AppData <dir>` copies the app data (`Global/` modules + `Resources/`
->   config) from an existing install into the package.
+> - Output goes to `publish\` (override with `-Target`).
+> - `-AppData <release-folder>` copies the app data (`Global/` modules + `Resources/`
+>   config) from an already-installed release folder into the package.
 > - `-OutZip <path>` additionally packs everything into a zip.
-> - Point `-QtBin` at your `windeployqt.exe` if it differs.
+> - `windeployqt` is located under your local Qt install's `bin/`; point `-QtBin`
+>   at its `windeployqt.exe` if you use a different Qt.
 
 ## Documentation
 

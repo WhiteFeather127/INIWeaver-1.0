@@ -95,10 +95,12 @@ CMake cache、Qt6 自动生成代码和导入库都留在 `build\` 下。
 > .\deploy.ps1 -AppData "<安装目录>" -OutZip ".\INIWeaver-Release.zip"
 > ```
 >
-> - 默认：Qt 在 `C:/Qt6/6.8.1/msvc2022_64`，输出到 `publish\`。
-> - `-AppData <目录>`：从已有安装目录把应用数据（`Global/` 模块库 + `Resources/` 配置）一起拷进包。
+> - 输出目录 `publish\`（可用 `-Target` 覆盖）。
+> - `-AppData <release目录>`：从已装好的 release 文件夹里把应用数据
+>   （`Global/` 模块库 + `Resources/` 配置）一起拷进包。
 > - `-OutZip <路径>`：额外把所有内容打包成 zip。
-> - 若 `windeployqt.exe` 不在此 Qt 目录，用 `-QtBin` 指定。
+> - `windeployqt` 在你本机 Qt 安装目录的 `bin\` 下；用非默认 Qt 时用 `-QtBin`
+>   指向其 `windeployqt.exe`。
 
 ## 文档
 
