@@ -772,13 +772,16 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: Text.AlignLeft
                                     leftPadding: 4
+                                    rightPadding: 16  // 给右侧下拉箭头留空间，避免文字与箭头重叠
                                     elide: Text.ElideRight
                                 }
-                                indicator: Rectangle {
+                                indicator: Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     anchors.right: parent.right
-                                    anchors.rightMargin: 4
-                                    width: 0; height: 0
+                                    anchors.rightMargin: 6
+                                    text: "▾"
+                                    color: "#9a9a9a"
+                                    font.pixelSize: root.fontBody
                                 }
                             }
 
