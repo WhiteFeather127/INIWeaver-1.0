@@ -793,9 +793,14 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 弹层位置交由 Qt 按下拉框视觉坐标自动定位（ComboBox 原生可靠），
-                                    // 只乘 ratio 使弹层宽/行高/字体匹配下拉框的视觉尺寸
-                                    y: comboCtrl.height * workspaceController.ratio  // 贴下拉框下缘
+                                    // 缩放中 GPU scale 使内建 positioner 定位不准 → 重开后用 mapToGlobal
+                                    // 把下拉框视觉底部映射到 overlay 坐标精确落位（callLater 等布局稳定）
+                                    onOpened: Qt.callLater(function () {
+                                        var gp = comboCtrl.mapToGlobal(0, comboCtrl.height * workspaceController.ratio)
+                                        var lo = Overlay.overlay.mapFromGlobal(gp.x, gp.y)
+                                        comboCtrl.popup.x = lo.x
+                                        comboCtrl.popup.y = lo.y
+                                    })
                                     width: comboCtrl.width * workspaceController.ratio
                                     padding: 0
                                     background: Rectangle {
