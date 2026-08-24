@@ -409,7 +409,7 @@ Item {
         verticalAlignment: Text.AlignVCenter
         background: Rectangle {
             color: "#1e1e1e"
-            border.color: "#007acc"
+            border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
             border.width: 1
             radius: 2
         }
@@ -731,7 +731,7 @@ Item {
                                 readOnly: cc.readOnly || false
                                 background: Rectangle {
                                     color: "#1e1e1e"
-                                    border.color: "#007acc"
+                                    border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                     border.width: 1
                                     radius: 2
                                 }
@@ -761,7 +761,7 @@ Item {
                                 }
                                 background: Rectangle {
                                     color: "#1e1e1e"
-                                    border.color: "#007acc"
+                                    border.color: comboCtrl.activeFocus ? "#007acc" : "#3c3c3c"
                                     border.width: 1
                                     radius: 2
                                 }
@@ -812,7 +812,7 @@ Item {
                                     selectByMouse: true
                                     background: Rectangle {
                                         color: "#1e1e1e"
-                                        border.color: "#007acc"
+                                        border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                         border.width: 1
                                         radius: 2
                                     }
@@ -823,7 +823,7 @@ Item {
                                 }
                             }
 
-                            // 整型滑条（slider）：滑条 + 当前值
+                            // 滑条（slider）：滑条 + 当前值
                             Row {
                                 visible: cc.type === "slider"
                                 x: iifCell.ctlX
@@ -1010,7 +1010,7 @@ Item {
         verticalAlignment: Text.AlignVCenter
         background: Rectangle {
             color: "#1e1e1e"
-            border.color: "#007acc"
+            border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
             border.width: 1
             radius: 2
         }
