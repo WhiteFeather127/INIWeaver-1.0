@@ -779,10 +779,11 @@ Item {
                                                         }
 
                                                         // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
+                                                        // 用 Dialog 通用 onAccepted + selectedColor：当前 Qt 版本 ColorDialog 无 onColorSelected 信号
                                                         ColorDialog {
                                                             id: colorDlg
                                                             title: "选择颜色"
-                                                            onColorSelected: (color) => { iifColorWrite(iifCell.comp, color, iifRowItem.rdata.mult); colorDlg.close() }
+                                                            onAccepted: { iifColorWrite(iifCell.comp, colorDlg.selectedColor, iifRowItem.rdata.mult) }
                                                         }
 
                                                         // color 色块（可点击取色）+ 值输入
@@ -799,7 +800,7 @@ Item {
                                                                     hoverEnabled: true
                                                                     cursorShape: Qt.PointingHandCursor
                                                                     onClicked: {
-                                                                        colorDlg.currentColor = iifCell.comp.value || "#000000"
+                                                                        colorDlg.selectedColor = iifCell.comp.value || "#000000"
                                                                         colorDlg.open()
                                                                     }
                                                                 }
