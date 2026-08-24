@@ -791,6 +791,12 @@ Item {
                                     y: comboCtrl.height + 2
                                     width: comboCtrl.width
                                     padding: 0
+                                    // 弹层是顶层 Popup，不被 SectionNode 的 GPU scale 缩放，
+                                    // 手动乘 ratio 使弹层宽/高/字体与下拉框及其余模块控件随缩放一致
+                                    transform: Scale {
+                                        xScale: workspaceController.ratio
+                                        yScale: workspaceController.ratio
+                                    }
                                     background: Rectangle {
                                         color: "#2d2d2d"
                                         border.color: "#3c3c3c"
@@ -800,24 +806,25 @@ Item {
                                     contentItem: ListView {
                                         id: comboList
                                         clip: true
-                                        // 直接绑定源 model 而非 comboCtrl.delegateModel：后者带 Qt 默认
-                                        // delegate 会把文字压成主题色（黑），这里自绘 delegate 完全控制样式
-                                        model: comboCtrl.model
-                                        implicitWidth: comboCtrl.width
+                                        // 用数值 count 作 model，delegate 经 index 直接从 opts 取元素，
+                                        // 避免对象数组 model→modelData 映射异常（曾导致所有项显示同一文本）
+                                        model: root.iifOptArr(cc).length
+                                        width: comboCtrl.width
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
                                         delegate: Rectangle {
                                             required property int index
+                                            readonly property var opt: {
+                                                var arr = root.iifOptArr(cc)
+                                                return (index >= 0 && index < arr.length) ? arr[index] : null
+                                            }
                                             width: comboList.width
                                             height: comboCtrl.height
                                             // 当前选中或悬停 → 高亮
                                             color: (index === comboCtrl.currentIndex || hoverArea.containsMouse)
                                                 ? "#3e3e3e" : "transparent"
                                             Text {
-                                                // opt 元素为 {key,label,desc}（见 IifExportOpts），显式取 label，
-                                                // 避免 textRole 间接引用出错；无 label 时回退原始显示
-                                                text: modelData && modelData.label !== undefined
-                                                    ? modelData.label : String(modelData ?? "")
+                                                text: (opt && opt.label) || (opt && opt.key) || ""
                                                 color: "#d4d4d4"
                                                 font.pixelSize: root.fontBody
                                                 verticalAlignment: Text.AlignVCenter
@@ -830,11 +837,9 @@ Item {
                                                 anchors.fill: parent
                                                 hoverEnabled: true
                                                 onClicked: {
-                                                    var arr = root.iifOptArr(cc)
-                                                    var o = (index >= 0 && index < arr.length) ? arr[index] : null
-                                                    if (o && root.lineModel)
+                                                    if (opt && root.lineModel)
                                                         root.lineModel.setIifComponentValue(
-                                                            root.rowIndex, cc.idx || cc.compIdx, o.key)
+                                                            root.rowIndex, cc.idx || cc.compIdx, opt.key)
                                                     comboCtrl.currentIndex = index
                                                     comboCtrl.popup.close()
                                                 }
