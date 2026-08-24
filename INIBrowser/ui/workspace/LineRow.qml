@@ -57,6 +57,8 @@ Item {
     property int iifRevision: 0
     // IIF 首行是否为链接节点行（Multiple "+" 需避开首行右端的链接节点，对齐首行左移）
     property bool iifFirstRowHasNode: false
+    // color 分量当前点击的 cell（取色器按需加载，共享一个 dialog，写回据此）
+    property var pendingColorComp: null
 
     // 监听模型写回通知：刷新本行 IIF 分量列表与自然宽度
     Connections {
@@ -90,18 +92,32 @@ Item {
         var rows = []
         var cur = null
         var same = false
+        var multiNext = false   // 上一 cell 为 radio/choice 且内部换多行 → 后续控件强制换新行下沉
         function newRow() { var r = { isSep: false, node: null, cells: [] }; rows.push(r); return r }
         for (var i = 0; i < all.length; i++) {
             var c = all[i]
             var t = c.type
             if (t === "samel") { same = true; continue }
-            if (t === "newl") { cur = null; same = false; continue }
-            if (t === "sep") { rows.push({ isSep: true, node: null, cells: [] }); cur = null; same = false; continue }
+            if (t === "newl") { cur = null; same = false; multiNext = false; continue }
+            if (t === "sep") { rows.push({ isSep: true, node: null, cells: [] }); cur = null; same = false; multiNext = false; continue }
+            // 上一 cell 是多行 radio/choice，本 cell 即使 samel 也强制另起新行，
+            // 让后续控件落在 radio/choice 多行块的下方（对齐流水布局视觉）
+            if (multiNext && same) { cur = null; same = false }
             if (!same) cur = null
             if (!cur) cur = newRow()
             if (t === "link") cur.node = c
             else cur.cells.push(c)
             same = false
+            // 判定本 cell 是否在内部换多行：若是，其后的控件应到它下方的新行
+            if (t === "radio" || t === "choice") {
+                var tot = root.iifOptArr(c).length
+                var per = 1
+                if (c.sameLine || c.sameLine === undefined)
+                    per = (c.maxInOneLine && c.maxInOneLine > 0) ? c.maxInOneLine : (tot > 0 ? tot : 1)
+                multiNext = Math.max(1, Math.ceil(tot / Math.max(1, per))) > 1
+            } else {
+                multiNext = false
+            }
         }
         return rows
     }
@@ -962,10 +978,18 @@ Item {
                             }
 
                             // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
-                            ColorDialog {
-                                id: colorDlg
-                                title: "选择颜色"
-                                onColorSelected: (color) => { root.iifColorWrite(cc, color); colorDlg.close() }
+                            // Loader 按需创建：Dialog 是重对象，若直接在每 cell 实例化（含非 color）
+                            // 会在缩放等刷新时反复重建拖垮帧率（缩放补间动画瞬跳的根因）
+                            Loader {
+                                id: colorDlgLoader
+                                active: cc && cc.type === "color"
+                                sourceComponent: ColorDialog {
+                                    title: "选择颜色"
+                                    onColorSelected: (color) => {
+                                        if (root.pendingColorComp) root.iifColorWrite(root.pendingColorComp, color)
+                                        close()
+                                    }
+                                }
                             }
 
                             // 色板（color）：色块可点击取色 + 值输入（label + 占满剩余宽）
@@ -989,8 +1013,12 @@ Item {
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
-                                            colorDlg.currentColor = root.iifColorToHex(cc.value)
-                                            colorDlg.open()
+                                            root.pendingColorComp = cc
+                                            var dlg = colorDlgLoader.item
+                                            if (dlg) {
+                                                dlg.currentColor = root.iifColorToHex(cc.value)
+                                                dlg.open()
+                                            }
                                         }
                                     }
                                 }
