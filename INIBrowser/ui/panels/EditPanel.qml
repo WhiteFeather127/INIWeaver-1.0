@@ -14,9 +14,6 @@ import "../components"
 Item {
     id: editPanel
 
-    // color 分量当前点击的 cell（取色器按需加载，写回据此）
-    property var pendingColorComp: null
-
     // 主容器
     ColumnLayout {
         anchors.fill: parent
@@ -782,19 +779,10 @@ Item {
                                                         }
 
                                                         // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
-                                                        // Loader 按需创建：Dialog 是重对象，若直接在每 cell 实例化（含非 color）
-                                                        // 会在缩放等刷新时反复重建拖垮帧率（缩放补间动画瞬跳的根因）
-                                                        Loader {
-                                                            id: colorDlgLoader
-                                                            active: iifCell.comp && iifCell.comp.type === "color"
-                                                            sourceComponent: ColorDialog {
-                                                                title: "选择颜色"
-                                                                onColorSelected: (color) => {
-                                                                    if (editPanel.pendingColorComp)
-                                                                        iifColorWrite(editPanel.pendingColorComp, color, iifRowItem.rdata.mult)
-                                                                    close()
-                                                                }
-                                                            }
+                                                        ColorDialog {
+                                                            id: colorDlg
+                                                            title: "选择颜色"
+                                                            onColorSelected: (color) => { iifColorWrite(iifCell.comp, color, iifRowItem.rdata.mult); colorDlg.close() }
                                                         }
 
                                                         // color 色块（可点击取色）+ 值输入
@@ -811,12 +799,8 @@ Item {
                                                                     hoverEnabled: true
                                                                     cursorShape: Qt.PointingHandCursor
                                                                     onClicked: {
-                                                                        editPanel.pendingColorComp = iifCell.comp
-                                                                        var dlg = colorDlgLoader.item
-                                                                        if (dlg) {
-                                                                            dlg.currentColor = iifCell.comp.value || "#000000"
-                                                                            dlg.open()
-                                                                        }
+                                                                        colorDlg.currentColor = iifCell.comp.value || "#000000"
+                                                                        colorDlg.open()
                                                                     }
                                                                 }
                                                             }

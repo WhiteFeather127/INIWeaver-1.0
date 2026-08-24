@@ -57,8 +57,6 @@ Item {
     property int iifRevision: 0
     // IIF 首行是否为链接节点行（Multiple "+" 需避开首行右端的链接节点，对齐首行左移）
     property bool iifFirstRowHasNode: false
-    // color 分量当前点击的 cell（取色器按需加载，共享一个 dialog，写回据此）
-    property var pendingColorComp: null
 
     // 监听模型写回通知：刷新本行 IIF 分量列表与自然宽度
     Connections {
@@ -978,18 +976,10 @@ Item {
                             }
 
                             // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
-                            // Loader 按需创建：Dialog 是重对象，若直接在每 cell 实例化（含非 color）
-                            // 会在缩放等刷新时反复重建拖垮帧率（缩放补间动画瞬跳的根因）
-                            Loader {
-                                id: colorDlgLoader
-                                active: cc && cc.type === "color"
-                                sourceComponent: ColorDialog {
-                                    title: "选择颜色"
-                                    onColorSelected: (color) => {
-                                        if (root.pendingColorComp) root.iifColorWrite(root.pendingColorComp, color)
-                                        close()
-                                    }
-                                }
+                            ColorDialog {
+                                id: colorDlg
+                                title: "选择颜色"
+                                onColorSelected: (color) => { root.iifColorWrite(cc, color); colorDlg.close() }
                             }
 
                             // 色板（color）：色块可点击取色 + 值输入（label + 占满剩余宽）
@@ -1013,12 +1003,8 @@ Item {
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
-                                            root.pendingColorComp = cc
-                                            var dlg = colorDlgLoader.item
-                                            if (dlg) {
-                                                dlg.currentColor = root.iifColorToHex(cc.value)
-                                                dlg.open()
-                                            }
+                                            colorDlg.currentColor = root.iifColorToHex(cc.value)
+                                            colorDlg.open()
                                         }
                                     }
                                 }
