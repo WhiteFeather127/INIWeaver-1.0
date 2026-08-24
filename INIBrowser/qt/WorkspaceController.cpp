@@ -1655,13 +1655,16 @@ void WorkspaceController::setDragTarget(qulonglong targetId, const QString &colo
 
 void WorkspaceController::clearDragTarget()
 {
+    // 仅清除"目标命中预览"相关状态（目标行），保留 m_dragSourceText 源标签：
+    // 拖线过程中 onPositionChanged 只要鼠标移出模块（空白区）就会调本函数清目标预览，
+    // 若连源标签一起清，而 setDragSourceText 仅在拖拽开始设一次 → 扫过空白区后
+    // 源标签永久消失，预览框少一行。源标签由拖拽结束时的 clearDraggingLink() 统一清理。
     if (m_dragTargetSectionId == INVALID_MODULE_ID && m_dragTargetColor.isEmpty()
-        && m_dragTargetText.isEmpty() && m_dragSourceText.isEmpty())
+        && m_dragTargetText.isEmpty())
         return;
     m_dragTargetSectionId = INVALID_MODULE_ID;
     m_dragTargetColor.clear();
     m_dragTargetText.clear();
-    m_dragSourceText.clear();
     emit dragTargetChanged();
 }
 
