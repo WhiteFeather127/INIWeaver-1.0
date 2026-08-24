@@ -172,12 +172,38 @@ Item {
         }
     }
 
+    // 递归命中测试（workspaceView 坐标系 (wsX,wsY)）。优先返回包含该点的最深子模块；
+    // 否则自身矩形（含缩放）包含该点则返回自身 sectionData；均未命中返回 null。
+    // 编组内子模块的实际渲染坐标由父虚拟块内 Column 布局决定，与逻辑 EqPos 不一致，
+    // 因此不能沿用 C++ 式 EqPos 盒测试，须在此按实际渲染矩形递归命中（连线/合并拖拽目标）。
+    function hitTestChild(wsX, wsY) {
+        // 1. 先递归子模块（命中任意子模块则返回最深的）
+        if (sectionData.isVirtualBlock && subModuleRepeater) {
+            for (var i = 0; i < subModuleRepeater.count; ++i) {
+                var del = subModuleRepeater.itemAt(i)
+                if (!del) continue
+                var sub = del.subModuleNode
+                if (sub && sub.hitTestChild) {
+                    var hit = sub.hitTestChild(wsX, wsY)
+                    if (hit) return hit
+                }
+            }
+        }
+        // 2. 自身矩形（左上→右下含缩放映射到 workspaceView）是否包含该点
+        var tl = root.mapToItem(workspaceView, 0, 0)
+        var br = root.mapToItem(workspaceView, root.width, root.height)
+        if (wsX >= tl.x && wsX <= br.x && wsY >= tl.y && wsY <= br.y) {
+            return root.sectionData
+        }
+        return null
+    }
+
     // 拖拽目标命中 + 预览（供标题栏圆点拖拽复用）
     // toX/toY 为鼠标在 workspaceView 坐标系的坐标；srcId 为拖拽源节点；linkType/isLinkDrag 区分连线/合并
     // 命中 → checkMergePreview/mergePreviewText 生成预览 → setDragTarget 通知目标节点显示预览框
     // 未命中或命中源自身 → setDragTarget(0) 清除预览
     function updateDragTarget(toX, toY, srcId, linkType, isLinkDrag) {
-        var targetStr = workspaceController.hitTestSectionStr(toX, toY)
+        var targetStr = workspaceView.findHitSectionIdStr(toX, toY)
         if (targetStr !== "" && Number(targetStr) !== srcId) {
             var targetId = Number(targetStr)
             var code = workspaceController.checkMergePreview(srcId, targetId, linkType, isLinkDrag)
@@ -343,7 +369,7 @@ Item {
                 onReleased: {
                     // 用拖拽终点（或按下位置）命中目标节点，命中则合并（对应 IBR_SecDrag 落点）
                     var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
-                    var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+                    var targetStr = workspaceView.findHitSectionIdStr(toPos.x, toPos.y)
                     if (targetStr !== "" && Number(targetStr) !== (root.sectionData.sectionId || 0)) {
                         var targetId = Number(targetStr)
                         workspaceController.mergeSectionToSection(root.sectionData.sectionId, targetId)
@@ -490,6 +516,8 @@ Item {
 
                     delegate: Item {
                         id: subModuleSlot
+                        // 暴露递归渲染的子模块节点，供 hitTestChild 递归命中（取最深子模块）
+                        property alias subModuleNode: subNodeLoader.item
                         width: virtualBlockContainer.width
                         // 高度由子 SectionNode 内容决定（对应 ImGui FinalY）
                         // 隐藏的子模块不占垂直空间（对应 ImGui 中 Hidden 计数但不渲染）

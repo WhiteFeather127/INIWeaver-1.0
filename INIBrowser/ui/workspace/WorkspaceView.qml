@@ -60,15 +60,26 @@ Item {
         workspaceView.reportViewportGlobal()
     }
 
-    // 查找指定屏幕坐标下的 SectionNode（供 LinkPoint 拖放检测）
+    // 查找指定 workspaceView 坐标系坐标下的 SectionNode（供 LinkPoint 拖放检测）
+    // 顶层 Repeater 只含顶层模块；编组内子模块由 SectionNode.hitTestChild 递归命中
+    //（子模块实际坐标由 QML Column 布局决定，不能用 C++ EqPos 盒测试）。
+    // 从后向前遍历（后渲染的在上层），返回命中的最深层 sectionData，未命中返回 null
     function findSectionAt(screenX, screenY) {
-        for (var i = 0; i < sectionRepeater.count; ++i) {
+        for (var i = sectionRepeater.count - 1; i >= 0; --i) {
             var item = sectionRepeater.itemAt(i)
-            if (item && item.contains(Qt.point(screenX - item.x, screenY - item.y))) {
-                return item.sectionData
+            if (item && item.hitTestChild) {
+                var hit = item.hitTestChild(screenX, screenY)
+                if (hit) return hit
             }
         }
         return null
+    }
+
+    // 命中 sectionId 的字符串版本：命中返回 sectionId（String），未命中返回 ""。
+    // 用途与 C++ hitTestSectionStr 一致，但覆盖编组内子模块（按实际渲染矩形递归命中）。
+    function findHitSectionIdStr(wsX, wsY) {
+        var node = findSectionAt(wsX, wsY)
+        return (node && node.sectionId !== undefined) ? String(node.sectionId) : ""
     }
 
     // 临时拖拽连线（对应 IBR_WorkSpace.cpp:1436-1459 拖动中的 Bezier）

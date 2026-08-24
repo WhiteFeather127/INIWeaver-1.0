@@ -180,7 +180,7 @@ Item {
             // 允许自连：targetId == sourceId 时链接回本模块（DLK），对应 ImGui Link.IsSelfLinked
             // 仅当确实拖拽过才建链，普通点击圆点（无拖动）松手不误建自连
             var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
-            var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+            var targetStr = workspaceView.findHitSectionIdStr(toPos.x, toPos.y)
             if (root.linkWasDragged && targetStr !== "" && root.linkLimit !== 0) {
                 var targetId = Number(targetStr)
                 if (root.iifNode) {
@@ -210,7 +210,7 @@ Item {
                 workspaceView.dragPreviewItem.x = toPos.x + 8
                 workspaceView.dragPreviewItem.y = toPos.y + 8
                 // 目标命中 + 预览（lineDrag：建链；允许自连，拖动中悬停本模块也给出预览）
-                var targetStr = workspaceController.hitTestSectionStr(toPos.x, toPos.y)
+                var targetStr = workspaceView.findHitSectionIdStr(toPos.x, toPos.y)
                 if (targetStr !== "") {
                     var targetId = Number(targetStr)
                     if (root.linkLimit === 0) {
