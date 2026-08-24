@@ -795,6 +795,7 @@ Item {
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
                                     // 弹层位置交由 Qt 按下拉框视觉坐标自动定位（ComboBox 原生可靠），
                                     // 只乘 ratio 使弹层宽/行高/字体匹配下拉框的视觉尺寸
+                                    y: comboCtrl.height * workspaceController.ratio  // 贴下拉框下缘
                                     width: comboCtrl.width * workspaceController.ratio
                                     padding: 0
                                     background: Rectangle {
