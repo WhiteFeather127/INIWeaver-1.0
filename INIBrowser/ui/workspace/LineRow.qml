@@ -761,7 +761,10 @@ Item {
                                 }
                                 background: Rectangle {
                                     color: "#1e1e1e"
-                                    border.color: comboCtrl.activeFocus ? "#007acc" : "#3c3c3c"
+                                    // 激活判定与输入框不同：ComboBox 点开弹出层后自身可能一直持有
+                                    // activeFocus（选中/点外关闭也不释放）→ 用 popup.visible 判断
+                                    // "下拉是否打开中"，关闭即变灰，等同于输入框失焦效果
+                                    border.color: comboCtrl.popup.visible ? "#007acc" : "#3c3c3c"
                                     border.width: 1
                                     radius: 2
                                 }
