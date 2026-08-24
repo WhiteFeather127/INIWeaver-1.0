@@ -593,39 +593,66 @@ Item {
                                                             }
                                                         }
 
-                                                        // radio 单选组：可点选按钮
-                                                        Row {
+                                                        // radio 单选组：可点选按钮；对齐 ImGui IIC_EnumRadio SameLine/MaxInOneLine 每行分组换行
+                                                        Column {
                                                             visible: iifCell.comp.type === "radio"
-                                                            spacing: 6
+                                                            spacing: 4
                                                             Repeater {
-                                                                model: iifOptArr(iifCell.comp)
+                                                                model: (function () {
+                                                                    var total = iifOptArr(iifCell.comp).length
+                                                                    var per = 1
+                                                                    if (iifCell.comp.sameLine || iifCell.comp.sameLine === undefined)
+                                                                        per = (iifCell.comp.maxInOneLine && iifCell.comp.maxInOneLine > 0) ? iifCell.comp.maxInOneLine : total
+                                                                    return Math.max(1, Math.ceil(total / Math.max(1, per)))
+                                                                })()
                                                                 delegate: Row {
-                                                                    property var opt: modelData
-                                                                    spacing: 3
-                                                                    Rectangle {
-                                                                        width: 14; height: 14; radius: 7
-                                                                        color: (opt.key === iifCell.comp.value) ? "#2d6db5" : "#1e1e1e"
-                                                                        border.color: (opt.key === iifCell.comp.value) ? "#007acc" : "#5a5a5a"
-                                                                        border.width: 1
-                                                                        MouseArea {
-                                                                            anchors.fill: parent
-                                                                            onClicked: editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, opt.key)
-                                                                        }
-                                                                    }
-                                                                    Text {
-                                                                        text: opt.label || opt.key || ""
-                                                                        color: "#e0e0e0"
-                                                                        font.pixelSize: 13
-                                                                        verticalAlignment: Text.AlignVCenter
-                                                                        MouseArea {
-                                                                            anchors.fill: parent
-                                                                            acceptedButtons: Qt.NoButton
-                                                                            hoverEnabled: true
-                                                                            onContainsMouseChanged: {
-                                                                                if (containsMouse && opt.desc && opt.desc.length > 0) {
-                                                                                    var gr = mapToGlobal(width / 2, height + 4)
-                                                                                    appToolTip.show(opt.desc, gr.x, gr.y)
-                                                                                } else appToolTip.hide()
+                                                                    id: sRadioRow
+                                                                    required property int index
+                                                                    readonly property int per: (function () {
+                                                                        var total = iifOptArr(iifCell.comp).length
+                                                                        var p = 1
+                                                                        if (iifCell.comp.sameLine || iifCell.comp.sameLine === undefined)
+                                                                            p = (iifCell.comp.maxInOneLine && iifCell.comp.maxInOneLine > 0) ? iifCell.comp.maxInOneLine : total
+                                                                        return Math.max(1, p)
+                                                                    })()
+                                                                    readonly property int start: index * per
+                                                                    spacing: 6
+                                                                    Repeater {
+                                                                        model: Math.min(parent.per, iifOptArr(iifCell.comp).length - parent.start)
+                                                                        delegate: Item {
+                                                                            required property int index
+                                                                            readonly property var opt: iifOptArr(iifCell.comp)[sRadioRow.start + index]
+                                                                            width: 14 + 3 + ((opt.label || opt.key || "").length * 13 * 0.6)
+                                                                            height: 14
+                                                                            Row {
+                                                                                spacing: 3
+                                                                                Rectangle {
+                                                                                    width: 14; height: 14; radius: 7
+                                                                                    color: (opt.key === iifCell.comp.value) ? "#2d6db5" : "#1e1e1e"
+                                                                                    border.color: (opt.key === iifCell.comp.value) ? "#007acc" : "#5a5a5a"
+                                                                                    border.width: 1
+                                                                                    MouseArea {
+                                                                                        anchors.fill: parent
+                                                                                        onClicked: editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, opt.key)
+                                                                                    }
+                                                                                }
+                                                                                Text {
+                                                                                    text: opt.label || opt.key || ""
+                                                                                    color: "#e0e0e0"
+                                                                                    font.pixelSize: 13
+                                                                                    verticalAlignment: Text.AlignVCenter
+                                                                                    MouseArea {
+                                                                                        anchors.fill: parent
+                                                                                        acceptedButtons: Qt.NoButton
+                                                                                        hoverEnabled: true
+                                                                                        onContainsMouseChanged: {
+                                                                                            if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                                                                var gr = mapToGlobal(width / 2, height + 4)
+                                                                                                appToolTip.show(opt.desc, gr.x, gr.y)
+                                                                                            } else appToolTip.hide()
+                                                                                        }
+                                                                                    }
+                                                                                }
                                                                             }
                                                                         }
                                                                     }

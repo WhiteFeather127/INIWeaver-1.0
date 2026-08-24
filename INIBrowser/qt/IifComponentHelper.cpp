@@ -118,6 +118,10 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
             m["opts"] = IifExportOpts(t->Options, t->OptionOrder, showReg);
         } else if (auto t = dynamic_cast<IIC_EnumRadio*>(p.get())) {
             m["opts"] = IifExportOpts(t->Options, t->OptionOrder, showReg);
+            // 对齐 ImGui IIC_EnumRadio::RenderUI 的 SameLine/MaxInOneLine：
+            // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行）
+            m["sameLine"] = t->SameLine;
+            m["maxInOneLine"] = t->MaxInOneLine;
         } else if (auto t = dynamic_cast<IIC_SliderInt*>(p.get())) {
             m["min"] = t->Min; m["max"] = t->Max;
         } else if (auto t = dynamic_cast<IIC_ColorPanel*>(p.get())) {

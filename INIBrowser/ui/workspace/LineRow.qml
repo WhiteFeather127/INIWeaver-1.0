@@ -605,49 +605,76 @@ Item {
                                 }
                             }
 
-                            // 枚举单选组（radio）：一组互斥圆点
-                            Row {
+                            // 枚举单选组（radio）：对齐 ImGui IIC_EnumRadio 的 SameLine/MaxInOneLine——每 MaxInOneLine 个换行
+                            Column {
                                 visible: cc.type === "radio"
                                 x: iifCell.ctlX
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 6
+                                spacing: 4
                                 Repeater {
-                                    model: root.iifOptArr(cc)
+                                    model: (function () {
+                                        var total = root.iifOptArr(cc).length
+                                        var per = 1
+                                        if (cc.sameLine || cc.sameLine === undefined)
+                                            per = (cc.maxInOneLine && cc.maxInOneLine > 0) ? cc.maxInOneLine : total
+                                        return Math.max(1, Math.ceil(total / Math.max(1, per)))
+                                    })()
                                     delegate: Row {
-                                        property var opt: modelData
-                                        spacing: 3
-                                        Rectangle {
-                                            width: root.fontBody * 1.4 + 4
-                                            height: width
-                                            radius: width / 2
-                                            color: (opt.key === cc.value) ? "#2d6db5" : "#1e1e1e"
-                                            border.color: (opt.key === cc.value) ? "#007acc" : "#5a5a5a"
-                                            border.width: 1
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                preventStealing: true
-                                                hoverEnabled: true
-                                                onClicked: {
-                                                    if (root.lineModel)
-                                                        root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, opt.key)
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            text: opt.label || opt.key || ""
-                                            color: "#d4d4d4"
-                                            font.pixelSize: root.fontBody
-                                            verticalAlignment: Text.AlignVCenter
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                acceptedButtons: Qt.NoButton
-                                                hoverEnabled: true
-                                                onContainsMouseChanged: {
-                                                    if (containsMouse && opt.desc && opt.desc.length > 0) {
-                                                        var gr = mapToGlobal(width / 2, height + 2)
-                                                        appToolTip.show(opt.desc, gr.x, gr.y)
-                                                    } else appToolTip.hide()
+                                        id: radioRowItem
+                                        required property int index   // 行序号
+                                        readonly property int per: (function () {
+                                            var total = root.iifOptArr(cc).length
+                                            var p = 1
+                                            if (cc.sameLine || cc.sameLine === undefined)
+                                                p = (cc.maxInOneLine && cc.maxInOneLine > 0) ? cc.maxInOneLine : total
+                                            return Math.max(1, p)
+                                        })()
+                                        readonly property int start: index * per
+                                        spacing: 6
+                                        Repeater {
+                                            model: Math.min(parent.per, root.iifOptArr(cc).length - parent.start)
+                                            delegate: Item {
+                                                required property int index   // 行内序号
+                                                readonly property var opt: root.iifOptArr(cc)[radioRowItem.start + index]
+                                                width: (root.fontBody * 1.4 + 4) + 3
+                                                       + ((opt.label || opt.key || "").length * root.fontBody * 0.6)
+                                                height: root.fontBody * 1.4 + 4
+                                                Row {
+                                                    spacing: 3
+                                                    Rectangle {
+                                                        width: root.fontBody * 1.4 + 4
+                                                        height: width
+                                                        radius: width / 2
+                                                        color: (opt.key === cc.value) ? "#2d6db5" : "#1e1e1e"
+                                                        border.color: (opt.key === cc.value) ? "#007acc" : "#5a5a5a"
+                                                        border.width: 1
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            preventStealing: true
+                                                            hoverEnabled: true
+                                                            onClicked: {
+                                                                if (root.lineModel)
+                                                                    root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, opt.key)
+                                                            }
+                                                        }
+                                                    }
+                                                    Text {
+                                                        text: opt.label || opt.key || ""
+                                                        color: "#d4d4d4"
+                                                        font.pixelSize: root.fontBody
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            acceptedButtons: Qt.NoButton
+                                                            hoverEnabled: true
+                                                            onContainsMouseChanged: {
+                                                                if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                                    var gr = mapToGlobal(width / 2, height + 2)
+                                                                    appToolTip.show(opt.desc, gr.x, gr.y)
+                                                                } else appToolTip.hide()
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
