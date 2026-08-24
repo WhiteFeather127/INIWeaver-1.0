@@ -222,14 +222,40 @@ Item {
         }
         root.iifNaturalWidth = root.onShowLabel.implicitWidth + 6 + maxRow
     }
-    // IIF 分量总高：每个分量/分隔都作为占空间的渲染行，模块高度随行数自适应。
-    // 逐行累加（分隔线 6px，普通行 fontBody*2）+ 行间距；非 IIF 返回 0。
+    // 单个分量占用高度：radio/choice 内部选项按 MaxInOneLine 换行到多行时高度随之增高，
+    // 使多行选项不向下溢出压到下方的控件/键行；其余单行分量维持 fontBody*2。
+    function iifCellUnitHeight(cc) {
+        if (!cc) return root.fontBody * 2
+        var t = cc.type
+        if (t === "radio" || t === "choice") {
+            var arr = root.iifOptArr(cc)
+            var tot = arr ? arr.length : 0
+            var per = 1
+            if (cc.sameLine || cc.sameLine === undefined)
+                per = (cc.maxInOneLine && cc.maxInOneLine > 0) ? cc.maxInOneLine : (tot > 0 ? tot : 1)
+            var rows = Math.max(1, Math.ceil(tot / Math.max(1, per)))
+            var itemH = root.fontBody * 1.4 + 4          // 单个选项高
+            var sp = 4                                   // Column spacing
+            return Math.max(root.fontBody * 2, rows * itemH + Math.max(0, rows - 1) * sp)
+        }
+        return root.fontBody * 2
+    }
+    // 单行实际高度：取行内各分量最大高度（分隔行固定 6）
+    function iifRowHeight(row) {
+        if (!row || row.isSep) return 6
+        var h = root.fontBody * 2
+        var cells = row.cells
+        if (cells) for (var i = 0; i < cells.length; i++)
+            h = Math.max(h, root.iifCellUnitHeight(cells[i]))
+        return h
+    }
+    // IIF 分量总高：逐行累加实际行高；模块高度随 radio/choice 多行自适应
     function iifTotalHeight() {
         if (!(root.isInputMode && root.keyType === 2) || !root.lineModel) return 0
         var rows = root.iifRows()
         var h = 0
         for (var i = 0; i < rows.length; i++)
-            h += rows[i].isSep ? 6 : root.fontBody * 2
+            h += root.iifRowHeight(rows[i])
         if (rows.length > 1) h += (rows.length - 1) * 2   // Column spacing
         if (workspaceController.diagLogEnabled())
             console.log("[IIF-DIAG] totalHeight row=" + root.rowIndex + " key='" + root.keyName + "' rows=" + rows.length + " h=" + h)
@@ -531,7 +557,7 @@ Item {
                 id: iifRow
                 property var rowData: modelData
                 width: iifEdit.width
-                height: (rowData && rowData.isSep) ? 6 : root.fontBody * 2
+                height: (rowData && rowData.isSep) ? 6 : root.iifRowHeight(rowData)
                 Component.onCompleted: if (workspaceController.diagLogEnabled())
                     console.log("[IIF-DIAG] rowCreate row=" + root.rowIndex + " key='" + root.keyName + "' idx=" + index
                                 + " isSep=" + (rowData && rowData.isSep) + " cells=" + ((rowData && rowData.comps) ? rowData.comps.length : 0)
@@ -567,7 +593,7 @@ Item {
                             Layout.fillWidth: isFlex
                             Layout.preferredWidth: root.iifCellNaturalWidth(cc)
                             Layout.minimumWidth: 30
-                            height: root.fontBody * 2
+                            height: root.iifCellUnitHeight(cc)
 
                             // Short 标签（imgui TextEx(Hint.Short)）——每个交互分量都有的可见 Hint
                             Text {

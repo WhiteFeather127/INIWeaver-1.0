@@ -429,7 +429,41 @@ Item {
                                 property var kentry: modelData
                                 property string iifKey: kentry ? (kentry.keyName || "") : ""
                                 property int rowH: 30
-                                height: modelData ? (iifFlattenRows().length * rowH) : 0
+                                // 单行实际高度：radio/choice 内部选项按 MaxInOneLine 换行到多行时高度随之增高，
+                                // 使多行选项不向下溢出压到下一行/下一个控件（对齐 ImGui 流式布局）
+                                function sRowHeight(r) {
+                                    if (!r || r.isSep) return rowH
+                                    var h = rowH
+                                    var comps = r.comps || []
+                                    for (var i = 0; i < comps.length; i++) {
+                                        var c = comps[i]
+                                        var t = c.type
+                                        if (t !== "radio" && t !== "choice") continue
+                                        var tot = (c.opts || []).length
+                                        var per = 1
+                                        if (c.sameLine || c.sameLine === undefined)
+                                            per = (c.maxInOneLine > 0) ? c.maxInOneLine : (tot > 0 ? tot : 1)
+                                        var rows = Math.max(1, Math.ceil(tot / Math.max(1, per)))
+                                        var itemH = 20            // 选项高（覆盖 radio/choice 勾选框）
+                                        var sp = 4                // Column spacing
+                                        var rh = rows * itemH + Math.max(0, rows - 1) * sp
+                                        if (rh > h) h = rh
+                                    }
+                                    return h
+                                }
+                                // 第 i 行顶部 y = 前序各行高累加（手动布局用，替代固定 index*rowH）
+                                function sRowY(i) {
+                                    var rows = iifFlattenRows()
+                                    var y = 0
+                                    for (var k = 0; k < i && k < rows.length; k++) y += sRowHeight(rows[k])
+                                    return y
+                                }
+                                height: modelData ? (function () {
+                                    var rows = iifFlattenRows()
+                                    var total = 0
+                                    for (var i = 0; i < rows.length; i++) total += sRowHeight(rows[i])
+                                    return total
+                                })() : 0
                                 Layout.preferredHeight: height
 
                                 Repeater {
@@ -438,8 +472,8 @@ Item {
                                         id: iifRowItem
                                         property var rdata: modelData
                                         width: iifArea.width
-                                        y: index * iifArea.rowH
-                                        height: iifArea.rowH
+                                        y: iifArea.sRowY(index)
+                                        height: iifArea.sRowHeight(rdata)
 
                                         // sep → 分隔线
                                         Rectangle {
@@ -464,7 +498,7 @@ Item {
                                                     id: iifCell
                                                     property var comp: modelData
                                                     width: cellComp.implicitWidth
-                                                    height: iifArea.rowH
+                                                    height: iifArea.sRowHeight(iifRowItem.rdata)
 
                                                     Row {
                                                         id: cellComp
