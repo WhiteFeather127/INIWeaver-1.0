@@ -788,6 +788,11 @@ Item {
                                 }
                                 // 下拉弹层：统一深色方角风格，替换 Qt 默认浅色圆角列表外观
                                 popup: Popup {
+                                    // 缩放时 SectionNode 的 GPU scale 变换不触发 Popup 重定位，
+                                    // 弹层锚点会错位 → 监测 ratio，缩放中若有弹层则收起，
+                                    // 缩放结束后重新打开即在正确位置（消除缩放偏移）
+                                    property real ratioWatch: workspaceController.ratio
+                                    onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
                                     // 弹层是顶层 Popup，不随 SectionNode 的 GPU scale 缩放，且 Popup 无
                                     // transform 属性，故将宽/高/间距/字体显式乘 ratio，与框及其他控件随缩放一致
                                     y: comboCtrl.height * workspaceController.ratio  // 紧贴下拉框下端
