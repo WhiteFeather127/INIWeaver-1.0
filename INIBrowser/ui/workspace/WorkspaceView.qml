@@ -18,30 +18,41 @@ Item {
     // 必须经此属性更新预览框位置（跟随鼠标）
     property alias dragPreviewItem: dragPreview
 
-    // 缩放补间动画（QML 端驱动，渲染线程与帧同步）
-    // 参考 GraphFlow（Qt/QML 节点图编辑器）：缩放动画放 QML 侧由 QQuickWindow
-    // 动画驱动推进，避免 C++ QVariantAnimation 定时器 tick 与渲染循环不同步
-    // 造成的跳帧/低帧率。C++ onWheel 只设定目标 Ratio 与锚点并 emit zoomTweenRequested，
-    // 本动画每渲染帧更新 zoomAnimRatio 并调 applyZoomRatio 应用到 C++ 全局态。
-    // zoomAnimRatio 故意非绑定：动画期间由 NumberAnimation 独占控制，不受 C++ 回写干扰
+    // 缩放补间动画（QML Timer 逐帧插值驱动）
+    // 原用 NumberAnimation 由 QQuickWindow 渲染帧动画驱动推进；但 QSG_NO_VSYNC=1 关闭
+    // vsync 后渲染循环不再持续刷帧，动画驱动不产生中间帧（探针实测动画期间 applyZoomRatio
+    // 只调用 1 次直接跳到目标 = 瞬跳）。改用独立 Timer 在 GUI 线程插值 zoomAnimRatio，
+    // 不依赖渲染帧驱动，稳定产生渐变帧。C++ onWheel 仍只设目标 Ratio 与锚点 emit
+    // zoomTweenRequested；每帧 onZoomAnimRatioChanged 调 applyZoomRatio 应用到 C++ 全局态。
     property real zoomAnimRatio: 1.0
-    // 动画每帧写入 zoomAnimRatio 时应用到 C++ 全局态（NumberAnimation 无 onValueChanged
-    // 信号处理器，用属性变化处理器驱动：Ratio/EqCenter/拖拽基准修正/dragOffset/预览线
-    // 在 C++ applyZoomRatio 内原子完成）
+    property real zoomAnimFrom: 0
+    property real zoomAnimTo: 0
+    property double zoomAnimStart: 0
+    property int zoomAnimDuration: 120
+    property bool zoomAnimRunning: false
+    // 动画每帧写入 zoomAnimRatio 时应用到 C++ 全局态（Ratio/EqCenter/拖拽基准修正/
+    // dragOffset/预览线在 C++ applyZoomRatio 内原子完成）
     onZoomAnimRatioChanged: workspaceController.applyZoomRatio(zoomAnimRatio)
-    // restart/abort 的瞬停抑制：stop() 同步触发 onRunningChanged(false)，此时不应收尾
-    property bool zoomSuppressFinish: false
 
-    NumberAnimation {
-        id: zoomTweenAnim
-        target: workspaceView
-        property: "zoomAnimRatio"
-        duration: 120
-        easing.type: Easing.OutCubic
-        onRunningChanged: {
-            // 正常结束才收尾（restart/abort 的瞬停被 zoomSuppressFinish 抑制）
-            if (!running && !workspaceView.zoomSuppressFinish)
+    Timer {
+        id: zoomAnimTimer
+        interval: 16
+        repeat: true
+        onTriggered: {
+            if (!workspaceView.zoomAnimRunning) { stop(); return }
+            var t = Date.now() - workspaceView.zoomAnimStart
+            var p = Math.min(1.0, t / workspaceView.zoomAnimDuration)
+            // OutCubic easing：1-(1-p)^3
+            var eased = 1.0 - Math.pow(1.0 - p, 3)
+            if (p >= 1.0) {
+                workspaceView.zoomAnimRatio = workspaceView.zoomAnimTo
+                workspaceView.zoomAnimRunning = false
+                stop()
                 workspaceController.zoomTweenFinished()
+            } else {
+                workspaceView.zoomAnimRatio = workspaceView.zoomAnimFrom
+                        + (workspaceView.zoomAnimTo - workspaceView.zoomAnimFrom) * eased
+            }
         }
     }
 
@@ -144,21 +155,20 @@ Item {
             draggingLinkCanvas.visible = false
         }
         // 缩放补间启动/续接（C++ 滚轮事件触发）：从当前实际 Ratio 向新目标平滑过渡，
-        // 连续滚轮续接不跳变。restart 的 stop() 瞬停由 zoomSuppressFinish 抑制收尾。
+        // 连续滚轮续接不跳变（重置计时，起点取当前实际 Ratio）。
         function onZoomTweenRequested() {
-            workspaceView.zoomSuppressFinish = true
-            zoomTweenAnim.stop()
-            zoomTweenAnim.from = workspaceController.ratio
-            zoomTweenAnim.to = workspaceController.zoomTargetRatio
-            zoomTweenAnim.start()
-            workspaceView.zoomSuppressFinish = false
+            workspaceView.zoomAnimTimer.stop()
+            workspaceView.zoomAnimFrom = workspaceController.ratio
+            workspaceView.zoomAnimTo = workspaceController.zoomTargetRatio
+            workspaceView.zoomAnimStart = Date.now()
+            workspaceView.zoomAnimRunning = true
+            workspaceView.zoomAnimTimer.start()
         }
         // 缩放补间强制中止（C++ 收尾路径清 zoomPending 前调用）：
         // Ratio 已由 C++ 直接推到目标，这里只停动画，不再逐帧改值
         function onZoomTweenAbortRequested() {
-            workspaceView.zoomSuppressFinish = true
-            zoomTweenAnim.stop()
-            workspaceView.zoomSuppressFinish = false
+            workspaceView.zoomAnimTimer.stop()
+            workspaceView.zoomAnimRunning = false
         }
     }
 

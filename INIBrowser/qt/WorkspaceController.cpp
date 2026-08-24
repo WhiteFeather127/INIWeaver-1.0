@@ -396,12 +396,12 @@ void WorkspaceController::onWheel(qreal x, qreal y, qreal delta)
         m_hasPendingDrag = true;
         applyPendingDrag();
     }
-    // 补间搬 QML 端驱动：C++ 只设定目标 Ratio 与锚点并 emit 请求信号，
-    // QML NumberAnimation 每渲染帧回调 applyZoomRatio —— Ratio/EqCenter 变更、
-    // 拖拽基准修正、dragOffset 重算、预览线重发在同一渲染帧内原子完成。
-    // 动画由 QQuickWindow 动画驱动推进（与渲染帧同步），消除 C++ 定时器驱动的
-    // QVariantAnimation 与渲染循环不同步造成的跳帧/低帧率；UpdatePrevII 收尾
-    // 移至 QML 动画停止回调 zoomTweenFinished。
+    // 补间由 QML Timer 逐帧插值驱动：C++ 只设定目标 Ratio 与锚点并 emit 请求信号，
+    // QML 每帧把插值后的 zoomAnimRatio 回调 applyZoomRatio —— Ratio/EqCenter 变更、
+    // 拖拽基准修正、dragOffset 重算、预览线重发在同一帧内原子完成。
+    // 因 QSG_NO_VSYNC=1 关闭 vsync 后 QQuickWindow 渲染循环不再持续刷帧，
+    // NumberAnimation 动画驱动不产生中间帧，故改由独立 Timer 在 GUI 线程插值
+    //（与渲染帧解耦，稳定产生渐变帧）；UpdatePrevII 收尾移至动画停止回调 zoomTweenFinished。
     m_zoomTargetRatio = newRatio;
     emit zoomTargetRatioChanged();
     m_zoomAnchorScreen = QPointF(x, y);
@@ -469,7 +469,7 @@ void WorkspaceController::applyZoomRatio(float newRatio)
 void WorkspaceController::zoomTweenFinished()
 {
     // QML 端动画停止回调（原 QVariantAnimation finished 逻辑，补间搬 QML 后由
-    // NumberAnimation onRunningChanged 调用）：
+    // Timer 插值结束调用）：
     // v3 批次 2.1：补间完成推入 Undo 栈（对应 MainStage.h:218 UpdatePrevII，内部有阈值/merge）
     m_zoomAnimating = false;
     IBR_WorkSpace::UpdatePrevII();
