@@ -307,7 +307,10 @@ Item {
         id: onShowLabel
         anchors.left: parent.left
         anchors.leftMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
+        // 键 hint 留在第一行（对齐 imgui TextEx(Line) + 默认 NewLineAfterDesc=false 与 IIF 同排）：
+        // IIF 多行时顶部对齐第一行，普通行垂直居中
+        anchors.verticalCenter: root.keyType === 2 ? undefined : parent.verticalCenter
+        anchors.top: root.keyType === 2 ? parent.top : undefined
         // 编辑行注释（inputOnShow）时隐藏原文本，由 descEditField 替代（对应 ImGui
         // InputOnShow 分支替换 onShow 文本输入框，而非叠加覆盖）
         visible: !root.inputOnShow
