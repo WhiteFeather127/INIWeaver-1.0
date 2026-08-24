@@ -904,19 +904,50 @@ Item {
                                     from: cc.min || 0
                                     to: cc.max || 100
                                     value: parseInt(cc.value || "0", 10)
+                                    stepSize: 1
                                     height: root.fontBody * 2
                                     width: Math.max(80, parent.width - parent.spacing - root.fontBody * 4)
                                     anchors.verticalCenter: parent.verticalCenter
-                                    // 死循环修复：写回必须绑定"用户拖动"（onMoved），不能用 onValueChanged——
-                                    // onValueChanged 在模型刷新重设 value 时也会触发，pressed 已为 false，
-                                    // 形成 加载/重建→写回→重建 每30ms 一轮的无限循环。
-                                    onMoved: {
-                                        if (root.lineModel)
-                                            root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, "" + parseInt(sliderCtrl.value, 10))
+                                    // 细轨道，两端留 6px 让圆点不越界
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    background: Rectangle {
+                                        height: 3
+                                        radius: 1
+                                        color: "#3c3c3c"
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: 6
+                                        anchors.rightMargin: 6
+                                        // 已取值部分用蓝填充
+                                        Rectangle {
+                                            width: sliderCtrl.visualPosition * parent.width
+                                            height: parent.height
+                                            radius: 1
+                                            color: "#007acc"
+                                        }
+                                    }
+                                    // 手柄：小圆点（默认过大），Slider 自动按 value 定位
+                                    handle: Rectangle {
+                                        implicitWidth: root.fontBody * 1.6
+                                        implicitHeight: root.fontBody * 1.6
+                                        radius: width / 2
+                                        color: "#d4d4d4"
+                                        border.color: "#007acc"
+                                        border.width: 1
+                                    }
+                                    // 写回仅松手时提交一次：onMoved 每步都写会触发模型刷新/组件重建，
+                                    // 导致拖动中途被中断（拖一下就停）。拖动中本地实时值由右侧 Text 显示。
+                                    onPressedChanged: {
+                                        if (!pressed && root.lineModel)
+                                            root.lineModel.setIifComponentValue(
+                                                root.rowIndex, cc.idx || cc.compIdx,
+                                                "" + parseInt(sliderCtrl.value, 10))
                                     }
                                 }
                                 Text {
-                                    text: cc.value || "0"
+                                    text: "" + parseInt(sliderCtrl.value, 10)
                                     color: "#ce9178"
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
