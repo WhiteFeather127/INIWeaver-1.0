@@ -800,28 +800,47 @@ Item {
                                     contentItem: ListView {
                                         id: comboList
                                         clip: true
-                                        implicitHeight: contentHeight
-                                        model: comboCtrl.delegateModel
-                                        currentIndex: comboCtrl.highlightedIndex
-                                        highlightMoveDuration: 0
-                                        highlight: Rectangle { color: "#3e3e3e" }
-                                        delegate: ItemDelegate {
+                                        // 直接绑定源 model 而非 comboCtrl.delegateModel：后者带 Qt 默认
+                                        // delegate 会把文字压成主题色（黑），这里自绘 delegate 完全控制样式
+                                        model: comboCtrl.model
+                                        implicitWidth: comboCtrl.width
+                                        // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
+                                        implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
+                                        delegate: Rectangle {
+                                            required property int index
                                             width: comboList.width
-                                            contentItem: Text {
-                                                text: comboCtrl.textRole
-                                                      ? (Array.isArray(comboCtrl.model) ? modelData[comboCtrl.textRole] : model[comboCtrl.textRole])
-                                                      : modelData
+                                            height: comboCtrl.height
+                                            // 当前选中或悬停 → 高亮
+                                            color: (index === comboCtrl.currentIndex || hoverArea.containsMouse)
+                                                ? "#3e3e3e" : "transparent"
+                                            Text {
+                                                text: comboCtrl.textRole ? modelData[comboCtrl.textRole] : modelData
                                                 color: "#d4d4d4"
                                                 font.pixelSize: root.fontBody
-                                                elide: Text.ElideRight
                                                 verticalAlignment: Text.AlignVCenter
                                                 leftPadding: 8
                                                 rightPadding: 8
+                                                elide: Text.ElideRight
                                             }
-                                            highlighted: comboCtrl.highlightedIndex === index
-                                            background: Rectangle { color: "transparent" }
+                                            MouseArea {
+                                                id: hoverArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    var arr = root.iifOptArr(cc)
+                                                    var o = (index >= 0 && index < arr.length) ? arr[index] : null
+                                                    if (o && root.lineModel)
+                                                        root.lineModel.setIifComponentValue(
+                                                            root.rowIndex, cc.idx || cc.compIdx, o.key)
+                                                    comboCtrl.currentIndex = index
+                                                    comboCtrl.popup.close()
+                                                }
+                                            }
                                         }
-                                        ScrollIndicator.vertical: ScrollIndicator { visible: false }
+                                        ScrollIndicator.vertical: ScrollIndicator {
+                                            width: 6
+                                            contentItem: Rectangle { color: "#3c3c3c" }
+                                        }
                                     }
                                 }
                             }
