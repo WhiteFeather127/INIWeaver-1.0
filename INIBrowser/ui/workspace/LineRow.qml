@@ -788,15 +788,11 @@ Item {
                                 }
                                 // 下拉弹层：统一深色方角风格，替换 Qt 默认浅色圆角列表外观
                                 popup: Popup {
-                                    y: comboCtrl.height + 2
-                                    width: comboCtrl.width
+                                    // 弹层是顶层 Popup，不随 SectionNode 的 GPU scale 缩放，且 Popup 无
+                                    // transform 属性，故将宽/高/行距/字体显式乘 ratio，与框及其他控件随缩放一致
+                                    y: (comboCtrl.height + 2) * workspaceController.ratio
+                                    width: comboCtrl.width * workspaceController.ratio
                                     padding: 0
-                                    // 弹层是顶层 Popup，不被 SectionNode 的 GPU scale 缩放，
-                                    // 手动乘 ratio 使弹层宽/高/字体与下拉框及其余模块控件随缩放一致
-                                    transform: Scale {
-                                        xScale: workspaceController.ratio
-                                        yScale: workspaceController.ratio
-                                    }
                                     background: Rectangle {
                                         color: "#2d2d2d"
                                         border.color: "#3c3c3c"
@@ -809,9 +805,10 @@ Item {
                                         // 用数值 count 作 model，delegate 经 index 直接从 opts 取元素，
                                         // 避免对象数组 model→modelData 映射异常（曾导致所有项显示同一文本）
                                         model: root.iifOptArr(cc).length
-                                        width: comboCtrl.width
+                                        width: comboCtrl.width * workspaceController.ratio
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
-                                        implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
+                                        implicitHeight: Math.min(contentHeight,
+                                            (comboCtrl.height + 2) * 7 * workspaceController.ratio)
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {
@@ -819,14 +816,14 @@ Item {
                                                 return (index >= 0 && index < arr.length) ? arr[index] : null
                                             }
                                             width: comboList.width
-                                            height: comboCtrl.height
+                                            height: comboCtrl.height * workspaceController.ratio
                                             // 当前选中或悬停 → 高亮
                                             color: (index === comboCtrl.currentIndex || hoverArea.containsMouse)
                                                 ? "#3e3e3e" : "transparent"
                                             Text {
                                                 text: (opt && opt.label) || (opt && opt.key) || ""
                                                 color: "#d4d4d4"
-                                                font.pixelSize: root.fontBody
+                                                font.pixelSize: root.fontBody * workspaceController.ratio
                                                 verticalAlignment: Text.AlignVCenter
                                                 leftPadding: 8
                                                 rightPadding: 8
