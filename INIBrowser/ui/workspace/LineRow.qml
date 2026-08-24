@@ -814,7 +814,10 @@ Item {
                                             color: (index === comboCtrl.currentIndex || hoverArea.containsMouse)
                                                 ? "#3e3e3e" : "transparent"
                                             Text {
-                                                text: comboCtrl.textRole ? modelData[comboCtrl.textRole] : modelData
+                                                // opt 元素为 {key,label,desc}（见 IifExportOpts），显式取 label，
+                                                // 避免 textRole 间接引用出错；无 label 时回退原始显示
+                                                text: modelData && modelData.label !== undefined
+                                                    ? modelData.label : String(modelData ?? "")
                                                 color: "#d4d4d4"
                                                 font.pixelSize: root.fontBody
                                                 verticalAlignment: Text.AlignVCenter
