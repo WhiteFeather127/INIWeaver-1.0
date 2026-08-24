@@ -789,8 +789,8 @@ Item {
                                 // 下拉弹层：统一深色方角风格，替换 Qt 默认浅色圆角列表外观
                                 popup: Popup {
                                     // 弹层是顶层 Popup，不随 SectionNode 的 GPU scale 缩放，且 Popup 无
-                                    // transform 属性，故将宽/高/行距/字体显式乘 ratio，与框及其他控件随缩放一致
-                                    y: (comboCtrl.height + 2) * workspaceController.ratio
+                                    // transform 属性，故将宽/高/间距/字体显式乘 ratio，与框及其他控件随缩放一致
+                                    y: comboCtrl.height * workspaceController.ratio  // 紧贴下拉框下端
                                     width: comboCtrl.width * workspaceController.ratio
                                     padding: 0
                                     background: Rectangle {
