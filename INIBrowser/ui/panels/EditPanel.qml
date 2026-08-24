@@ -505,18 +505,91 @@ Item {
                                                             onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=iifInput key='" + iifArea.iifKey + "' mult=" + iifRowItem.rdata.mult + " idx=" + iifCell.comp.idx + " val='" + text + "'")
                                                         }
 
-                                                        // combo 下拉
+                                                        // combo 下拉（方角 + 箭头 + 深色弹层，对齐画布）
                                                         ComboBox {
+                                                            id: comboCtrl
                                                             visible: iifCell.comp.type === "combo"
                                                             model: iifOptArr(iifCell.comp)
                                                             textRole: "label"
                                                             currentIndex: iifComboIndex(iifCell.comp)
                                                             width: 150
                                                             height: 24
-                                                            onActivated: {
-                                                                var arr = iifOptArr(iifCell.comp)
-                                                                var o = (index >= 0 && index < arr.length) ? arr[index] : null
-                                                                if (o) editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, o.key)
+                                                            background: Rectangle {
+                                                                color: "#2d2d2d"
+                                                                border.color: comboCtrl.popup.visible ? "#007acc" : "#3c3c3c"
+                                                                border.width: 1
+                                                                radius: 0
+                                                            }
+                                                            contentItem: Text {
+                                                                text: comboCtrl.currentText
+                                                                color: "#e0e0e0"
+                                                                font.pixelSize: 13
+                                                                verticalAlignment: Text.AlignVCenter
+                                                                leftPadding: 6
+                                                                rightPadding: 16
+                                                                elide: Text.ElideRight
+                                                            }
+                                                            indicator: Text {
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                                anchors.right: parent.right
+                                                                anchors.rightMargin: 6
+                                                                text: "▾"
+                                                                color: "#9a9a9a"
+                                                                font.pixelSize: 13
+                                                            }
+                                                            popup: Popup {
+                                                                y: comboCtrl.height
+                                                                width: comboCtrl.width
+                                                                padding: 0
+                                                                background: Rectangle {
+                                                                    color: "#2d2d2d"
+                                                                    border.color: "#3c3c3c"
+                                                                    border.width: 1
+                                                                    radius: 0
+                                                                }
+                                                                contentItem: ListView {
+                                                                    id: comboList
+                                                                    clip: true
+                                                                    // 数值 count 作 model，delegate 经 index 直接取 opts 元素
+                                                                    model: iifOptArr(iifCell.comp).length
+                                                                    width: comboCtrl.width
+                                                                    implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
+                                                                    delegate: Rectangle {
+                                                                        required property int index
+                                                                        readonly property var opt: {
+                                                                            var arr = iifOptArr(iifCell.comp)
+                                                                            return (index >= 0 && index < arr.length) ? arr[index] : null
+                                                                        }
+                                                                        width: comboList.width
+                                                                        height: comboCtrl.height
+                                                                        color: (index === comboCtrl.currentIndex || hoverArea.containsMouse)
+                                                                            ? "#3e3e3e" : "transparent"
+                                                                        Text {
+                                                                            text: (opt && opt.label) || (opt && opt.key) || ""
+                                                                            color: "#d4d4d4"
+                                                                            font.pixelSize: 13
+                                                                            verticalAlignment: Text.AlignVCenter
+                                                                            leftPadding: 8
+                                                                            rightPadding: 8
+                                                                            elide: Text.ElideRight
+                                                                        }
+                                                                        MouseArea {
+                                                                            id: hoverArea
+                                                                            anchors.fill: parent
+                                                                            hoverEnabled: true
+                                                                            onClicked: {
+                                                                                if (opt) editPanelController.setIifValue(
+                                                                                    iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, opt.key)
+                                                                                comboCtrl.currentIndex = index
+                                                                                comboCtrl.popup.close()
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    ScrollIndicator.vertical: ScrollIndicator {
+                                                                        width: 6
+                                                                        contentItem: Rectangle { color: "#3c3c3c" }
+                                                                    }
+                                                                }
                                                             }
                                                         }
 
@@ -630,15 +703,48 @@ Item {
                                                                 from: iifCell.comp.min || 0
                                                                 to: iifCell.comp.max || 100
                                                                 value: parseInt(iifCell.comp.value || "0", 10)
+                                                                stepSize: 1
                                                                 width: 140
                                                                 height: 24
-                                                                // 死循环修复：写回必须绑定"用户拖动"（onMoved），不能用 onValueChanged——
-                                                                // onValueChanged 在模型刷新重设 value 时也会触发，pressed 已为 false，
-                                                                // 形成 加载/重建→写回→重建 每30ms 一轮的无限循环。
-                                                                onMoved: editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, "" + parseInt(sliderCtrl.value, 10))
+                                                                leftPadding: 6
+                                                                rightPadding: 6
+                                                                background: Rectangle {
+                                                                    height: 3
+                                                                    radius: 1
+                                                                    color: "#3c3c3c"
+                                                                    anchors.left: parent.left
+                                                                    anchors.right: parent.right
+                                                                    anchors.verticalCenter: parent.verticalCenter
+                                                                    anchors.leftMargin: 6
+                                                                    anchors.rightMargin: 6
+                                                                    // 已取值部分用蓝填充
+                                                                    Rectangle {
+                                                                        width: sliderCtrl.visualPosition * parent.width
+                                                                        height: parent.height
+                                                                        radius: 1
+                                                                        color: "#007acc"
+                                                                    }
+                                                                }
+                                                                // 手柄：小圆点，按 value 的 visualPosition 显式定位
+                                                                handle: Rectangle {
+                                                                    x: sliderCtrl.leftPadding + sliderCtrl.visualPosition
+                                                                       * (sliderCtrl.availableWidth - width)
+                                                                    y: sliderCtrl.topPadding + sliderCtrl.availableHeight / 2 - height / 2
+                                                                    implicitWidth: 13 * 1.6
+                                                                    implicitHeight: 13 * 1.6
+                                                                    radius: width / 2
+                                                                    color: "#d4d4d4"
+                                                                    border.color: "#007acc"
+                                                                    border.width: 1
+                                                                }
+                                                                // 写回仅松手时提交一次，避免拖动中刷新中断；拖动中数值由右侧 Text 实时显示
+                                                                onPressedChanged: {
+                                                                    if (!pressed)
+                                                                        editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, "" + parseInt(sliderCtrl.value, 10))
+                                                                }
                                                             }
                                                             Text {
-                                                                text: iifCell.comp.value || "0"
+                                                                text: "" + parseInt(sliderCtrl.value, 10)
                                                                 color: "#e0e0e0"
                                                                 font.pixelSize: 13
                                                                 verticalAlignment: Text.AlignVCenter
