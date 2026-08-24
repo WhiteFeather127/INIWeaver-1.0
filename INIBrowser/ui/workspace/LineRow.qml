@@ -928,8 +928,11 @@ Item {
                                             color: "#007acc"
                                         }
                                     }
-                                    // 手柄：小圆点（默认过大），Slider 自动按 value 定位
+                                    // 手柄：小圆点（默认过大），按 value 的 visualPosition 显式定位
                                     handle: Rectangle {
+                                        x: sliderCtrl.leftPadding + sliderCtrl.visualPosition
+                                           * (sliderCtrl.availableWidth - width)
+                                        y: sliderCtrl.topPadding + sliderCtrl.availableHeight / 2 - height / 2
                                         implicitWidth: root.fontBody * 1.6
                                         implicitHeight: root.fontBody * 1.6
                                         radius: width / 2
