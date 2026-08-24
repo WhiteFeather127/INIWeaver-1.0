@@ -112,15 +112,24 @@ Canvas {
             ctx.strokeRect(wUL.x, wUL.y, wDR.x - wUL.x, wDR.y - wUL.y);
         }
 
-        // 绘制 Section 矩形
+        // 绘制 Section 矩形（对应 ImGui DrawView AddRectFilled + AddRect）
+        // 编组块等透明填充色的模块（registerColor alpha=0）仅靠填充不可见，
+        // 需补画 1px 描边轮廓（对应 ImGui AddRect 用 WindowBg 色画边框），否则小地图画不出来。
         for (var i = 0; i < sections.length; i++) {
             var s = sections[i];
             var ul = eqToMini(s.eqX, s.eqY);
             var dr = eqToMini(s.eqX + s.eqW, s.eqY + s.eqH);
+            var w = dr.x - ul.x;
+            var h = dr.y - ul.y;
 
             ctx.fillStyle = s.ignored ? "#5a5a5a" : (s.registerColor || "#808080");
             ctx.globalAlpha = s.hidden ? 0.3 : 0.8;
-            ctx.fillRect(ul.x, ul.y, dr.x - ul.x, Math.max(2, dr.y - ul.y));
+            ctx.fillRect(ul.x, ul.y, w, Math.max(2, h));
+            // 描边：任何颜色（含透明）的模块都有轮廓可见，对应 ImGui AddRect(WindowBg)
+            ctx.globalAlpha = s.hidden ? 0.3 : 0.8;
+            ctx.strokeStyle = "#1e1e1e";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ul.x, ul.y, w, h);
         }
         ctx.globalAlpha = 1.0;
 

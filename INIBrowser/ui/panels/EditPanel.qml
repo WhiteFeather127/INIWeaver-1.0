@@ -8,6 +8,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../components"
 
 Item {
@@ -264,6 +265,26 @@ Item {
                             var out = []
                             for (var k in set) if (set[k] === true) out.push(k)
                             editPanelController.setIifValue(modelData.keyName, mult, comp.idx, out.join(d))
+                        }
+                        // color 值格式判定：Hash_Hex("#rrggbb") / Hex("rrggbb") / Int("r,g,b") / Float("f,f,f")
+                        function iifColorFormat(v) {
+                            var s = (v || "").trim()
+                            if (!s) return "int"
+                            if (s.charAt(0) === "#") return "hashhex"
+                            if (s.indexOf(",") >= 0) return (s.indexOf(".") >= 0) ? "float" : "int"
+                            return "hex"
+                        }
+                        // 取色器选中后按当前值格式写回，避免破坏原有 Hex/Hash_Hex/Int/Float 形式
+                        function iifColorWrite(comp, color, mult) {
+                            var fmt = iifColorFormat(comp.value)
+                            function h(n) { var x = n.toString(16); return x.length === 1 ? "0" + x : x }
+                            var r = Math.round(color.r * 255), g = Math.round(color.g * 255), b = Math.round(color.b * 255)
+                            var val
+                            if (fmt === "hashhex") val = "#" + h(r) + h(g) + h(b)
+                            else if (fmt === "hex") val = h(r) + h(g) + h(b)
+                            else if (fmt === "float") val = color.r.toFixed(3) + "," + color.g.toFixed(3) + "," + color.b.toFixed(3)
+                            else val = r + "," + g + "," + b
+                            editPanelController.setIifValue(modelData.keyName, mult, comp.idx, val)
                         }
 
                         ColumnLayout {
@@ -660,35 +681,62 @@ Item {
                                                             }
                                                         }
 
-                                                        // choice 多选组：每选项一个勾选（当前值按 delim 切分）
-                                                        Row {
+                                                        // choice 多选组：对齐 ImGui IIC_MultipleChoice 的 SameLine/MaxInOneLine 每行分组换行
+                                                        Column {
                                                             visible: iifCell.comp.type === "choice"
-                                                            spacing: 6
+                                                            spacing: 4
                                                             Repeater {
-                                                                model: iifOptArr(iifCell.comp)
+                                                                model: (function () {
+                                                                    var total = iifOptArr(iifCell.comp).length
+                                                                    var per = 1
+                                                                    if (iifCell.comp.sameLine || iifCell.comp.sameLine === undefined)
+                                                                        per = (iifCell.comp.maxInOneLine && iifCell.comp.maxInOneLine > 0) ? iifCell.comp.maxInOneLine : total
+                                                                    return Math.max(1, Math.ceil(total / Math.max(1, per)))
+                                                                })()
                                                                 delegate: Row {
-                                                                    property var opt: modelData
-                                                                    property var sel: iifChoiceSelected(iifCell.comp)
-                                                                    spacing: 3
-                                                                    StyledCheckBox {
-                                                                        checked: { var s = sel; return s[opt.key] === true }
-                                                                        rightPadding: 0
-                                                                        onToggled: iifSetChoice(iifCell.comp, opt.key, checked, iifRowItem.rdata.mult)
-                                                                    }
-                                                                    Text {
-                                                                        text: opt.label || opt.key || ""
-                                                                        color: "#e0e0e0"
-                                                                        font.pixelSize: 13
-                                                                        verticalAlignment: Text.AlignVCenter
-                                                                        MouseArea {
-                                                                            anchors.fill: parent
-                                                                            acceptedButtons: Qt.NoButton
-                                                                            hoverEnabled: true
-                                                                            onContainsMouseChanged: {
-                                                                                if (containsMouse && opt.desc && opt.desc.length > 0) {
-                                                                                    var gch = mapToGlobal(width / 2, height + 4)
-                                                                                    appToolTip.show(opt.desc, gch.x, gch.y)
-                                                                                } else appToolTip.hide()
+                                                                    id: choiceRow
+                                                                    required property int index   // 行序号
+                                                                    readonly property int per: (function () {
+                                                                        var total = iifOptArr(iifCell.comp).length
+                                                                        var p = 1
+                                                                        if (iifCell.comp.sameLine || iifCell.comp.sameLine === undefined)
+                                                                            p = (iifCell.comp.maxInOneLine && iifCell.comp.maxInOneLine > 0) ? iifCell.comp.maxInOneLine : total
+                                                                        return Math.max(1, p)
+                                                                    })()
+                                                                    readonly property int start: index * per
+                                                                    spacing: 6
+                                                                    Repeater {
+                                                                        model: Math.min(parent.per, iifOptArr(iifCell.comp).length - parent.start)
+                                                                        delegate: Item {
+                                                                            required property int index   // 行内序号
+                                                                            readonly property var opt: iifOptArr(iifCell.comp)[choiceRow.start + index]
+                                                                            readonly property var sel: iifChoiceSelected(iifCell.comp)
+                                                                            width: 17 + ((opt.label || opt.key || "").length * 13 * 0.6)
+                                                                            height: 17
+                                                                            Row {
+                                                                                spacing: 3
+                                                                                StyledCheckBox {
+                                                                                    checked: { var s = sel; return s[opt.key] === true }
+                                                                                    rightPadding: 0
+                                                                                    onToggled: iifSetChoice(iifCell.comp, opt.key, checked, iifRowItem.rdata.mult)
+                                                                                }
+                                                                                Text {
+                                                                                    text: opt.label || opt.key || ""
+                                                                                    color: "#e0e0e0"
+                                                                                    font.pixelSize: 13
+                                                                                    verticalAlignment: Text.AlignVCenter
+                                                                                    MouseArea {
+                                                                                        anchors.fill: parent
+                                                                                        acceptedButtons: Qt.NoButton
+                                                                                        hoverEnabled: true
+                                                                                        onContainsMouseChanged: {
+                                                                                            if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                                                                var gch = mapToGlobal(width / 2, height + 4)
+                                                                                                appToolTip.show(opt.desc, gch.x, gch.y)
+                                                                                            } else appToolTip.hide()
+                                                                                        }
+                                                                                    }
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -696,7 +744,14 @@ Item {
                                                             }
                                                         }
 
-                                                        // color 色块 + 值输入
+                                                        // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
+                                                        ColorDialog {
+                                                            id: colorDlg
+                                                            title: "选择颜色"
+                                                            onColorSelected: (color) => { iifColorWrite(iifCell.comp, color, iifRowItem.rdata.mult); colorDlg.close() }
+                                                        }
+
+                                                        // color 色块（可点击取色）+ 值输入
                                                         Row {
                                                             visible: iifCell.comp.type === "color"
                                                             spacing: 4
@@ -704,6 +759,16 @@ Item {
                                                                 width: 22; height: 22; radius: 3
                                                                 color: iifCell.comp.value || "#000000"
                                                                 border.color: "#5a5a5a"; border.width: 1
+                                                                // 点击弹出取色器
+                                                                MouseArea {
+                                                                    anchors.fill: parent
+                                                                    hoverEnabled: true
+                                                                    cursorShape: Qt.PointingHandCursor
+                                                                    onClicked: {
+                                                                        colorDlg.currentColor = iifCell.comp.value || "#000000"
+                                                                        colorDlg.open()
+                                                                    }
+                                                                }
                                                             }
                                                             TextField {
                                                                 text: iifCell.comp.value || ""

@@ -114,6 +114,10 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
         } else if (auto t = dynamic_cast<IIC_MultipleChoice*>(p.get())) {
             m["delim"] = QString::fromUtf8(t->Delim.c_str());
             m["opts"] = IifExportOpts(t->Options, t->OptionOrder, showReg);
+            // 对齐 ImGui IIC_MultipleChoice::RenderUI 的 SameLine/MaxInOneLine：
+            // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行），避免选项溢出
+            m["sameLine"] = t->SameLine;
+            m["maxInOneLine"] = t->MaxInOneLine;
         } else if (auto t = dynamic_cast<IIC_EnumCombo*>(p.get())) {
             m["opts"] = IifExportOpts(t->Options, t->OptionOrder, showReg);
         } else if (auto t = dynamic_cast<IIC_EnumRadio*>(p.get())) {

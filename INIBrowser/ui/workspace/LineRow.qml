@@ -7,6 +7,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../components"
 
 Item {
@@ -148,6 +149,27 @@ Item {
             }
         }
         return s
+    }
+    // color 值格式判定：Hash_Hex("#rrggbb") / Hex("rrggbb") / Int("r,g,b") / Float("f,f,f")
+    function iifColorFormat(v) {
+        var s = (v || "").trim()
+        if (!s) return "int"
+        if (s.charAt(0) === "#") return "hashhex"
+        if (s.indexOf(",") >= 0) return (s.indexOf(".") >= 0) ? "float" : "int"
+        return "hex"
+    }
+    // 取色器选中后按当前值格式写回，避免破坏原有 Hex/Hash_Hex/Int/Float 形式
+    function iifColorWrite(cc, color) {
+        if (!root.lineModel || !cc) return
+        var fmt = root.iifColorFormat(cc.value)
+        function h(n) { var x = n.toString(16); return x.length === 1 ? "0" + x : x }
+        var r = Math.round(color.r * 255), g = Math.round(color.g * 255), b = Math.round(color.b * 255)
+        var val
+        if (fmt === "hashhex") val = "#" + h(r) + h(g) + h(b)
+        else if (fmt === "hex") val = h(r) + h(g) + h(b)
+        else if (fmt === "float") val = color.r.toFixed(3) + "," + color.g.toFixed(3) + "," + color.b.toFixed(3)
+        else val = r + "," + g + "," + b
+        root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx || 0, val)
     }
     // 单个计量分量（非 fillWidth）的自然宽：text/locale/setter/bool/radio/choice
     function iifCellNaturalWidth(cc) {
@@ -682,59 +704,88 @@ Item {
                                 }
                             }
 
-                            // 多选组（choice）：每选项一个勾选框（当前值按 delim 切分）
-                            Row {
+                            // 多选组（choice）：对齐 ImGui IIC_MultipleChoice 的 SameLine/MaxInOneLine——
+                            // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行），避免选项溢出模块
+                            Column {
                                 visible: cc.type === "choice"
                                 x: iifCell.ctlX
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 6
+                                spacing: 4
                                 Repeater {
-                                    model: root.iifOptArr(cc)
+                                    model: (function () {
+                                        var total = root.iifOptArr(cc).length
+                                        var per = 1
+                                        if (cc.sameLine || cc.sameLine === undefined)
+                                            per = (cc.maxInOneLine && cc.maxInOneLine > 0) ? cc.maxInOneLine : total
+                                        return Math.max(1, Math.ceil(total / Math.max(1, per)))
+                                    })()
                                     delegate: Row {
-                                        property var opt: modelData
-                                        property var sel: root.iifChoiceSelected(cc)
-                                        spacing: 3
-                                        Rectangle {
-                                            id: choiceBox
-                                            width: root.fontBody * 1.4 + 4
-                                            height: width
-                                            radius: 3
-                                            color: cbChk.containsMouse ? "#3a3a3a" : "#1e1e1e"
-                                            border.color: (opt.key.length > 0 && sel[opt.key] === true) ? "#007acc" : "#5a5a5a"
-                                            border.width: 1
-                                            Text {
-                                                visible: opt.key.length > 0 && sel[opt.key] === true
-                                                anchors.centerIn: parent
-                                                text: "✓"
-                                                color: "#4ec9b0"
-                                                font.pixelSize: root.fontBody
-                                                font.bold: true
-                                            }
-                                            MouseArea {
-                                                id: cbChk
-                                                anchors.fill: parent
-                                                preventStealing: true
-                                                hoverEnabled: true
-                                                onClicked: {
-                                                    var on = !(sel[opt.key] === true)
-                                                    root.iifSetChoice(cc, opt.key, on)
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            text: opt.label || opt.key || ""
-                                            color: "#d4d4d4"
-                                            font.pixelSize: root.fontBody
-                                            verticalAlignment: Text.AlignVCenter
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                acceptedButtons: Qt.NoButton
-                                                hoverEnabled: true
-                                                onContainsMouseChanged: {
-                                                    if (containsMouse && opt.desc && opt.desc.length > 0) {
-                                                        var g1 = mapToGlobal(width / 2, height + 2)
-                                                        appToolTip.show(opt.desc, g1.x, g1.y)
-                                                    } else appToolTip.hide()
+                                        id: choiceRowItem
+                                        required property int index   // 行序号
+                                        readonly property int per: (function () {
+                                            var total = root.iifOptArr(cc).length
+                                            var p = 1
+                                            if (cc.sameLine || cc.sameLine === undefined)
+                                                p = (cc.maxInOneLine && cc.maxInOneLine > 0) ? cc.maxInOneLine : total
+                                            return Math.max(1, p)
+                                        })()
+                                        readonly property int start: index * per
+                                        spacing: 6
+                                        Repeater {
+                                            model: Math.min(parent.per, root.iifOptArr(cc).length - parent.start)
+                                            delegate: Item {
+                                                required property int index   // 行内序号
+                                                readonly property var opt: root.iifOptArr(cc)[choiceRowItem.start + index]
+                                                readonly property var sel: root.iifChoiceSelected(cc)
+                                                width: (root.fontBody * 1.4 + 4) + 3
+                                                       + ((opt.label || opt.key || "").length * root.fontBody * 0.6)
+                                                height: root.fontBody * 1.4 + 4
+                                                Row {
+                                                    spacing: 3
+                                                    Rectangle {
+                                                        id: choiceBox
+                                                        width: root.fontBody * 1.4 + 4
+                                                        height: width
+                                                        radius: 3
+                                                        color: cbChk.containsMouse ? "#3a3a3a" : "#1e1e1e"
+                                                        border.color: (opt.key.length > 0 && sel[opt.key] === true) ? "#007acc" : "#5a5a5a"
+                                                        border.width: 1
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        Text {
+                                                            visible: opt.key.length > 0 && sel[opt.key] === true
+                                                            anchors.centerIn: parent
+                                                            text: "✓"
+                                                            color: "#4ec9b0"
+                                                            font.pixelSize: root.fontBody
+                                                            font.bold: true
+                                                        }
+                                                        MouseArea {
+                                                            id: cbChk
+                                                            anchors.fill: parent
+                                                            preventStealing: true
+                                                            hoverEnabled: true
+                                                            onClicked: {
+                                                                var on = !(sel[opt.key] === true)
+                                                                root.iifSetChoice(cc, opt.key, on)
+                                                            }
+                                                        }
+                                                    }
+                                                    Text {
+                                                        text: opt.label || opt.key || ""
+                                                        color: "#d4d4d4"
+                                                        font.pixelSize: root.fontBody
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            acceptedButtons: Qt.NoButton
+                                                            hoverEnabled: true
+                                                            onContainsMouseChanged: {
+                                                                if (containsMouse && opt.desc && opt.desc.length > 0) {
+                                                                    var g1 = mapToGlobal(width / 2, height + 2)
+                                                                    appToolTip.show(opt.desc, g1.x, g1.y)
+                                                                } else appToolTip.hide()
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -884,7 +935,14 @@ Item {
                                 }
                             }
 
-                            // 色板（color）：色块 + 值输入（label + 占满剩余宽）
+                            // 取色器（color 分量点击色块弹出，对应 ImGui IIC_ColorPanel 的 ColorPicker3）
+                            ColorDialog {
+                                id: colorDlg
+                                title: "选择颜色"
+                                onColorSelected: (color) => { root.iifColorWrite(cc, color); colorDlg.close() }
+                            }
+
+                            // 色板（color）：色块可点击取色 + 值输入（label + 占满剩余宽）
                             Row {
                                 visible: cc.type === "color"
                                 x: iifCell.ctlX
@@ -899,6 +957,16 @@ Item {
                                     border.color: "#5a5a5a"
                                     border.width: 1
                                     anchors.verticalCenter: parent.verticalCenter
+                                    // 点击弹出取色器
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            colorDlg.currentColor = root.iifColorToHex(cc.value)
+                                            colorDlg.open()
+                                        }
+                                    }
                                 }
                                 TextField {
                                     text: cc.value || ""
