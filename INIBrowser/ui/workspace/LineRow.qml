@@ -239,7 +239,10 @@ Item {
             var rows = Math.max(1, Math.ceil(tot / Math.max(1, per)))
             var itemH = root.fontBody * 1.4 + 4          // 单个选项高
             var sp = 4                                   // Column spacing
-            return Math.max(root.fontBody * 2, rows * itemH + Math.max(0, rows - 1) * sp)
+            var h = rows * itemH + Math.max(0, rows - 1) * sp
+            // hint(Short) 独占第一行（对齐 imgui TextWrapped(Hint.Short)）
+            if ((cc.label || "").length > 0) h += root.fontBody * 2 + sp
+            return Math.max(root.fontBody * 2, h)
         }
         return root.fontBody * 2
     }
@@ -601,7 +604,9 @@ Item {
                             // Short 标签（imgui TextEx(Hint.Short)）——每个交互分量都有的可见 Hint
                             Text {
                                 id: cellLabel
-                                visible: (cc.label || "").length > 0
+                                // radio/choice 的 hint 由组件内部独占第一行（imgui TextWrapped(Hint.Short)），
+                                // 不在此处左边横排，故对这两类隐藏
+                                visible: (cc.label || "").length > 0 && cc.type !== "radio" && cc.type !== "choice"
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.label || ""
@@ -656,11 +661,19 @@ Item {
                                 }
                             }
 
-                            // 枚举单选组（radio）：对齐 ImGui IIC_EnumRadio 的 SameLine/MaxInOneLine——每 MaxInOneLine 个换行
+                            // 枚举单选组（radio）：对齐 ImGui IIC_EnumRadio——hint(Short) 独占第一行，
+                            // 选项从下一行起按 SameLine/MaxInOneLine 每 MaxInOneLine 个折一行
                             Column {
                                 visible: cc.type === "radio"
                                 x: iifCell.ctlX
                                 spacing: 4
+                                // hint 第一行（imgui TextWrapped(Hint.Short) 后自动换行）
+                                Text {
+                                    visible: (cc.label || "").length > 0
+                                    text: cc.label || ""
+                                    color: "#9cdcfe"
+                                    font.pixelSize: root.fontBody
+                                }
                                 Repeater {
                                     model: (function () {
                                         var total = root.iifOptArr(cc).length
@@ -733,12 +746,19 @@ Item {
                                 }
                             }
 
-                            // 多选组（choice）：对齐 ImGui IIC_MultipleChoice 的 SameLine/MaxInOneLine——
-                            // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行），避免选项溢出模块
+                            // 多选组（choice）：对齐 ImGui IIC_MultipleChoice——hint(Short) 独占第一行，
+                            // 选项从下一行起每 MaxInOneLine 个折一行（SameLine=false 则每项都换行）
                             Column {
                                 visible: cc.type === "choice"
                                 x: iifCell.ctlX
                                 spacing: 4
+                                // hint 第一行（imgui TextWrapped(Hint.Short) 后自动换行）
+                                Text {
+                                    visible: (cc.label || "").length > 0
+                                    text: cc.label || ""
+                                    color: "#9cdcfe"
+                                    font.pixelSize: root.fontBody
+                                }
                                 Repeater {
                                     model: (function () {
                                         var total = root.iifOptArr(cc).length

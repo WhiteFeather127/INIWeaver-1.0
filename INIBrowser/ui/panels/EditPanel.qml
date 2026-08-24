@@ -447,6 +447,8 @@ Item {
                                         var itemH = 20            // 选项高（覆盖 radio/choice 勾选框）
                                         var sp = 4                // Column spacing
                                         var rh = rows * itemH + Math.max(0, rows - 1) * sp
+                                        // hint(Short) 独占第一行（对齐 imgui TextWrapped(Hint.Short)）
+                                        if (c.label && c.label.length > 0) rh += rowH + sp
                                         if (rh > h) h = rh
                                     }
                                     return h
@@ -507,9 +509,10 @@ Item {
                                                         anchors.bottom: parent.bottom
                                                         spacing: 4
 
-                                                        // 分量 Short 标签
+                                                        // 分量 Short 标签（radio/choice 的 hint 由组件内部独占第一行，对齐 imgui TextWrapped(Hint.Short)）
                                                         Text {
                                                             visible: (iifCell.comp.label || "").length > 0
+                                                                    && iifCell.comp.type !== "radio" && iifCell.comp.type !== "choice"
                                                             text: iifCell.comp.label || ""
                                                             color: "#9cdcfe"
                                                             font.pixelSize: 13
@@ -648,10 +651,18 @@ Item {
                                                             }
                                                         }
 
-                                                        // radio 单选组：可点选按钮；对齐 ImGui IIC_EnumRadio SameLine/MaxInOneLine 每行分组换行
+                                                        // radio 单选组：对齐 ImGui IIC_EnumRadio——hint(Short) 独占第一行，
+                                                        // 选项从下一行起每 MaxInOneLine 个折一行换行
                                                         Column {
                                                             visible: iifCell.comp.type === "radio"
                                                             spacing: 4
+                                                            // hint 第一行（imgui TextWrapped(Hint.Short) 后自动换行）
+                                                            Text {
+                                                                visible: (iifCell.comp.label || "").length > 0
+                                                                text: iifCell.comp.label || ""
+                                                                color: "#9cdcfe"
+                                                                font.pixelSize: 13
+                                                            }
                                                             Repeater {
                                                                 model: (function () {
                                                                     var total = iifOptArr(iifCell.comp).length
@@ -715,10 +726,18 @@ Item {
                                                             }
                                                         }
 
-                                                        // choice 多选组：对齐 ImGui IIC_MultipleChoice 的 SameLine/MaxInOneLine 每行分组换行
+                                                        // choice 多选组：对齐 ImGui IIC_MultipleChoice——hint(Short) 独占第一行，
+                                                        // 选项从下一行起每 MaxInOneLine 个折一行换行
                                                         Column {
                                                             visible: iifCell.comp.type === "choice"
                                                             spacing: 4
+                                                            // hint 第一行（imgui TextWrapped(Hint.Short) 后自动换行）
+                                                            Text {
+                                                                visible: (iifCell.comp.label || "").length > 0
+                                                                text: iifCell.comp.label || ""
+                                                                color: "#9cdcfe"
+                                                                font.pixelSize: 13
+                                                            }
                                                             Repeater {
                                                                 model: (function () {
                                                                     var total = iifOptArr(iifCell.comp).length
