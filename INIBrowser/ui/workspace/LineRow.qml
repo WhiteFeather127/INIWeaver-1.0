@@ -81,8 +81,11 @@ Item {
         return root.lineModel.iifComponents(root.rowIndex)
     }
 
-    // IIF 行建模（对齐 imgui Immediate 模式）：
-    // 默认每个非标记分量新起一行；samel 把下一个并入当前行；newl 强制换行；sep 单独成"分隔线行"。
+    // IIF 行建模（对齐 imgui IBG_InputForm::RenderUI 流式布局）：
+    // 默认每个非标记分量新起一行（Text 等自动换行）；samel 把下一个并入当前行（SameLine）；
+    // newl 强制换行；sep 单独成"分隔线行"（Separator）。
+    // radio/choice 是"内部流式折行"的多行块，由其自身行高占据多行（见 iifCellUnitHeight），
+    // 后续内容按流式自然下移，不额外强制换行……
     // 每行 { isSep:bool, node:linkCell|null, cells:[普通cell...] }，供下方行 Repeater 渲染。
     function iifRows() {
         if (!root.lineModel || root.rowIndex < 0) return []
@@ -90,32 +93,18 @@ Item {
         var rows = []
         var cur = null
         var same = false
-        var multiNext = false   // 上一 cell 为 radio/choice 且内部换多行 → 后续控件强制换新行下沉
         function newRow() { var r = { isSep: false, node: null, cells: [] }; rows.push(r); return r }
         for (var i = 0; i < all.length; i++) {
             var c = all[i]
             var t = c.type
             if (t === "samel") { same = true; continue }
-            if (t === "newl") { cur = null; same = false; multiNext = false; continue }
-            if (t === "sep") { rows.push({ isSep: true, node: null, cells: [] }); cur = null; same = false; multiNext = false; continue }
-            // 上一 cell 是多行 radio/choice，本 cell 即使 samel 也强制另起新行，
-            // 让后续控件落在 radio/choice 多行块的下方（对齐流水布局视觉）
-            if (multiNext && same) { cur = null; same = false }
+            if (t === "newl") { cur = null; same = false; continue }
+            if (t === "sep") { rows.push({ isSep: true, node: null, cells: [] }); cur = null; same = false; continue }
             if (!same) cur = null
             if (!cur) cur = newRow()
             if (t === "link") cur.node = c
             else cur.cells.push(c)
             same = false
-            // 判定本 cell 是否在内部换多行：若是，其后的控件应到它下方的新行
-            if (t === "radio" || t === "choice") {
-                var tot = root.iifOptArr(c).length
-                var per = 1
-                if (c.sameLine || c.sameLine === undefined)
-                    per = (c.maxInOneLine && c.maxInOneLine > 0) ? c.maxInOneLine : (tot > 0 ? tot : 1)
-                multiNext = Math.max(1, Math.ceil(tot / Math.max(1, per))) > 1
-            } else {
-                multiNext = false
-            }
         }
         return rows
     }
