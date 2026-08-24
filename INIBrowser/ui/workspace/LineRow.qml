@@ -106,14 +106,6 @@ Item {
     }
 
     // ===== IIF 分量通用辅助（对齐侧边栏 EditPanel.qml） =====
-    // 弹层重定位：把下拉框的视觉底部（mapToGlobal 已含 SectionNode 的 GPU scale
-    // 变换）映射到 Overlay.overlay 坐标设 popup.x/y，任意缩放均精确紧贴、无错位。
-    function repositionComboPopup(ctrl) {
-        var gp = ctrl.mapToGlobal(0, ctrl.height)
-        var lo = Overlay.overlay.mapFromGlobal(gp.x, gp.y)
-        ctrl.popup.x = lo.x
-        ctrl.popup.y = lo.y
-    }
     // 选项数组（combo/radio/choice 的 opts：[{key,label,desc}...]）
     function iifOptArr(comp) { return (comp && comp.opts) ? comp.opts : [] }
     // combo 当前选中索引（以 opts[i].key 与 value 匹配）
@@ -801,10 +793,8 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 用 repositionComboPopup（mapToGlobal 已含 GPU scale）在弹出时精确定位，
-                                    // 任意缩放均紧贴下拉框底部、无错位。弹层是顶层 Popup（overlay 像素，
-                                    // 不随模块 scale），故宽/高/字体乘 ratio 以匹配下拉框的视觉尺寸
-                                    onOpened: root.repositionComboPopup(comboCtrl)
+                                    // 弹层位置交由 Qt 按下拉框视觉坐标自动定位（ComboBox 原生可靠），
+                                    // 只乘 ratio 使弹层宽/行高/字体匹配下拉框的视觉尺寸
                                     width: comboCtrl.width * workspaceController.ratio
                                     padding: 0
                                     background: Rectangle {
