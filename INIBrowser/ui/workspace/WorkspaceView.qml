@@ -18,25 +18,39 @@ Item {
     // 必须经此属性更新预览框位置（跟随鼠标）
     property alias dragPreviewItem: dragPreview
 
-    // 缩放补间动画（标准 QML NumberAnimation 驱动）
-    // 根因：QSG_NO_VSYNC=1 关闭 vsync 后默认动画驱动依赖渲染循环持续刷帧才推进，
-    // 不再产生中间帧 → 动画瞬跳。QtMain.cpp 已设置 QSG_USE_SIMPLE_ANIMATION_DRIVER=1
-    //（官方建议）改用定时器驱动的简单动画驱动，标准 NumberAnimation 恢复正常渐变。
+    // 缩放补间动画（QML Timer 逐帧插值驱动）
+    // 根因：QSG_NO_VSYNC=1 关闭 vsync 后，无论默认动画驱动还是
+    // QSG_USE_SIMPLE_ANIMATION_DRIVER（基于全局 QElapsedTimer），NumberAnimation
+    // 都只产生 1 个中间帧就跳到目标（探针实测 120ms 动画 2-3ms 完成）。
+    // 改用独立 Timer 在 GUI 线程插值 zoomAnimRatio，不依赖动画驱动，稳定产生渐变帧。
     // C++ onWheel 仍只设目标 Ratio 与锚点 emit zoomTweenRequested；
-    // 动画每帧写入 zoomAnimRatio 时经 onZoomAnimRatioChanged 调 applyZoomRatio 应用到 C++ 全局态。
+    // 每帧 onZoomAnimRatioChanged 调 applyZoomRatio 应用到 C++ 全局态。
     property real zoomAnimRatio: 1.0
-    // restart/abort 的瞬停抑制：stop() 同步触发 onRunningChanged(false)，此时不应收尾
-    property bool zoomSuppressFinish: false
+    property real zoomAnimFrom: 0
+    property real zoomAnimTo: 0
+    property double zoomAnimStart: 0
+    property int zoomAnimDuration: 120
+    property bool zoomAnimRunning: false
 
-    NumberAnimation {
-        id: zoomTweenAnim
-        target: workspaceView
-        property: "zoomAnimRatio"
-        duration: 120
-        easing.type: Easing.OutCubic
-        onRunningChanged: {
-            if (!running && !workspaceView.zoomSuppressFinish)
+    Timer {
+        id: zoomAnimTimer
+        interval: 16
+        repeat: true
+        onTriggered: {
+            if (!workspaceView.zoomAnimRunning) { stop(); return }
+            var t = Date.now() - workspaceView.zoomAnimStart
+            var p = Math.min(1.0, t / workspaceView.zoomAnimDuration)
+            // OutCubic easing：1-(1-p)^3
+            var eased = 1.0 - Math.pow(1.0 - p, 3)
+            if (p >= 1.0) {
+                workspaceView.zoomAnimRatio = workspaceView.zoomAnimTo
+                workspaceView.zoomAnimRunning = false
+                stop()
                 workspaceController.zoomTweenFinished()
+            } else {
+                workspaceView.zoomAnimRatio = workspaceView.zoomAnimFrom
+                        + (workspaceView.zoomAnimTo - workspaceView.zoomAnimFrom) * eased
+            }
         }
     }
     // 动画每帧写入 zoomAnimRatio 时应用到 C++ 全局态（Ratio/EqCenter/拖拽基准修正/
@@ -142,21 +156,20 @@ Item {
             draggingLinkCanvas.visible = false
         }
         // 缩放补间启动/续接（C++ 滚轮事件触发）：从当前实际 Ratio 向新目标平滑过渡，
-        // 连续滚轮续接不跳变。restart 的 stop() 瞬停由 zoomSuppressFinish 抑制收尾。
+        // 连续滚轮续接不跳变（重置计时，起点取当前实际 Ratio）。
         function onZoomTweenRequested() {
-            workspaceView.zoomSuppressFinish = true
-            zoomTweenAnim.stop()
-            zoomTweenAnim.from = workspaceController.ratio
-            zoomTweenAnim.to = workspaceController.zoomTargetRatio
-            zoomTweenAnim.start()
-            workspaceView.zoomSuppressFinish = false
+            workspaceView.zoomAnimTimer.stop()
+            workspaceView.zoomAnimFrom = workspaceController.ratio
+            workspaceView.zoomAnimTo = workspaceController.zoomTargetRatio
+            workspaceView.zoomAnimStart = Date.now()
+            workspaceView.zoomAnimRunning = true
+            workspaceView.zoomAnimTimer.start()
         }
         // 缩放补间强制中止（C++ 收尾路径清 zoomPending 前调用）：
         // Ratio 已由 C++ 直接推到目标，这里只停动画，不再逐帧改值
         function onZoomTweenAbortRequested() {
-            workspaceView.zoomSuppressFinish = true
-            zoomTweenAnim.stop()
-            workspaceView.zoomSuppressFinish = false
+            workspaceView.zoomAnimTimer.stop()
+            workspaceView.zoomAnimRunning = false
         }
     }
 
