@@ -766,7 +766,7 @@ Item {
                                     // "下拉是否打开中"，关闭即变灰，等同于输入框失焦效果
                                     border.color: comboCtrl.popup.visible ? "#007acc" : "#3c3c3c"
                                     border.width: 1
-                                    radius: 2
+                                    radius: 0   // 方角（对齐模块内其他控件）
                                 }
                                 contentItem: Text {
                                     text: comboCtrl.currentText
@@ -785,6 +785,44 @@ Item {
                                     text: "▾"
                                     color: "#9a9a9a"
                                     font.pixelSize: root.fontBody
+                                }
+                                // 下拉弹层：统一深色方角风格，替换 Qt 默认浅色圆角列表外观
+                                popup: Popup {
+                                    y: comboCtrl.height + 2
+                                    width: comboCtrl.width
+                                    padding: 0
+                                    background: Rectangle {
+                                        color: "#2d2d2d"
+                                        border.color: "#3c3c3c"
+                                        border.width: 1
+                                        radius: 0
+                                    }
+                                    contentItem: ListView {
+                                        id: comboList
+                                        clip: true
+                                        implicitHeight: contentHeight
+                                        model: comboCtrl.delegateModel
+                                        currentIndex: comboCtrl.highlightedIndex
+                                        highlightMoveDuration: 0
+                                        highlight: Rectangle { color: "#3e3e3e" }
+                                        delegate: ItemDelegate {
+                                            width: comboList.width
+                                            contentItem: Text {
+                                                text: comboCtrl.textRole
+                                                      ? (Array.isArray(comboCtrl.model) ? modelData[comboCtrl.textRole] : model[comboCtrl.textRole])
+                                                      : modelData
+                                                color: "#d4d4d4"
+                                                font.pixelSize: root.fontBody
+                                                elide: Text.ElideRight
+                                                verticalAlignment: Text.AlignVCenter
+                                                leftPadding: 8
+                                                rightPadding: 8
+                                            }
+                                            highlighted: comboCtrl.highlightedIndex === index
+                                            background: Rectangle { color: "transparent" }
+                                        }
+                                        ScrollIndicator.vertical: ScrollIndicator { visible: false }
+                                    }
                                 }
                             }
 
