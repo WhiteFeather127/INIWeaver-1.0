@@ -645,6 +645,25 @@ Item {
                             // ===== IIF 分量编辑区（keyType===2）=====
                             // 替代 mainValueField+valueRows：按值(mult)拍平成行，各分量渲染完整控件
                             // 对齐 imgui IIC_*::RenderUI；写回复用 EditPanelController::setIifValue/setIifBool
+                            // "+" 按钮：多值 IIF 键在键名下面那行（分量区上方），追加新值用 IIF 控件渲染
+                            Button {
+                                Layout.fillWidth: false
+                                visible: ((modelData.keyType || 0) === 2)
+                                         && (modelData.isMultiple || false)
+                                         && !(modelData.missing || false)
+                                text: "＋"
+                                width: 20
+                                height: 20
+                                onClicked: editPanelController.addLineValue(modelData.keyName)
+                                background: Rectangle {
+                                    color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
+                                    border.color: "#3c3c3c"; border.width: 1; radius: 3
+                                }
+                                contentItem: Text {
+                                    text: parent.text; color: "#cccccc"; font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                            }
                             Column {
                                 id: iifArea
                                 Layout.fillWidth: true
