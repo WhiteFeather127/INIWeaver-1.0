@@ -1349,7 +1349,8 @@ Item {
     //       Multiple 的 IIF 键永远不显示加号。改为仅按 isMultiple 判定；IIF 行并排靠右。
     Rectangle {
         id: addLineButton
-        visible: root.isMultiple && !root.inputOnShow
+        // 同一组键只有一个 "+"：仅第一个值行（lineMult===0）显示，追加的新值行不再显示
+        visible: root.isMultiple && !root.inputOnShow && root.lineMult === 0
         // Import 行 LinkNode 居中，"+" 放在居中点左侧；其他行放在 LinkNode 左侧；
         // IIF 行（keyType==2）或 Input 态无行级 LinkNode 时，"+" 放在模块右端对齐节点。
         x: (root.isImport && root.keyType !== 2)
