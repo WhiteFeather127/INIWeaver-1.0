@@ -55,7 +55,9 @@ Item {
     }
     // 动画每帧写入 zoomAnimRatio 时应用到 C++ 全局态（Ratio/EqCenter/拖拽基准修正/
     // dragOffset/预览线在 C++ applyZoomRatio 内原子完成）
-    onZoomAnimRatioChanged: workspaceController.applyZoomRatio(zoomAnimRatio)
+    onZoomAnimRatioChanged: {
+        workspaceController.applyZoomRatio(zoomAnimRatio)
+    }
 
     // 同步视口尺寸到 C++ IBR_RealCenter，供 EqPosToRePos 计算屏幕坐标
     // 对应 ImGui 版本 IBR_Misc.cpp:484-493 IBR_RealCenter::Update()
@@ -158,17 +160,17 @@ Item {
         // 缩放补间启动/续接（C++ 滚轮事件触发）：从当前实际 Ratio 向新目标平滑过渡，
         // 连续滚轮续接不跳变（重置计时，起点取当前实际 Ratio）。
         function onZoomTweenRequested() {
-            workspaceView.zoomAnimTimer.stop()
+            zoomAnimTimer.stop()
             workspaceView.zoomAnimFrom = workspaceController.ratio
             workspaceView.zoomAnimTo = workspaceController.zoomTargetRatio
             workspaceView.zoomAnimStart = Date.now()
             workspaceView.zoomAnimRunning = true
-            workspaceView.zoomAnimTimer.start()
+            zoomAnimTimer.start()
         }
         // 缩放补间强制中止（C++ 收尾路径清 zoomPending 前调用）：
         // Ratio 已由 C++ 直接推到目标，这里只停动画，不再逐帧改值
         function onZoomTweenAbortRequested() {
-            workspaceView.zoomAnimTimer.stop()
+            zoomAnimTimer.stop()
             workspaceView.zoomAnimRunning = false
         }
     }

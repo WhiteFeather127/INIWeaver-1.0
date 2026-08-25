@@ -2361,6 +2361,16 @@ void WorkspaceController::refreshLinks()
 
 void WorkspaceController::rebuildLinkEndpoints()
 {
+    // 缩放进行中（补间动画或防抖窗口）禁止重建端点表：
+    // 重建会调用 finishZoomTweenNow 中止进行中的补间动画，且清 zoomPending 后
+    // LinkRenderer 换算失效，连线以旧端点表无换算渲染 → 与节点错位。
+    // 此时只标脏，由缩放收尾路径（finalizeZoom/平移/拖拽收尾）重建。
+    // 注意：所有主动收尾路径（finalizeZoom/onMousePress/onMouseRelease/
+    // endMoveSection/endMassDrag）都在调用本函数前清除了 zoom 状态，不受此守卫影响。
+    if (m_zoomAnimating || m_zoomPending) {
+        m_linkEndpointsDirty = true;
+        return;
+    }
     // 缩放叠加结束：先强制完成补间（重建后 Ratio 不得再变，否则连线与节点错位），
     // 再终止换算叠加（LinkRenderer 直接用新端点表）
     finishZoomTweenNow();
