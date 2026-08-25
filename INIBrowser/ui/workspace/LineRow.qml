@@ -109,6 +109,8 @@ Item {
         function newRow() { var r = { isSep: false, node: null, cells: [] }; rows.push(r); return r }
         for (var i = 0; i < all.length; i++) {
             var c = all[i]
+            // Constraint 不满足的分量不渲染（对齐 imgui `if (!ValueContainer.Satisfy(IC->Constraint))continue;`）
+            if (c.hidden) continue
             var t = c.type
             if (t === "samel") { same = true; continue }
             if (t === "newl") {

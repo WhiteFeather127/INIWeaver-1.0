@@ -285,6 +285,13 @@ void EditPanelController::rebuildEditLines()
         }
         entry["isMultiple"] = pLine->IsMultiple();
         entry["lineCount"] = static_cast<int>(pLine->Count());
+        // 行级 InputType 属性（对齐 ImGui IBG_InputType::Load）：NewLineAfterDesc / ShowLineID / LineIDFrom
+        {
+            auto &itype = pLine->Default->GetInputType();
+            entry["newLineAfterDesc"] = itype.NewLineAfterDesc;
+            entry["showLineID"] = itype.ShowLineID;
+            entry["lineIDFrom"] = itype.LineIDFrom;
+        }
 
         // keyType + IIF 分量导出（对齐画布 SectionLineModel）：
         // 0=String, 1=Bool, 2=IIF；IIF 键的 iifValues 按每个值(mult)导出分量列表，供侧边栏逐分量编辑。

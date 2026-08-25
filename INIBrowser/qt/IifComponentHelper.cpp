@@ -134,6 +134,20 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
         m["readOnly"] = p->Disabled;
         m["disabled"] = p->Disabled;
         m["valueID"] = vid;
+        // 对齐 ImGui CreateInputComponent 通用设置：InitialStatus / Constraint / ColoredFrame / LinkNode
+        m["initialStatus"] = (p->InitialStatus.InputMethod == IICStatus::Link) ? "link" : "input";
+        m["coloredFrame"] = p->UseNodeColorInFrame;
+        // Constraint：对齐 ImGui IBG_InputForm::RenderUI 的 `if (!ValueContainer.Satisfy(IC->Constraint))continue;`
+        // 约束不满足的分量不渲染（QML 端跳过 hidden）
+        m["hidden"] = !form.GetValues().Satisfy(p->Constraint);
+        // LinkNode.LinkCol 原始色（ABGR ImU32 → #RRGGBB），供 ColoredFrame 染框等使用
+        {
+            uint32_t lc = p->NodeSetting.LinkCol;
+            m["linkCol"] = QString("#%1%2%3")
+                .arg((lc >> 0) & 0xFF, 2, 16, QLatin1Char('0'))
+                .arg((lc >> 8) & 0xFF, 2, 16, QLatin1Char('0'))
+                .arg((lc >> 16) & 0xFF, 2, 16, QLatin1Char('0'));
+        }
 
         QString label, tooltip;
         IifComponentHint(p.get(), label, tooltip);
@@ -158,6 +172,7 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
             m["colored"] = t->Colored;
             m["wrapped"] = t->Wrapped;
             if (t->Colored) m["color"] = IifImColorToHex(t->Color);
+            m["locKey"] = QString::fromUtf8(t->Key.c_str());
         } else if (auto t = dynamic_cast<IIC_Setter_String*>(p.get())) {
             m["value"] = QString::fromUtf8(t->Value.c_str()); m["readOnly"] = true;
         } else if (m["type"] == "samel" || m["type"] == "newl" || m["type"] == "sep") {
