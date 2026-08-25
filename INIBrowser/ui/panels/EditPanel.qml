@@ -583,6 +583,22 @@ Item {
                                 visible: (entry.isMultiple || false)
                                          && ((entry.keyType || 0) !== 2)   // IIF 键改由下方逐分量渲染
                                          && !(entry.missing || false)
+                                // "+" 按钮：同一组键只有一个，放在键名下面那行（值列表开头）
+                                // 对齐 imgui WorkSpaceLine::RenderUI 的 "+" 按钮（IBR_Misc.cpp:321-333）
+                                Button {
+                                    text: "＋"
+                                    width: 20
+                                    height: 20
+                                    onClicked: editPanelController.addLineValue(valueRows.entry.keyName)
+                                    background: Rectangle {
+                                        color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
+                                        border.color: "#3c3c3c"; border.width: 1; radius: 3
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text; color: "#cccccc"; font.pixelSize: 13
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                }
                                 Repeater {
                                     model: entry.values ? entry.values.length : 0
                                     delegate: Row {

@@ -389,6 +389,36 @@ void EditPanelController::addLine(const QString &key, const QString &value)
     });
 }
 
+void EditPanelController::addLineValue(const QString &key)
+{
+    // 对应 WorkSpaceLine::RenderUI 的 "+" 按钮（IBR_Misc.cpp:373-386）
+    // 多值键添加新值：MergeLine(key, Index_AlwaysNew, 初始格式化串, Replace)
+    std::string keyStr = key.toUtf8().toStdString();
+    if (m_isEmpty) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    IBB_Section* pbk = it->second.GetBack_Inl();
+    if (!pbk) return;
+
+    IBRF_CoreBump.SendToR({ [keyStr, pbk]() {
+        IBG_Undo.SomethingShouldBeHere();
+        StrPoolID KeyID = NewPoolStr(keyStr);
+        auto pLine = pbk->GetLineFromSubSecs(KeyID);
+        if (!pLine || !pLine->Default) return;
+        // 初始值 = 该键 InputType 的默认格式化串（对齐 IBR_Misc.cpp:382）
+        std::string initVal = pLine->Default->GetInputType().Form->GetFormattedString();
+        pbk->MergeLine(KeyID, Index_AlwaysNew, initVal, IBB_IniMergeMode::Replace);
+        IBF_Inst_Project.UpdateAll();
+        IBR_EditFrame::ResetEdit(pbk);
+    } });
+
+    // 刷新显示（延迟到 R 线程完成后）
+    QTimer::singleShot(50, this, [this]() {
+        rebuildEditLines();
+        emit sectionDataChanged(m_currentSectionId);
+    });
+}
+
 QString EditPanelController::getInitialValue(const QString &key) const
 {
     // 对应 RenderUI_NewLine 的 TextDisabled 提示（IBR_Misc.cpp:737-748）

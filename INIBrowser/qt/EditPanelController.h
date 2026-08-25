@@ -54,6 +54,10 @@ public:
     // 新增行（对应 RenderUI_NewLine 的 "＋" 按钮逻辑，IBR_Misc.cpp:701-727）
     Q_INVOKABLE void addLine(const QString &key, const QString &value);
 
+    // 多值键添加新值（对应 WorkSpaceLine::RenderUI 的 "+" 按钮，IBR_Misc.cpp:373-386）
+    // MergeLine(key, Index_AlwaysNew, 初始格式化串, Replace)，同一组键只有一个 "+" 按钮
+    Q_INVOKABLE void addLineValue(const QString &key);
+
     // 获取 Key 的初始值提示（对应 RenderUI_NewLine 的 TextDisabled，IBR_Misc.cpp:737-748）
     // 当 Value 为空时，从默认类型列表查询 Key 的初始值，用于显示提示
     Q_INVOKABLE QString getInitialValue(const QString &key) const;
