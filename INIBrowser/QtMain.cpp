@@ -128,9 +128,12 @@ int main(int argc, char* argv[])
 {
     // 关闭 Qt Quick 渲染循环的 vsync（在 QApplication/渲染循环创建前设置）
     // 帧率不再被显示器刷新率锁死，允许更高帧率（代价：可能画面撕裂、GPU 占用升高）
-    // 注意：关闭 vsync 后 QML 动画驱动（含 QSG_USE_SIMPLE_ANIMATION_DRIVER）均无法
-    // 稳定产生中间帧，缩放补间改用 WorkspaceView.qml 的独立 Timer 逐帧插值驱动。
+    // 动画驱动：QSG_NO_VSYNC 关闭 vsync 后，默认动画驱动依赖渲染循环持续刷帧才推进，
+    // 不再产生中间帧 → NumberAnimation 瞬跳。设置 QSG_USE_SIMPLE_ANIMATION_DRIVER=1
+    //（官方建议，基于全局 QElapsedTimer），并配合 WorkspaceView.qml 在动画期间
+    // 每帧 requestUpdate 强制持续渲染，使标准 QML 动画逐帧推进。
     qputenv("QSG_NO_VSYNC", "1");
+    qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
     // 双保险：QSurfaceFormat::swapInterval(0) 请求禁用 vsync（Qt 6.4+ 文档：与 QSG_NO_VSYNC
     // 等效，均请求渲染线程 swap 时不阻塞；对 D3D11 RHI 后端是否真正生效取决于驱动，见诊断日志）
     // 必须在 QGuiApplication / 窗口创建前设置默认格式
@@ -464,9 +467,10 @@ int main(int argc, char* argv[])
             case QSGRendererInterface::Null:        apiName = "Null (no rendering)"; break;
             default: break;
             }
-            debugLog(QString("SceneGraph backend: %1 (QSG_NO_VSYNC=%2)")
+            debugLog(QString("SceneGraph backend: %1 (QSG_NO_VSYNC=%2, QSG_USE_SIMPLE_ANIMATION_DRIVER=%3)")
                          .arg(apiName)
-                         .arg(qEnvironmentVariableIsSet("QSG_NO_VSYNC") ? "1" : "0").toUtf8().constData());
+                         .arg(qEnvironmentVariableIsSet("QSG_NO_VSYNC") ? "1" : "0")
+                         .arg(qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER") ? "1" : "0").toUtf8().constData());
             // 诊断：窗口所在屏幕的刷新率，用于区分 60fps 是 VSync 锁定（60Hz 屏）还是渲染耗时瓶颈
             if (rootWindow->screen()) {
                 debugLog(QString("Screen refreshRate=%1Hz")
