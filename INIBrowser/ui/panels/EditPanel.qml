@@ -648,17 +648,19 @@ Item {
                                                             visible: (iifCell.comp.label || "").length > 0
                                                                     && iifCell.comp.type !== "radio" && iifCell.comp.type !== "choice"
                                                             text: iifCell.comp.label || ""
-                                                            color: "#9cdcfe"
+                                                            color: iifCell.comp.disabled ? "#6e6e6e" : "#9cdcfe"
                                                             font.pixelSize: 13
                                                             verticalAlignment: Text.AlignVCenter
                                                         }
 
                                                         // 只读文本类：text/locale/setter
-                                                        // 对齐 ImGui IIC_PureText/LocalizedText：Colored 用分量 Color，Wrapped 自动换行
+                                                        // 对齐 ImGui IIC_PureText/LocalizedText：Colored 用分量 Color，Wrapped 自动换行；
+                                                        // Disabled 用禁用文本色
                                                         Text {
                                                             visible: iifCell.comp.type === "text" || iifCell.comp.type === "locale" || iifCell.comp.type === "setter"
                                                             text: iifCell.comp.value || ""
-                                                            color: iifCell.comp.colored ? (iifCell.comp.color || "#c586c0") : "#c586c0"
+                                                            color: iifCell.comp.disabled ? "#6e6e6e"
+                                                                 : (iifCell.comp.colored ? (iifCell.comp.color || "#c586c0") : "#c586c0")
                                                             font.pixelSize: 13
                                                             wrapMode: iifCell.comp.wrapped ? Text.Wrap : Text.NoWrap
                                                             verticalAlignment: Text.AlignVCenter
@@ -668,7 +670,7 @@ Item {
                                                         Text {
                                                             visible: iifCell.comp.type === "link"
                                                             text: iifCell.comp.value || ""
-                                                            color: "#9cdcfe"
+                                                            color: iifCell.comp.disabled ? "#6e6e6e" : "#9cdcfe"
                                                             font.pixelSize: 13
                                                             verticalAlignment: Text.AlignVCenter
                                                         }
@@ -677,6 +679,7 @@ Item {
                                                         StyledCheckBox {
                                                             visible: iifCell.comp.type === "bool"
                                                             checked: iifCell.comp.boolVal === true
+                                                            enabled: !iifCell.comp.disabled
                                                             rightPadding: 0
                                                             onToggled: editPanelController.setIifBool(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, checked)
                                                         }
@@ -685,13 +688,14 @@ Item {
                                                         TextField {
                                                             visible: iifCell.comp.type === "input" || iifCell.comp.type === "int"
                                                             text: iifCell.comp.value || ""
-                                                            color: "#e0e0e0"
+                                                            color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                             font.pixelSize: 13
                                                             width: 140
                                                             height: 24
                                                             verticalAlignment: Text.AlignVCenter
+                                                            readOnly: iifCell.comp.disabled || false
                                                             background: Rectangle {
-                                                                color: "#2d2d2d"
+                                                                color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
                                                                 border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                                                 border.width: 1; radius: 2
                                                             }
@@ -703,20 +707,21 @@ Item {
                                                         ComboBox {
                                                             id: comboCtrl
                                                             visible: iifCell.comp.type === "combo"
+                                                            enabled: !iifCell.comp.disabled
                                                             model: iifOptArr(iifCell.comp)
                                                             textRole: "label"
                                                             currentIndex: iifComboIndex(iifCell.comp)
                                                             width: 150
                                                             height: 24
                                                             background: Rectangle {
-                                                                color: "#2d2d2d"
+                                                                color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
                                                                 border.color: comboCtrl.popup.visible ? "#007acc" : "#3c3c3c"
                                                                 border.width: 1
                                                                 radius: 0
                                                             }
                                                             contentItem: Text {
                                                                 text: comboCtrl.currentText
-                                                                color: "#e0e0e0"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                                 font.pixelSize: 13
                                                                 verticalAlignment: Text.AlignVCenter
                                                                 leftPadding: 6
@@ -728,7 +733,7 @@ Item {
                                                                 anchors.right: parent.right
                                                                 anchors.rightMargin: 6
                                                                 text: "▾"
-                                                                color: "#9a9a9a"
+                                                                color: iifCell.comp.disabled ? "#5a5a5a" : "#9a9a9a"
                                                                 font.pixelSize: 13
                                                             }
                                                             popup: Popup {
@@ -796,7 +801,7 @@ Item {
                                                             Text {
                                                                 visible: (iifCell.comp.label || "").length > 0
                                                                 text: iifCell.comp.label || ""
-                                                                color: "#9cdcfe"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#9cdcfe"
                                                                 font.pixelSize: 13
                                                             }
                                                             Repeater {
@@ -817,11 +822,12 @@ Item {
                                                                                 anchors.left: parent.left
                                                                                 anchors.verticalCenter: parent.verticalCenter
                                                                                 width: 14; height: 14; radius: 7
-                                                                                color: (opt.key === iifCell.comp.value) ? "#2d6db5" : "#1e1e1e"
-                                                                                border.color: (opt.key === iifCell.comp.value) ? "#007acc" : "#5a5a5a"
+                                                                                color: (opt.key === iifCell.comp.value) ? (iifCell.comp.disabled ? "#2a4a5e" : "#2d6db5") : "#1e1e1e"
+                                                                                border.color: (opt.key === iifCell.comp.value) ? (iifCell.comp.disabled ? "#3a5a6e" : "#007acc") : "#5a5a5a"
                                                                                 border.width: 1
                                                                                 MouseArea {
                                                                                     anchors.fill: parent
+                                                                                    enabled: !iifCell.comp.disabled
                                                                                     onClicked: editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, opt.key)
                                                                                 }
                                                                             }
@@ -830,7 +836,7 @@ Item {
                                                                                 anchors.leftMargin: 17
                                                                                 anchors.verticalCenter: parent.verticalCenter
                                                                                 text: opt.label || opt.key || ""
-                                                                                color: "#e0e0e0"
+                                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                                                 font.pixelSize: 13
                                                                                 verticalAlignment: Text.AlignVCenter
                                                                                 MouseArea {
@@ -860,7 +866,7 @@ Item {
                                                             Text {
                                                                 visible: (iifCell.comp.label || "").length > 0
                                                                 text: iifCell.comp.label || ""
-                                                                color: "#9cdcfe"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#9cdcfe"
                                                                 font.pixelSize: 13
                                                             }
                                                             Repeater {
@@ -884,6 +890,7 @@ Item {
                                                                                 width: 14
                                                                                 height: 14
                                                                                 checked: { var s = sel; return s[opt.key] === true }
+                                                                                enabled: !iifCell.comp.disabled
                                                                                 rightPadding: 0
                                                                                 onToggled: iifSetChoice(iifCell.comp, opt.key, checked, iifRowItem.rdata.mult)
                                                                             }
@@ -892,7 +899,7 @@ Item {
                                                                                 anchors.leftMargin: 17
                                                                                 anchors.verticalCenter: parent.verticalCenter
                                                                                 text: opt.label || opt.key || ""
-                                                                                color: "#e0e0e0"
+                                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                                                 font.pixelSize: 13
                                                                                 verticalAlignment: Text.AlignVCenter
                                                                                 MouseArea {
@@ -934,6 +941,7 @@ Item {
                                                                     anchors.fill: parent
                                                                     hoverEnabled: true
                                                                     cursorShape: Qt.PointingHandCursor
+                                                                    enabled: !iifCell.comp.disabled
                                                                     onClicked: {
                                                                         colorDlg.selectedColor = iifColorToHex(iifCell.comp.value, iifCell.comp)
                                                                         colorDlg.open()
@@ -945,10 +953,11 @@ Item {
                                                                 width: 110
                                                                 height: 24
                                                                 font.pixelSize: 13
-                                                                color: "#e0e0e0"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                                 verticalAlignment: Text.AlignVCenter
+                                                                readOnly: iifCell.comp.disabled || false
                                                                 background: Rectangle {
-                                                                    color: "#2d2d2d"
+                                                                    color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
                                                                     border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                                                     border.width: 1; radius: 2
                                                                 }
@@ -962,6 +971,7 @@ Item {
                                                             spacing: 6
                                                             Slider {
                                                                 id: sliderCtrl
+                                                                enabled: !iifCell.comp.disabled
                                                                 from: iifCell.comp.min || 0
                                                                 to: iifCell.comp.max || 100
                                                                 value: parseInt(iifCell.comp.value || "0", 10)
@@ -984,7 +994,7 @@ Item {
                                                                         width: sliderCtrl.visualPosition * parent.width
                                                                         height: parent.height
                                                                         radius: 1
-                                                                        color: "#007acc"
+                                                                        color: iifCell.comp.disabled ? "#3a5a6e" : "#007acc"
                                                                     }
                                                                 }
                                                                 // 手柄：小圆点，按 value 的 visualPosition 显式定位
@@ -995,8 +1005,8 @@ Item {
                                                                     implicitWidth: 13 * 1.6
                                                                     implicitHeight: 13 * 1.6
                                                                     radius: width / 2
-                                                                    color: "#d4d4d4"
-                                                                    border.color: "#007acc"
+                                                                    color: iifCell.comp.disabled ? "#6e6e6e" : "#d4d4d4"
+                                                                    border.color: iifCell.comp.disabled ? "#3a5a6e" : "#007acc"
                                                                     border.width: 1
                                                                 }
                                                                 // 写回仅松手时提交一次，避免拖动中刷新中断；拖动中数值由右侧 Text 实时显示
@@ -1007,7 +1017,7 @@ Item {
                                                             }
                                                             Text {
                                                                 text: iifSliderFormat(parseInt(sliderCtrl.value, 10), iifCell.comp.slideFormat)
-                                                                color: "#e0e0e0"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
                                                                 font.pixelSize: 13
                                                                 verticalAlignment: Text.AlignVCenter
                                                             }

@@ -739,7 +739,7 @@ Item {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.label || ""
-                                color: "#9cdcfe"
+                                color: cc.disabled ? "#6e6e6e" : "#9cdcfe"
                                 font.pixelSize: root.fontBody
                                 elide: Text.ElideRight
                             }
@@ -748,20 +748,23 @@ Item {
                             property real ctlX: cellLabel.visible ? cellLabel.width + 3 : 0
 
                             // 纯文本/本地化/赋值串（只读，本身就是内容，无 label）
-                            // 对齐 ImGui IIC_PureText/LocalizedText：Colored 用分量 Color，Wrapped 自动换行
+                            // 对齐 ImGui IIC_PureText/LocalizedText：Colored 用分量 Color，Wrapped 自动换行；
+                            // Disabled 用禁用文本色（对齐 imgui PushStyleColor(TextDisabled)）
                             Text {
                                 id: cellTxtVal
                                 visible: (cc.type === "text" || cc.type === "locale" || cc.type === "setter")
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.value || ""
-                                color: cc.colored ? (cc.color || "#c586c0") : "#c586c0"
+                                color: cc.disabled ? "#6e6e6e"
+                                     : (cc.colored ? (cc.color || "#c586c0") : "#c586c0")
                                 font.pixelSize: root.fontBody
                                 wrapMode: cc.wrapped ? Text.Wrap : Text.NoWrap
                                 elide: cc.wrapped ? Text.ElideNone : Text.ElideRight
                             }
 
                             // 布尔勾选框（可见 label + 勾选框）
+                            // Disabled：对齐 imgui BeginDisabled——灰显且不可点击
                             Rectangle {
                                 visible: cc.type === "bool"
                                 width: root.fontBody * 1.4 + 4
@@ -770,13 +773,13 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 radius: 3
                                 color: cbMA.containsMouse ? "#3a3a3a" : "#1e1e1e"
-                                border.color: root.boolTrue(cc.value) ? "#007acc" : "#5a5a5a"
+                                border.color: root.boolTrue(cc.value) ? (cc.disabled ? "#3a5a6e" : "#007acc") : "#5a5a5a"
                                 border.width: 1
                                 Text {
                                     visible: root.boolTrue(cc.value)
                                     anchors.centerIn: parent
                                     text: "✓"
-                                    color: "#4ec9b0"
+                                    color: cc.disabled ? "#3a6e5e" : "#4ec9b0"
                                     font.pixelSize: root.fontBody
                                     font.bold: true
                                 }
@@ -785,6 +788,7 @@ Item {
                                     anchors.fill: parent
                                     preventStealing: true
                                     hoverEnabled: true
+                                    enabled: !cc.disabled
                                     onClicked: {
                                         if (root.lineModel)
                                             root.lineModel.setIifComponentValueBool(root.rowIndex, cc.idx || cc.compIdx, !root.boolTrue(cc.value))
@@ -802,7 +806,7 @@ Item {
                                 Text {
                                     visible: (cc.label || "").length > 0
                                     text: cc.label || ""
-                                    color: "#9cdcfe"
+                                    color: cc.disabled ? "#6e6e6e" : "#9cdcfe"
                                     font.pixelSize: root.fontBody
                                 }
                                 Repeater {
@@ -825,13 +829,14 @@ Item {
                                                     width: root.fontBody * 1.4 + 4
                                                     height: width
                                                     radius: width / 2
-                                                    color: (opt.key === cc.value) ? "#2d6db5" : "#1e1e1e"
-                                                    border.color: (opt.key === cc.value) ? "#007acc" : "#5a5a5a"
+                                                    color: (opt.key === cc.value) ? (cc.disabled ? "#2a4a5e" : "#2d6db5") : "#1e1e1e"
+                                                    border.color: (opt.key === cc.value) ? (cc.disabled ? "#3a5a6e" : "#007acc") : "#5a5a5a"
                                                     border.width: 1
                                                     MouseArea {
                                                         anchors.fill: parent
                                                         preventStealing: true
                                                         hoverEnabled: true
+                                                        enabled: !cc.disabled
                                                         onClicked: {
                                                             if (root.lineModel)
                                                                 root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, opt.key)
@@ -843,7 +848,7 @@ Item {
                                                     anchors.leftMargin: root.fontBody * 1.4 + 4 + 3
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     text: opt.label || opt.key || ""
-                                                    color: "#d4d4d4"
+                                                    color: cc.disabled ? "#6e6e6e" : "#d4d4d4"
                                                     font.pixelSize: root.fontBody
                                                     verticalAlignment: Text.AlignVCenter
                                                     MouseArea {
@@ -874,7 +879,7 @@ Item {
                                 Text {
                                     visible: (cc.label || "").length > 0
                                     text: cc.label || ""
-                                    color: "#9cdcfe"
+                                    color: cc.disabled ? "#6e6e6e" : "#9cdcfe"
                                     font.pixelSize: root.fontBody
                                 }
                                 Repeater {
@@ -899,13 +904,13 @@ Item {
                                                     height: width
                                                     radius: 3
                                                     color: cbChk.containsMouse ? "#3a3a3a" : "#1e1e1e"
-                                                    border.color: (opt.key.length > 0 && sel[opt.key] === true) ? "#007acc" : "#5a5a5a"
+                                                    border.color: (opt.key.length > 0 && sel[opt.key] === true) ? (cc.disabled ? "#3a5a6e" : "#007acc") : "#5a5a5a"
                                                     border.width: 1
                                                     Text {
                                                         visible: opt.key.length > 0 && sel[opt.key] === true
                                                         anchors.centerIn: parent
                                                         text: "✓"
-                                                        color: "#4ec9b0"
+                                                        color: cc.disabled ? "#3a6e5e" : "#4ec9b0"
                                                         font.pixelSize: root.fontBody
                                                         font.bold: true
                                                     }
@@ -914,6 +919,7 @@ Item {
                                                         anchors.fill: parent
                                                         preventStealing: true
                                                         hoverEnabled: true
+                                                        enabled: !cc.disabled
                                                         onClicked: {
                                                             var on = !(sel[opt.key] === true)
                                                             root.iifSetChoice(cc, opt.key, on)
@@ -925,7 +931,7 @@ Item {
                                                     anchors.leftMargin: root.fontBody * 1.4 + 4 + 3
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     text: opt.label || opt.key || ""
-                                                    color: "#d4d4d4"
+                                                    color: cc.disabled ? "#6e6e6e" : "#d4d4d4"
                                                     font.pixelSize: root.fontBody
                                                     verticalAlignment: Text.AlignVCenter
                                                     MouseArea {
@@ -947,6 +953,7 @@ Item {
                             }
 
                             // 输入/整数分量：label + 占满剩余宽的输入框
+                            // Disabled：对齐 imgui BeginDisabled——灰显且不可编辑，但仍显示输入框
                             TextField {
                                 id: cellInput
                                 visible: (cc.type === "input" || cc.type === "int")
@@ -956,12 +963,12 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.value || ""
                                 font.pixelSize: root.fontBody
-                                color: "#ce9178"
+                                color: cc.disabled ? "#6e6e6e" : "#ce9178"
                                 verticalAlignment: Text.AlignVCenter
                                 selectByMouse: true
-                                readOnly: cc.readOnly || false
+                                readOnly: cc.readOnly || cc.disabled || false
                                 background: Rectangle {
-                                    color: "#1e1e1e"
+                                    color: cc.disabled ? "#161616" : "#1e1e1e"
                                     border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                     border.width: 1
                                     radius: 2
@@ -973,9 +980,11 @@ Item {
                             }
 
                             // 下拉组合框（combo）
+                            // Disabled：对齐 imgui BeginDisabled——灰显且不可交互
                             ComboBox {
                                 visible: cc.type === "combo"
                                 id: comboCtrl
+                                enabled: !cc.disabled
                                 x: iifCell.ctlX
                                 width: parent.width - x
                                 height: root.fontBody * 2
@@ -991,7 +1000,7 @@ Item {
                                         root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, o.key)
                                 }
                                 background: Rectangle {
-                                    color: "#1e1e1e"
+                                    color: cc.disabled ? "#161616" : "#1e1e1e"
                                     // 激活判定与输入框不同：ComboBox 点开弹出层后自身可能一直持有
                                     // activeFocus（选中/点外关闭也不释放）→ 用 popup.visible 判断
                                     // "下拉是否打开中"，关闭即变灰，等同于输入框失焦效果
@@ -1001,7 +1010,7 @@ Item {
                                 }
                                 contentItem: Text {
                                     text: comboCtrl.currentText
-                                    color: "#ce9178"
+                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: Text.AlignLeft
@@ -1014,7 +1023,7 @@ Item {
                                     anchors.right: parent.right
                                     anchors.rightMargin: 6
                                     text: "▾"
-                                    color: "#9a9a9a"
+                                    color: cc.disabled ? "#5a5a5a" : "#9a9a9a"
                                     font.pixelSize: root.fontBody
                                 }
                                 // 下拉弹层：统一深色方角风格，替换 Qt 默认浅色圆角列表外观
@@ -1097,6 +1106,7 @@ Item {
                             }
 
                             // 色板（color）：色块可点击取色 + 值输入（label + 占满剩余宽）
+                            // Disabled：对齐 imgui BeginDisabled——灰显且不可取色/编辑
                             Row {
                                 visible: cc.type === "color"
                                 x: iifCell.ctlX
@@ -1116,6 +1126,7 @@ Item {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
+                                        enabled: !cc.disabled
                                         onClicked: {
                                             colorDlg.selectedColor = root.iifColorToHex(cc.value, cc)
                                             colorDlg.open()
@@ -1128,11 +1139,12 @@ Item {
                                     width: parent.width - parent.spacing - (root.fontBody * 1.6)
                                     anchors.verticalCenter: parent.verticalCenter
                                     font.pixelSize: root.fontBody
-                                    color: "#ce9178"
+                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
                                     verticalAlignment: Text.AlignVCenter
                                     selectByMouse: true
+                                    readOnly: cc.disabled || false
                                     background: Rectangle {
-                                        color: "#1e1e1e"
+                                        color: cc.disabled ? "#161616" : "#1e1e1e"
                                         border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                         border.width: 1
                                         radius: 2
@@ -1145,6 +1157,7 @@ Item {
                             }
 
                             // 滑条（slider）：滑条 + 当前值
+                            // Disabled：对齐 imgui BeginDisabled——灰显且不可拖动
                             Row {
                                 visible: cc.type === "slider"
                                 x: iifCell.ctlX
@@ -1153,6 +1166,7 @@ Item {
                                 spacing: 6
                                 Slider {
                                     id: sliderCtrl
+                                    enabled: !cc.disabled
                                     from: cc.min || 0
                                     to: cc.max || 100
                                     value: parseInt(cc.value || "0", 10)
@@ -1177,7 +1191,7 @@ Item {
                                             width: sliderCtrl.visualPosition * parent.width
                                             height: parent.height
                                             radius: 1
-                                            color: "#007acc"
+                                            color: cc.disabled ? "#3a5a6e" : "#007acc"
                                         }
                                     }
                                     // 手柄：小圆点（默认过大），按 value 的 visualPosition 显式定位
@@ -1188,8 +1202,8 @@ Item {
                                         implicitWidth: root.fontBody * 1.6
                                         implicitHeight: root.fontBody * 1.6
                                         radius: width / 2
-                                        color: "#d4d4d4"
-                                        border.color: "#007acc"
+                                        color: cc.disabled ? "#6e6e6e" : "#d4d4d4"
+                                        border.color: cc.disabled ? "#3a5a6e" : "#007acc"
                                         border.width: 1
                                     }
                                     // 写回仅松手时提交一次：onMoved 每步都写会触发模型刷新/组件重建，
@@ -1203,7 +1217,7 @@ Item {
                                 }
                                 Text {
                                     text: root.iifSliderFormat(parseInt(sliderCtrl.value, 10), cc.slideFormat)
-                                    color: "#ce9178"
+                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
                                     anchors.verticalCenter: parent.verticalCenter
@@ -1238,7 +1252,7 @@ Item {
                         Layout.alignment: Qt.AlignVCenter
                         visible: cc && (cc.label || "").length > 0
                         text: cc ? (cc.label || "") : ""
-                        color: "#9cdcfe"
+                        color: cc && cc.disabled ? "#6e6e6e" : "#9cdcfe"
                         font.pixelSize: root.fontBody
                         MouseArea {
                             anchors.fill: parent

@@ -20,7 +20,7 @@ CheckBox {
 
     contentItem: Text {
         text: control.text
-        color: control.checked ? control.accentColor : "#858585"
+        color: control.enabled ? (control.checked ? control.accentColor : "#858585") : "#6e6e6e"
         font: control.font
         verticalAlignment: Text.AlignVCenter
         leftPadding: control.indicator.width + control.spacing
@@ -33,15 +33,15 @@ CheckBox {
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         radius: 2
-        color: control.checked ? control.accentColor : "#1e1e1e"
-        border.color: control.checked ? control.accentColor : "#3c3c3c"
+        color: control.checked ? (control.enabled ? control.accentColor : "#3a5a6e") : "#1e1e1e"
+        border.color: control.checked ? (control.enabled ? control.accentColor : "#3a5a6e") : "#3c3c3c"
         border.width: 1
 
         Text {
             anchors.centerIn: parent
             visible: control.checked
             text: "✓"
-            color: "#ffffff"
+            color: control.enabled ? "#ffffff" : "#3a6e5e"
             font.pixelSize: 10
         }
     }
