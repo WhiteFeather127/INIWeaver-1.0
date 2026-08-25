@@ -529,6 +529,10 @@ IBB_IniLine_Data_IIF::IBB_IniLine_Data_IIF(const IBB_IniLine_Default* Default)
 bool IBB_IniLine_Data_IIF::SetValue(const std::string& Val)
 {
     Value->ParseFromString(Val);
+    //ParseFromString 会原样保留旧 ComponentStatus（空进空出），这里从各分量 InitialStatus
+    //补齐缺失状态：ImGui 版靠 RenderUI 每帧 CheckStatus 兜底，QML 导出路径不走 RenderUI，
+    //不补齐则新行（"+"新增）的 Link 分量渲染成输入框，且 UpdateAll 里 cs[i] 越界 UB
+    Value->CheckStatus();
     _Empty = Val.empty();
     return LinkNodeContext::CurSub ? LinkNodeContext::CurSub->UpdateAll() : true;
 }
