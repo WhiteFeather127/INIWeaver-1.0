@@ -377,6 +377,31 @@ Item {
                             out = out.replace(/\u0000/g, "%")
                             return out
                         }
+                        // coloredFrame（UseNodeColorInFrame）：输入框底色 = 节点色压暗（对齐 imgui 暗色模式 V/S×0.7）
+                        function iifFrameBgColor(comp) {
+                            if (!comp || !comp.coloredFrame || !comp.linkCol) return "#2d2d2d"
+                            return Qt.darker(comp.linkCol, 1.4)
+                        }
+                        // coloredFrame 文字色：按节点色亮度选黑/白（对齐 imgui IsLightColor 判断）
+                        function iifFrameTextColor(comp) {
+                            if (!comp || !comp.coloredFrame || !comp.linkCol) return "#e0e0e0"
+                            var c = Qt.darker(comp.linkCol, 1.0)
+                            var lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114
+                            return lum > 0.5 ? "#000000" : "#ffffff"
+                        }
+                        // 对数滑条：值 → 位置百分比（0-100）；min<=0 时回退线性
+                        function iifLogPos(v, min, max) {
+                            if (max <= min || min <= 0) return 0
+                            var vv = Math.max(min, Math.min(max, v))
+                            var logMin = Math.log(min), logMax = Math.log(max)
+                            return (Math.log(vv) - logMin) / (logMax - logMin) * 100
+                        }
+                        // 对数滑条：位置百分比 → 值；min<=0 时回退线性
+                        function iifLogValue(pos, min, max) {
+                            if (max <= min || min <= 0) return min
+                            var logMin = Math.log(min), logMax = Math.log(max)
+                            return Math.round(Math.exp(logMin + (logMax - logMin) * pos / 100))
+                        }
                         // ===== 文本真实度量（对齐字体大小：中文字符/字体变化时 length*0.6 估算会失真 → 重叠） =====
                         // 用 FontMetrics.advanceWidth()（纯方法调用）：不写属性、不建立绑定依赖，
                         // 避免 TextMetrics.text 赋值在绑定求值中修改自身依赖属性导致绑定循环。
@@ -483,12 +508,14 @@ Item {
                                 // 互斥规则：主值框 与 多值 Column(valueRows) 严格二选一，绝不并存
                                 //  - 非 Multiple 键：主值框显示（valueRows 恒 0）
                                 //  - Multiple 键：无主值框概念，每个同名键都由 valueRows 自己的框渲染
+                                // NewLineAfterDesc=true 时主值框换到下一行（见下方 mainValueFieldNL）
                                 TextField {
                                     id: mainValueField
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
                                              && ((modelData.keyType || 0) !== 2)   // IIF 键改由下方分量区逐分量渲染
                                              && !(modelData.isMultiple || false)
+                                             && !(modelData.newLineAfterDesc || false)
                                     text: modelData.value || ""
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
@@ -511,12 +538,42 @@ Item {
                                         }
                                     }
                                 }
-}
+                            }
+
+                            // NewLineAfterDesc=true：键名独占一行，值编辑控件换到下一行（对齐 imgui WorkSpaceLine::RenderUI）
+                            TextField {
+                                id: mainValueFieldNL
+                                Layout.fillWidth: true
+                                visible: !(modelData.missing || false)
+                                         && ((modelData.keyType || 0) !== 2)
+                                         && !(modelData.isMultiple || false)
+                                         && (modelData.newLineAfterDesc || false)
+                                text: modelData.value || ""
+                                color: "#e0e0e0"
+                                placeholderTextColor: "#909090"
+                                font.pixelSize: 13
+                                background: Rectangle {
+                                    color: "#2d2d2d"
+                                    border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
+                                    border.width: 1
+                                    radius: 2
+                                }
+                                onEditingFinished: editPanelController.setLineValue(modelData.keyName, text)
+                                onHoveredChanged: {
+                                    if (hovered && modelData.hint && modelData.hint.length > 0) {
+                                        var g = mapToGlobal(width / 2, height + 4)
+                                        appToolTip.show(modelData.hint, g.x, g.y)
+                                    } else {
+                                        appToolTip.hide()
+                                    }
+                                }
+                            }
 
                             // 同名多值键（isMultiple）：无主值框概念，每个同名键都有自己的值框
                             // 每值一个输入框，按值索引写回（对应 imgui ForEachWithIdx 逐行渲染）
                             // 只要 isMultiple 就逐值显示（含仅 1 个值的情形）；非 Multiple 键 values 为空 → model 恒 0
                             // 高度由 Column 天然堆叠自适应（不引 mainValueField——Multiple 键主值框已隐藏，不可作为参考）
+                            // ShowLineID：每个值框前显示行号（对齐 imgui `slid && !nlad && multiple` 的透明占位行号）
                             Column {
                                 id: valueRows
                                 Layout.fillWidth: true
@@ -528,27 +585,41 @@ Item {
                                          && !(entry.missing || false)
                                 Repeater {
                                     model: entry.values ? entry.values.length : 0
-                                    delegate: TextField {
-                                        // 每行一个值，高度走 TextField 默认 implicitHeight，与普通单值框一致
-                                        width: linesListView.width - 4
-                                        text: valueRows.entry.values[index] || ""
-                                        color: "#e0e0e0"
-                                        placeholderTextColor: "#909090"
-                                        font.pixelSize: 13
-                                        background: Rectangle {
-                                            color: "#2d2d2d"
-                                            border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
-                                            border.width: 1
-                                            radius: 2
+                                    delegate: Row {
+                                        spacing: 4
+                                        // 行号（ShowLineID 时显示：lineIDFrom + index，对齐 imgui Count+LineIDFrom 语义）
+                                        Text {
+                                            visible: (valueRows.entry.showLineID || false)
+                                                     && !(valueRows.entry.newLineAfterDesc || false)
+                                            width: 24
+                                            text: "" + ((valueRows.entry.lineIDFrom || 0) + index)
+                                            color: "#6e6e6e"
+                                            font.pixelSize: 13
+                                            verticalAlignment: Text.AlignVCenter
+                                            horizontalAlignment: Text.AlignRight
                                         }
-                                        onEditingFinished: editPanelController.setLineValueAt(valueRows.entry.keyName, index, text)
-                                        onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=multiValue key='" + valueRows.entry.keyName + "' index=" + index + " value=['" + text + "']")
-                                        onHoveredChanged: {
-                                            if (hovered && valueRows.entry.hint && valueRows.entry.hint.length > 0) {
-                                                var g = mapToGlobal(width / 2, height + 4)
-                                                appToolTip.show(valueRows.entry.hint, g.x, g.y)
-                                            } else {
-                                                appToolTip.hide()
+                                        TextField {
+                                            // 每行一个值，高度走 TextField 默认 implicitHeight，与普通单值框一致
+                                            width: linesListView.width - 4 - (visible ? 28 : 0)
+                                            text: valueRows.entry.values[index] || ""
+                                            color: "#e0e0e0"
+                                            placeholderTextColor: "#909090"
+                                            font.pixelSize: 13
+                                            background: Rectangle {
+                                                color: "#2d2d2d"
+                                                border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
+                                                border.width: 1
+                                                radius: 2
+                                            }
+                                            onEditingFinished: editPanelController.setLineValueAt(valueRows.entry.keyName, index, text)
+                                            onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=multiValue key='" + valueRows.entry.keyName + "' index=" + index + " value=['" + text + "']")
+                                            onHoveredChanged: {
+                                                if (hovered && valueRows.entry.hint && valueRows.entry.hint.length > 0) {
+                                                    var g = mapToGlobal(width / 2, height + 4)
+                                                    appToolTip.show(valueRows.entry.hint, g.x, g.y)
+                                                } else {
+                                                    appToolTip.hide()
+                                                }
                                             }
                                         }
                                     }
@@ -688,14 +759,14 @@ Item {
                                                         TextField {
                                                             visible: iifCell.comp.type === "input" || iifCell.comp.type === "int"
                                                             text: iifCell.comp.value || ""
-                                                            color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
+                                                            color: iifCell.comp.disabled ? "#6e6e6e" : iifFrameTextColor(iifCell.comp)
                                                             font.pixelSize: 13
                                                             width: 140
                                                             height: 24
                                                             verticalAlignment: Text.AlignVCenter
                                                             readOnly: iifCell.comp.disabled || false
                                                             background: Rectangle {
-                                                                color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
+                                                                color: iifCell.comp.disabled ? "#242424" : iifFrameBgColor(iifCell.comp)
                                                                 border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                                                 border.width: 1; radius: 2
                                                             }
@@ -714,14 +785,14 @@ Item {
                                                             width: 150
                                                             height: 24
                                                             background: Rectangle {
-                                                                color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
+                                                                color: iifCell.comp.disabled ? "#242424" : iifFrameBgColor(iifCell.comp)
                                                                 border.color: comboCtrl.popup.visible ? "#007acc" : "#3c3c3c"
                                                                 border.width: 1
                                                                 radius: 0
                                                             }
                                                             contentItem: Text {
                                                                 text: comboCtrl.currentText
-                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : iifFrameTextColor(iifCell.comp)
                                                                 font.pixelSize: 13
                                                                 verticalAlignment: Text.AlignVCenter
                                                                 leftPadding: 6
@@ -953,11 +1024,11 @@ Item {
                                                                 width: 110
                                                                 height: 24
                                                                 font.pixelSize: 13
-                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : iifFrameTextColor(iifCell.comp)
                                                                 verticalAlignment: Text.AlignVCenter
                                                                 readOnly: iifCell.comp.disabled || false
                                                                 background: Rectangle {
-                                                                    color: iifCell.comp.disabled ? "#242424" : "#2d2d2d"
+                                                                    color: iifCell.comp.disabled ? "#242424" : iifFrameBgColor(iifCell.comp)
                                                                     border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                                                     border.width: 1; radius: 2
                                                                 }
@@ -972,10 +1043,13 @@ Item {
                                                             Slider {
                                                                 id: sliderCtrl
                                                                 enabled: !iifCell.comp.disabled
-                                                                from: iifCell.comp.min || 0
-                                                                to: iifCell.comp.max || 100
-                                                                value: parseInt(iifCell.comp.value || "0", 10)
-                                                                stepSize: 1
+                                                                // 对数滑条用 0-100 位置百分比；线性滑条用 min-max 实际值
+                                                                from: iifCell.comp.logarithmic ? 0 : (iifCell.comp.min || 0)
+                                                                to: iifCell.comp.logarithmic ? 100 : (iifCell.comp.max || 100)
+                                                                value: iifCell.comp.logarithmic
+                                                                       ? iifLogPos(parseInt(iifCell.comp.value || "0", 10), iifCell.comp.min || 0, iifCell.comp.max || 100)
+                                                                       : parseInt(iifCell.comp.value || "0", 10)
+                                                                stepSize: iifCell.comp.logarithmic ? 0.1 : 1
                                                                 width: 140
                                                                 height: 24
                                                                 leftPadding: 6
@@ -989,12 +1063,13 @@ Item {
                                                                     anchors.verticalCenter: parent.verticalCenter
                                                                     anchors.leftMargin: 6
                                                                     anchors.rightMargin: 6
-                                                                    // 已取值部分用蓝填充
+                                                                    // 已取值部分用蓝填充（coloredFrame 时用节点色）
                                                                     Rectangle {
                                                                         width: sliderCtrl.visualPosition * parent.width
                                                                         height: parent.height
                                                                         radius: 1
-                                                                        color: iifCell.comp.disabled ? "#3a5a6e" : "#007acc"
+                                                                        color: iifCell.comp.disabled ? "#3a5a6e"
+                                                                             : (iifCell.comp.coloredFrame ? iifFrameBgColor(iifCell.comp) : "#007acc")
                                                                     }
                                                                 }
                                                                 // 手柄：小圆点，按 value 的 visualPosition 显式定位
@@ -1011,13 +1086,21 @@ Item {
                                                                 }
                                                                 // 写回仅松手时提交一次，避免拖动中刷新中断；拖动中数值由右侧 Text 实时显示
                                                                 onPressedChanged: {
-                                                                    if (!pressed)
-                                                                        editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, "" + parseInt(sliderCtrl.value, 10))
+                                                                    if (!pressed) {
+                                                                        var val = iifCell.comp.logarithmic
+                                                                            ? iifLogValue(sliderCtrl.value, iifCell.comp.min || 0, iifCell.comp.max || 100)
+                                                                            : parseInt(sliderCtrl.value, 10)
+                                                                        editPanelController.setIifValue(iifArea.iifKey, iifRowItem.rdata.mult, iifCell.comp.idx, "" + val)
+                                                                    }
                                                                 }
                                                             }
                                                             Text {
-                                                                text: iifSliderFormat(parseInt(sliderCtrl.value, 10), iifCell.comp.slideFormat)
-                                                                color: iifCell.comp.disabled ? "#6e6e6e" : "#e0e0e0"
+                                                                text: iifSliderFormat(
+                                                                    iifCell.comp.logarithmic
+                                                                        ? iifLogValue(sliderCtrl.value, iifCell.comp.min || 0, iifCell.comp.max || 100)
+                                                                        : parseInt(sliderCtrl.value, 10),
+                                                                    iifCell.comp.slideFormat)
+                                                                color: iifCell.comp.disabled ? "#6e6e6e" : iifFrameTextColor(iifCell.comp)
                                                                 font.pixelSize: 13
                                                                 verticalAlignment: Text.AlignVCenter
                                                             }

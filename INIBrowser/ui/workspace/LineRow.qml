@@ -88,6 +88,32 @@ Item {
         return out
     }
 
+    // coloredFrame（UseNodeColorInFrame）：输入框底色 = 节点色压暗（对齐 imgui 暗色模式 V/S×0.7）
+    function iifFrameBgColor(cc) {
+        if (!cc || !cc.coloredFrame || !cc.linkCol) return "#1e1e1e"
+        return Qt.darker(cc.linkCol, 1.4)
+    }
+    // coloredFrame 文字色：按节点色亮度选黑/白（对齐 imgui IsLightColor 判断）
+    function iifFrameTextColor(cc) {
+        if (!cc || !cc.coloredFrame || !cc.linkCol) return "#ce9178"
+        var c = Qt.darker(cc.linkCol, 1.0)
+        var lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114
+        return lum > 0.5 ? "#000000" : "#ffffff"
+    }
+    // 对数滑条：值 → 位置百分比（0-100）；min<=0 时回退线性
+    function iifLogPos(v, min, max) {
+        if (max <= min || min <= 0) return 0
+        var vv = Math.max(min, Math.min(max, v))
+        var logMin = Math.log(min), logMax = Math.log(max)
+        return (Math.log(vv) - logMin) / (logMax - logMin) * 100
+    }
+    // 对数滑条：位置百分比 → 值；min<=0 时回退线性
+    function iifLogValue(pos, min, max) {
+        if (max <= min || min <= 0) return min
+        var logMin = Math.log(min), logMax = Math.log(max)
+        return Math.round(Math.exp(logMin + (logMax - logMin) * pos / 100))
+    }
+
     // 获取当前行 IIF 分量列表
     function iifList() {
         if (!root.lineModel || root.rowIndex < 0) return []
@@ -954,6 +980,7 @@ Item {
 
                             // 输入/整数分量：label + 占满剩余宽的输入框
                             // Disabled：对齐 imgui BeginDisabled——灰显且不可编辑，但仍显示输入框
+                            // ColoredFrame：对齐 imgui UseNodeColorInFrame——框底染节点色、文字按亮度黑白
                             TextField {
                                 id: cellInput
                                 visible: (cc.type === "input" || cc.type === "int")
@@ -963,12 +990,12 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.value || ""
                                 font.pixelSize: root.fontBody
-                                color: cc.disabled ? "#6e6e6e" : "#ce9178"
+                                color: cc.disabled ? "#6e6e6e" : root.iifFrameTextColor(cc)
                                 verticalAlignment: Text.AlignVCenter
                                 selectByMouse: true
                                 readOnly: cc.readOnly || cc.disabled || false
                                 background: Rectangle {
-                                    color: cc.disabled ? "#161616" : "#1e1e1e"
+                                    color: cc.disabled ? "#161616" : root.iifFrameBgColor(cc)
                                     border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                     border.width: 1
                                     radius: 2
@@ -981,6 +1008,7 @@ Item {
 
                             // 下拉组合框（combo）
                             // Disabled：对齐 imgui BeginDisabled——灰显且不可交互
+                            // ColoredFrame：对齐 imgui UseNodeColorInFrame——框底染节点色、文字按亮度黑白
                             ComboBox {
                                 visible: cc.type === "combo"
                                 id: comboCtrl
@@ -1000,7 +1028,7 @@ Item {
                                         root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, o.key)
                                 }
                                 background: Rectangle {
-                                    color: cc.disabled ? "#161616" : "#1e1e1e"
+                                    color: cc.disabled ? "#161616" : root.iifFrameBgColor(cc)
                                     // 激活判定与输入框不同：ComboBox 点开弹出层后自身可能一直持有
                                     // activeFocus（选中/点外关闭也不释放）→ 用 popup.visible 判断
                                     // "下拉是否打开中"，关闭即变灰，等同于输入框失焦效果
@@ -1010,7 +1038,7 @@ Item {
                                 }
                                 contentItem: Text {
                                     text: comboCtrl.currentText
-                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
+                                    color: cc.disabled ? "#6e6e6e" : root.iifFrameTextColor(cc)
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: Text.AlignLeft
@@ -1139,12 +1167,12 @@ Item {
                                     width: parent.width - parent.spacing - (root.fontBody * 1.6)
                                     anchors.verticalCenter: parent.verticalCenter
                                     font.pixelSize: root.fontBody
-                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
+                                    color: cc.disabled ? "#6e6e6e" : root.iifFrameTextColor(cc)
                                     verticalAlignment: Text.AlignVCenter
                                     selectByMouse: true
                                     readOnly: cc.disabled || false
                                     background: Rectangle {
-                                        color: cc.disabled ? "#161616" : "#1e1e1e"
+                                        color: cc.disabled ? "#161616" : root.iifFrameBgColor(cc)
                                         border.color: parent.activeFocus ? "#007acc" : "#3c3c3c"
                                         border.width: 1
                                         radius: 2
@@ -1158,6 +1186,8 @@ Item {
 
                             // 滑条（slider）：滑条 + 当前值
                             // Disabled：对齐 imgui BeginDisabled——灰显且不可拖动
+                            // Logarithmic：对齐 imgui ImGuiSliderFlags_Logarithmic——对数刻度（min>0 时生效）
+                            // ColoredFrame：对齐 imgui UseNodeColorInFrame——轨道染节点色、文字按亮度黑白
                             Row {
                                 visible: cc.type === "slider"
                                 x: iifCell.ctlX
@@ -1167,10 +1197,13 @@ Item {
                                 Slider {
                                     id: sliderCtrl
                                     enabled: !cc.disabled
-                                    from: cc.min || 0
-                                    to: cc.max || 100
-                                    value: parseInt(cc.value || "0", 10)
-                                    stepSize: 1
+                                    // 对数滑条用 0-100 位置百分比；线性滑条用 min-max 实际值
+                                    from: cc.logarithmic ? 0 : (cc.min || 0)
+                                    to: cc.logarithmic ? 100 : (cc.max || 100)
+                                    value: cc.logarithmic
+                                           ? root.iifLogPos(parseInt(cc.value || "0", 10), cc.min || 0, cc.max || 100)
+                                           : parseInt(cc.value || "0", 10)
+                                    stepSize: cc.logarithmic ? 0.1 : 1
                                     height: root.fontBody * 2
                                     width: Math.max(80, parent.width - parent.spacing - root.fontBody * 4)
                                     anchors.verticalCenter: parent.verticalCenter
@@ -1186,12 +1219,13 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.leftMargin: 6
                                         anchors.rightMargin: 6
-                                        // 已取值部分用蓝填充
+                                        // 已取值部分用蓝填充（coloredFrame 时用节点色）
                                         Rectangle {
                                             width: sliderCtrl.visualPosition * parent.width
                                             height: parent.height
                                             radius: 1
-                                            color: cc.disabled ? "#3a5a6e" : "#007acc"
+                                            color: cc.disabled ? "#3a5a6e"
+                                                 : (cc.coloredFrame ? root.iifFrameBgColor(cc) : "#007acc")
                                         }
                                     }
                                     // 手柄：小圆点（默认过大），按 value 的 visualPosition 显式定位
@@ -1209,15 +1243,22 @@ Item {
                                     // 写回仅松手时提交一次：onMoved 每步都写会触发模型刷新/组件重建，
                                     // 导致拖动中途被中断（拖一下就停）。拖动中本地实时值由右侧 Text 显示。
                                     onPressedChanged: {
-                                        if (!pressed && root.lineModel)
+                                        if (!pressed && root.lineModel) {
+                                            var val = cc.logarithmic
+                                                ? root.iifLogValue(sliderCtrl.value, cc.min || 0, cc.max || 100)
+                                                : parseInt(sliderCtrl.value, 10)
                                             root.lineModel.setIifComponentValue(
-                                                root.rowIndex, cc.idx || cc.compIdx,
-                                                "" + parseInt(sliderCtrl.value, 10))
+                                                root.rowIndex, cc.idx || cc.compIdx, "" + val)
+                                        }
                                     }
                                 }
                                 Text {
-                                    text: root.iifSliderFormat(parseInt(sliderCtrl.value, 10), cc.slideFormat)
-                                    color: cc.disabled ? "#6e6e6e" : "#ce9178"
+                                    text: root.iifSliderFormat(
+                                        cc.logarithmic
+                                            ? root.iifLogValue(sliderCtrl.value, cc.min || 0, cc.max || 100)
+                                            : parseInt(sliderCtrl.value, 10),
+                                        cc.slideFormat)
+                                    color: cc.disabled ? "#6e6e6e" : root.iifFrameTextColor(cc)
                                     font.pixelSize: root.fontBody
                                     verticalAlignment: Text.AlignVCenter
                                     anchors.verticalCenter: parent.verticalCenter
