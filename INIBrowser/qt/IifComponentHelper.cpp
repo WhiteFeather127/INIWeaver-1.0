@@ -6,6 +6,7 @@
 #include "IBB_Ini.h"        // IBB_SubSec / IBB_NewLink（链接表）
 #include "IBR_Misc.h"       // IBR_WorkSpace::ShowRegName
 #include <cctype>
+#include <cstdio>           // sprintf（ImColor → #RRGGBB）
 
 namespace {
 // 侧边栏枚举选项导出（Options/OptionOrder → QVariantList，对齐 EditPanel 的 iifOptArr）
@@ -31,6 +32,60 @@ bool IifStrTrue(const std::string& s)
     t.reserve(s.size());
     for (char c : s) if (c != ' ' && c != '\t') t.push_back((char)tolower((unsigned char)c));
     return t == "yes" || t == "true" || t == "1" || t == "on";
+}
+
+// ImColor(RGBA float) → "#RRGGBB"（对齐 ImGui 各 IIC 的 Color 成员）
+QString IifImColorToHex(const ImColor& c)
+{
+    auto f2i = [](float f) -> int {
+        return f < 0.0f ? 0 : (f > 1.0f ? 255 : static_cast<int>(f * 255.0f + 0.5f));
+    };
+    char buf[8];
+    sprintf(buf, "#%02X%02X%02X", f2i(c.Value.x), f2i(c.Value.y), f2i(c.Value.z));
+    return QString::fromLatin1(buf);
+}
+
+// StrBoolType → 字符串名（对齐 ImGui IIC_Bool::FmtType）
+QString IifBoolFmtName(StrBoolType t)
+{
+    switch (t) {
+    case StrBoolType::Str_true_false: return "true_false";
+    case StrBoolType::Str_True_False: return "True_False";
+    case StrBoolType::Str_TRUE_FALSE: return "TRUE_FALSE";
+    case StrBoolType::Str_yes_no: return "yes_no";
+    case StrBoolType::Str_Yes_No: return "Yes_No";
+    case StrBoolType::Str_YES_NO: return "YES_NO";
+    case StrBoolType::Str_t_f: return "t_f";
+    case StrBoolType::Str_T_F: return "T_F";
+    case StrBoolType::Str_y_n: return "y_n";
+    case StrBoolType::Str_Y_N: return "Y_N";
+    case StrBoolType::Str_1_0: return "1_0";
+    case StrBoolType::Str_yeah_fuck: return "yeah_fuck";
+    default: return "custom";
+    }
+}
+
+// IIC_ColorPanel::ValueMode → 字符串（rgb/bgr/hsv）
+const char* IifColorVModeName(IIC_ColorPanel::ValueMode m)
+{
+    switch (m) {
+    case IIC_ColorPanel::RGB: return "rgb";
+    case IIC_ColorPanel::BGR: return "bgr";
+    case IIC_ColorPanel::HSV: return "hsv";
+    }
+    return "rgb";
+}
+
+// IIC_ColorPanel::FormatMode → 字符串（int/float/hex/hashhex）
+const char* IifColorFModeName(IIC_ColorPanel::FormatMode m)
+{
+    switch (m) {
+    case IIC_ColorPanel::Int: return "int";
+    case IIC_ColorPanel::Float: return "float";
+    case IIC_ColorPanel::Hex: return "hex";
+    case IIC_ColorPanel::Hash_Hex: return "hashhex";
+    }
+    return "int";
 }
 } // namespace
 
@@ -95,8 +150,14 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
         // 纯文本类：value 用组件自身文本（覆盖），tooltip 回退
         if (auto t = dynamic_cast<IIC_PureText*>(p.get())) {
             m["value"] = QString::fromUtf8(t->Text.c_str()); m["readOnly"] = true;
+            m["colored"] = t->Colored;
+            m["wrapped"] = t->Wrapped;
+            if (t->Colored) m["color"] = IifImColorToHex(t->Color);
         } else if (auto t = dynamic_cast<IIC_LocalizedText*>(p.get())) {
             m["value"] = QString::fromUtf8(t->FallbackText.c_str()); m["readOnly"] = true;
+            m["colored"] = t->Colored;
+            m["wrapped"] = t->Wrapped;
+            if (t->Colored) m["color"] = IifImColorToHex(t->Color);
         } else if (auto t = dynamic_cast<IIC_Setter_String*>(p.get())) {
             m["value"] = QString::fromUtf8(t->Value.c_str()); m["readOnly"] = true;
         } else if (m["type"] == "samel" || m["type"] == "newl" || m["type"] == "sep") {
@@ -109,6 +170,7 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
         // 组件特有参数（对齐 ImGui 各 IIC 控件参数）
         if (auto t = dynamic_cast<IIC_Bool*>(p.get())) {
             m["boolVal"] = IifStrTrue(valueStr);
+            m["fmtType"] = IifBoolFmtName(t->FmtType);
         } else if (auto t = dynamic_cast<IIC_InputInt*>(p.get())) {
             m["min"] = t->Min; m["max"] = t->Max;
         } else if (auto t = dynamic_cast<IIC_MultipleChoice*>(p.get())) {
@@ -118,6 +180,7 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
             // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行），避免选项溢出
             m["sameLine"] = t->SameLine;
             m["maxInOneLine"] = t->MaxInOneLine;
+            m["hintID"] = QString::fromUtf8(t->HintID.c_str());
         } else if (auto t = dynamic_cast<IIC_EnumCombo*>(p.get())) {
             m["opts"] = IifExportOpts(t->Options, t->OptionOrder, showReg);
         } else if (auto t = dynamic_cast<IIC_EnumRadio*>(p.get())) {
@@ -126,10 +189,15 @@ QVariantList IifExportComponents(IBB_IniLine_Data_IIF *ii, IBB_SubSec *sub,
             // 每 MaxInOneLine 个选项换一行（SameLine=false 则每项都换行）
             m["sameLine"] = t->SameLine;
             m["maxInOneLine"] = t->MaxInOneLine;
+            m["hintID"] = QString::fromUtf8(t->HintID.c_str());
         } else if (auto t = dynamic_cast<IIC_SliderInt*>(p.get())) {
             m["min"] = t->Min; m["max"] = t->Max;
+            m["slideFormat"] = QString::fromUtf8(t->SlideFormat.c_str());
+            m["logarithmic"] = t->Logarithmic;
         } else if (auto t = dynamic_cast<IIC_ColorPanel*>(p.get())) {
             m["color"] = true;
+            m["vMode"] = IifColorVModeName(t->VMode);
+            m["fMode"] = IifColorFModeName(t->FMode);
         }
 
         // 链接分量：仅当 ComponentStatus 为 Link（isLink）且支持链接时才渲染为链接。
