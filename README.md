@@ -61,6 +61,24 @@ Full feature list, animated demonstrations, and the menu tour live in
 
 INIWeaver builds with CMake + Qt 6.8.x + QML on Windows.
 
+### Prerequisites
+
+| Component | Requirement |
+|:--|:--|
+| OS | Windows 10/11 x64 |
+| Compiler | Visual Studio 2022, MSVC v143 (x64) |
+| CMake | >= 3.21 |
+| Qt | **>= 6.5** MSVC 2022 x64 build — the `QTP0001` policy and the `QmlIntegration` CMake module this project relies on were both introduced in Qt 6.5; older Qt 6.x fails at CMake configure time |
+| windeployqt | same Qt version as the build (used by `deploy.ps1`) |
+
+Qt modules referenced: `Core`, `Gui`, `Qml`, `QmlIntegration`, `Quick`,
+`QuickControls2`, `Widgets`, `QuickDialogs2`.
+
+The Qt prefix path is pinned at the top of `CMakeLists.txt`
+(`set(CMAKE_PREFIX_PATH ...)`); the build is currently verified against
+**Qt 6.8.1 (msvc2022_64)**. To build with a different Qt installation, edit
+that line, then run `cmake -S . -B build` again.
+
 > The legacy Dear ImGui version (`legacy-imgui\INIBrowser.sln`) is archived
 > and no longer compiles. Use the root `INIWeaver.sln`.
 

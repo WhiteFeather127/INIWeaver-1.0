@@ -55,6 +55,23 @@ INI Weaver 是面向《红警 2 / 尤里复仇》modder 的可视化 INI 编辑�
 
 INIWeaver 用 CMake + Qt 6.8.x + QML 在 Windows 上构建。
 
+### 编译环境
+
+| 组件 | 要求 |
+|:--|:--|
+| 操作系统 | Windows 10/11 x64 |
+| 编译器 | Visual Studio 2022，MSVC v143（x64） |
+| CMake | >= 3.21 |
+| Qt | **>= 6.5**（MSVC 2022 x64 版）——本项目用到的 `QTP0001` policy 与 `QmlIntegration` CMake 模块都是 Qt 6.5 才引入的，更老的 Qt 6.x 会在 cmake configure 阶段直接报错 |
+| windeployqt | 与编译用的 Qt 同版本（`deploy.ps1` 使用） |
+
+涉及的 Qt 模块：`Core`、`Gui`、`Qml`、`QmlIntegration`、`Quick`、
+`QuickControls2`、`Widgets`、`QuickDialogs2`。
+
+Qt 前缀路径写在 `CMakeLists.txt` 开头的 `set(CMAKE_PREFIX_PATH ...)` 里，
+当前用 **Qt 6.8.1（msvc2022_64）** 编译验证。换用其它 Qt 安装时改这一行，
+再 `cmake -S . -B build` 重新配置即可。
+
 > 旧版 Dear ImGui（`legacy-imgui\INIBrowser.sln`）已归档，不再编译。
 > 请使用根目录的 `INIWeaver.sln`。
 
