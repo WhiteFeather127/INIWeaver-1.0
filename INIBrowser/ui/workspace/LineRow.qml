@@ -736,11 +736,35 @@ Item {
                     color: "#3a3a3a"
                 }
 
-                // 普通行：左侧 cells（label+控件），右侧 [节点标签 + 节点]
+                // 普通行：左侧 cells（label+控件），右侧节点（对应 imgui RenderUI_Node 流式）
                 RowLayout {
                     visible: !(rowData && rowData.isSep)
                     anchors.fill: parent
                     spacing: 4
+
+                    // 行首处：链接节点的 Short 标签靠左显示（对齐普通分量 label 位置）
+                    Text {
+                        property var cc: rowData && rowData.node ? rowData.node : null
+                        Layout.preferredWidth: implicitWidth
+                        Layout.alignment: Qt.AlignVCenter
+                        visible: cc && (cc.label || "").length > 0
+                        text: cc ? (cc.label || "") : ""
+                        color: cc && cc.disabled ? "#6e6e6e" : "#9cdcfe"
+                        font.pixelSize: root.fontBody
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.NoButton
+                            hoverEnabled: true
+                            onContainsMouseChanged: {
+                                if (containsMouse && parent.cc && parent.cc.tooltip && parent.cc.tooltip.length > 0) {
+                                    var g = parent.mapToGlobal(parent.width / 2, parent.height + 2)
+                                    appToolTip.show(parent.cc.tooltip, g.x, g.y)
+                                } else {
+                                    appToolTip.hide()
+                                }
+                            }
+                        }
+                    }
 
                     // 普通 cells（label + 控件）
                     Repeater {
@@ -1286,33 +1310,15 @@ Item {
                     // 行末处：把节点推到右端的弹性占位（仅当本行有链接节点时占用）
                     Item { Layout.fillWidth: true; visible: rowData && rowData.node != null }
 
-                    // 链接节点：左侧 Short 标签 + 右端节点（对齐 imgui RenderUI_Node）
-                    Text {
-                        property var cc: rowData && rowData.node ? rowData.node : null
-                        Layout.preferredWidth: implicitWidth
-                        Layout.alignment: Qt.AlignVCenter
-                        visible: cc && (cc.label || "").length > 0
-                        text: cc ? (cc.label || "") : ""
-                        color: cc && cc.disabled ? "#6e6e6e" : "#9cdcfe"
-                        font.pixelSize: root.fontBody
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.NoButton
-                            hoverEnabled: true
-                            onContainsMouseChanged: {
-                                if (containsMouse && parent.cc && parent.cc.tooltip && parent.cc.tooltip.length > 0) {
-                                    var g = parent.mapToGlobal(parent.width / 2, parent.height + 2)
-                                    appToolTip.show(parent.cc.tooltip, g.x, g.y)
-                                } else {
-                                    appToolTip.hide()
-                                }
-                            }
-                        }
-                    }
+                    // 链接节点：右端节点（对应 imgui RenderUI_Node；hint 标签已移到行首靠左）
                     LinkNodePoint {
                         property var cc: rowData && rowData.node ? rowData.node : null
                         visible: cc != null
                         flowNode: true
+                        // 使分量节点中心与普通行节点对齐（普通行中心 = 行宽 - 1.5*fontSmall；
+                        // 本节点右缘 = RowLayout 右缘(=行宽-4) - margin，即 center = 行宽-4-margin-0.75*fontSmall
+                        // → 令两者相等得 margin = 0.75*fontSmall - 4，保持非负）
+                        Layout.rightMargin: Math.max(0, root.fontSmall * 0.75 - 4)
                         Layout.preferredWidth: root.fontSmall * 1.5
                         Layout.preferredHeight: root.fontSmall * 1.5
                         Layout.alignment: Qt.AlignVCenter
