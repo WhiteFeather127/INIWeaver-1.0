@@ -1,4 +1,4 @@
-# deploy.ps1 — 用 windeployqt 自动生成 Qt6 运行库并打 Release 包
+﻿# deploy.ps1 — 用 windeployqt 自动生成 Qt6 运行库并打 Release 包
 #
 # 不把 Qt 运行库放入 git 仓库：这些 DLL/QML 插件是产物，由本脚本从本机 Qt
 # 安装目录用 windeployqt 一次性生成，可随时重建。
