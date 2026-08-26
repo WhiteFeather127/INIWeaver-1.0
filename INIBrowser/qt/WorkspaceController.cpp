@@ -2602,21 +2602,11 @@ void WorkspaceController::rebuildLinkEndpoints()
 #endif
         }
 
-        if (!sv.Collapsed && !dstCollapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
-        {
-            auto itModel = m_lineModels.find(dstActualId);
-            if (itModel != m_lineModels.end() && *itModel)
-            {
-                QString keyName = QString::fromUtf8(PoolStr(link.DestKey));
-                QPointF ac = (*itModel)->acceptCenterByKey(keyName, static_cast<int>(link.LineMult));
-                if (!ac.isNull())
-                {
-                    pbX = ac.x();
-                    pbY = ac.y();
-                    pbValid = true;
-                }
-            }
-        }
+        // 从键拖线落到块上 → 目标端点统一连到「标题栏接受点」（headLineRN/m_sectionAcceptPoint）。
+        // 不再优先落到目标 DLK 键行圆点：对应 ImGui RenderUI_Acceptor 的 IBR_LineDrag 分支
+        // （IBR_SectionData.cpp:528-551），节点级落点只写源键值、端点是模块标题栏 RAB。
+        // 因此跳过「行级接受点」分支，非折叠且行可见时也走下方 m_sectionAcceptPoint。
+        // （保留 dstCollapsed 分支在最上方处理折叠收敛；下方隐藏行与兜底分支维持原逻辑。）
         // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端。
         // y 与头节点 RadioButton 水平对齐：优先用 m_sectionAcceptPoint 回写的头节点实际中心 y，
         // 兜底 halfLine。折叠态（sv.Collapsed=true）不进此分支，仍由优先级 2 走标题栏 RadioButton。
@@ -3323,8 +3313,12 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
         auto *ln = srcBsec->GetLineFromSubSecs(srcKeyId);
         if (!ln || !ln->Default) return;
 
-        // 构建 newTarget（对应 TargetValueStr(dstData->Desc.Sec, finalDstKey, dstMult)）
-        std::string newTarget = TargetValueStr(dstData->Desc.Sec, finalDstKey, dstMult);
+        // 构建 newTarget：节点级落点只写目标节名，不拼 $$<DLK>。
+        // 对应 ImGui acceptLineDrag -> pSession->ValueToMerge = Desc.Sec（IBR_SectionData.cpp:548）。
+        // DLK 在反向连接/渲染时按目标寄存器解析，不写入键值（否则值变成 sec$$UseFlagPack）。
+        (void)finalDstKey;
+        (void)dstMult;
+        std::string newTarget = dstData->Desc.Sec;
 
         // 找到包含该 key 的 SubSec 及其 lineIdx（对应 Lines_ByName 中的位置索引）
         IBB_SubSec *foundSub = nullptr;
@@ -3532,16 +3526,9 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
             }
             pbValid = true;
         }
-        if (!sv.Collapsed && !dstCollapsed && dstLineVisible && link.DestKey != EmptyPoolStr && dstData)
-        {
-            auto itModel = m_lineModels.find(static_cast<qulonglong>(dstRsec.ID));
-            if (itModel != m_lineModels.end() && *itModel)
-            {
-                QPointF ac = (*itModel)->acceptCenterByKey(
-                    QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
-                if (!ac.isNull()) { pbX = ac.x(); pbY = ac.y(); pbValid = true; }
-            }
-        }
+        // 从键拖线落到块上 → 目标端点统一连到「标题栏接受点」（headLineRN/m_sectionAcceptPoint）。
+        // 与 rebuildLinkEndpoints 一致：不再落到目标 DLK 键行圆点（对应 ImGui IBR_LineDrag）。
+        // 跳过「行级接受点」分支，非折叠且行可见时也走下方 m_sectionAcceptPoint。
         // 隐藏行专用：目标行隐藏（非折叠态）时连线终点落到标题栏最右端（同 rebuildLinkEndpoints）
         // y 与头节点水平对齐：优先 m_sectionAcceptPoint.y()，兜底 halfLine
         if (!pbValid && !dstLineVisible && !sv.Collapsed && !dstCollapsed)
