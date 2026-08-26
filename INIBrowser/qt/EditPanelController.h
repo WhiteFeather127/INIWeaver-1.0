@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QString>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include "IBR_Project.h"  // ModuleID_t, INVALID_MODULE_ID（"无激活" 哨兵不能用 0，0 是合法模块 ID）
@@ -61,6 +62,11 @@ public:
     // 获取 Key 的初始值提示（对应 RenderUI_NewLine 的 TextDisabled，IBR_Misc.cpp:737-748）
     // 当 Value 为空时，从默认类型列表查询 Key 的初始值，用于显示提示
     Q_INVOKABLE QString getInitialValue(const QString &key) const;
+
+    // 新增行 Key 输入检索候选（对应 IBR_Combo.cpp:144-186 EditStringWithOptions）
+    // 输入时实时从默认类型列表检索匹配键（Name/DescShort 不分大小写包含 + 大写缩写匹配），
+    // 返回 {items:[{name,descShort,descLong,inWrongSection}], tooMany}，最多 100 条
+    Q_INVOKABLE QVariantMap queryKeySuggestions(const QString &input) const;
 
     // 删除行（对应 RenderUI_OnShow 的 "移除行" 按钮，IBR_Misc.cpp:858-864）
     Q_INVOKABLE void removeLine(const QString &key);

@@ -14,6 +14,27 @@ import "../components"
 Item {
     id: editPanel
 
+    // 新增行 Key 检索下拉状态：候选是否超过 100 条（决定 footer"候选过多"提示行是否显示）
+    property bool keySuggestTooMany: false
+
+    // 刷新新增行 Key 检索下拉（由 newKeyField.onTextChanged 调用，对应 EditStringWithOptions）
+    // 空输入/失焦时关闭；否则查询候选填充模型并打开弹层
+    function refreshKeySuggestions() {
+        if (newKeyField.text.length === 0 || !newKeyField.activeFocus) {
+            keySuggestPopup.close()
+            keySuggestModel.clear()
+            return
+        }
+        var r = editPanelController.queryKeySuggestions(newKeyField.text)
+        keySuggestModel.clear()
+        if (r && r.items) {
+            for (var i = 0; i < r.items.length; ++i)
+                keySuggestModel.append(r.items[i])
+        }
+        keySuggestTooMany = !!(r && r.tooMany)
+        keySuggestPopup.open()
+    }
+
     // 主容器
     ColumnLayout {
         anchors.fill: parent
@@ -119,17 +140,11 @@ Item {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                CheckBox {
+                StyledCheckBox {
                     text: (i18n.rev, i18n.tr("GUI_RefreshRegisterOnPaste"))
                     checked: editPanelController.needtoMangle
                     onToggled: editPanelController.toggleUseOwnName()
-                    contentItem: Text {
-                        text: parent.text
-                        color: "#cccccc"
-                        font.pixelSize: 13
-                        verticalAlignment: Text.AlignVCenter
-                        leftPadding: parent.indicator.width + parent.spacing
-                    }
+                    font.pixelSize: 13
                 }
             }
 
@@ -144,6 +159,9 @@ Item {
                     color: "#e0e0e0"
                     font.pixelSize: 13
                     background: Rectangle { color: "#2d2d2d"; border.color: newKeyField.activeFocus ? "#007acc" : "#3c3c3c"; border.width: 1; radius: 2 }
+                    onTextChanged: editPanel.refreshKeySuggestions()
+                    onActiveFocusChanged: if (!activeFocus) keySuggestPopup.close()
+                    Keys.onEscapePressed: keySuggestPopup.close()
                 }
                 Text { text: "="; color: "#cccccc"; font.pixelSize: 13 }
                 TextField {
@@ -164,6 +182,84 @@ Item {
                     contentItem: Text {
                         text: parent.text; color: "#cccccc"; font.pixelSize: 13
                         horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+
+            // 新增行 Key 检索下拉（对应 IBR_Combo.cpp:144-186 EditStringWithOptions）
+            // 输入时实时从默认类型列表检索匹配键，点击填入，悬停显示长描述，错误分区项红色显示
+            ListModel {
+                id: keySuggestModel
+            }
+            Popup {
+                id: keySuggestPopup
+                parent: editPanel
+                x: 0
+                // 定位到两个输入框下方（newKeyField 底边相对 editPanel 的位置），撑满整个侧边栏宽度
+                y: newKeyField.mapToItem(editPanel, 0, newKeyField.height).y + 2
+                width: editPanel.width
+                padding: 0
+                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                background: Rectangle {
+                    color: "#2d2d2d"
+                    border.color: "#3c3c3c"
+                    border.width: 1
+                    radius: 0
+                }
+                contentItem: ListView {
+                    id: keySuggestList
+                    clip: true
+                    model: keySuggestModel
+                    // 最多 9 行高（对齐原版 LastCount>=9 固定 9 行）
+                    implicitHeight: Math.min(contentHeight, 26 * 9)
+                    // 候选超过 100 条的提示行（对应 TextDisabled(locc("GUI_TooManyOptions"))）
+                    footer: Text {
+                        visible: keySuggestTooMany
+                        height: visible ? 24 : 0
+                        text: (i18n.rev, i18n.tr("GUI_TooManyOptions"))
+                        color: "#808080"
+                        font.pixelSize: 12
+                        leftPadding: 8
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    delegate: Rectangle {
+                        required property string name
+                        required property string descShort
+                        required property string descLong
+                        required property bool inWrongSection
+                        width: keySuggestList.width
+                        height: 26
+                        color: hoverArea.containsMouse ? "#3e3e3e" : "transparent"
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: parent.name + " : " + parent.descShort
+                            color: parent.inWrongSection ? "#f48771" : "#d4d4d4"
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            id: hoverArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: {
+                                // 悬停显示长描述（对齐原版 IsItemHovered → IBR_ToolTip(PoolDesc(DescLong))）
+                                if (parent.descLong.length > 0) {
+                                    var g = parent.mapToGlobal(parent.width / 2, parent.height + 4)
+                                    appToolTip.show(parent.descLong, g.x, g.y)
+                                }
+                            }
+                            onExited: appToolTip.hide()
+                            onClicked: {
+                                // 点击填入 Key（对齐原版 Selectable → str = NameStr）
+                                newKeyField.text = parent.name
+                                keySuggestPopup.close()
+                            }
+                        }
                     }
                 }
             }

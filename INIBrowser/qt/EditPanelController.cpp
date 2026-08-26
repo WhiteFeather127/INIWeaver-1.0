@@ -18,6 +18,8 @@
 #include <QDebug>
 #include <unordered_map>
 #include <cstdlib>
+#include <cctype>
+#include <algorithm>
 
 // IBR_EditFrame 命名空间的成员声明（定义在 IBR_Misc.cpp:587-594）
 // EditBuf 大小固定为 100000（对应 IBR_Misc.cpp:592 的 char EditBuf[100000]）
@@ -110,6 +112,44 @@ EditPanelController::EditPanelController(QObject *parent)
     : QObject(parent)
 {
 }
+
+// ========== 新增行 Key 检索辅助（对齐 IBR_Combo.cpp:107-186 EditStringWithOptions） ==========
+
+// 判断 a 是否在 b 中出现（不区分大小写，对应 IBR_Combo.cpp:107-116 contains_ignore_case）
+static bool contains_ignore_case(const std::string& a, const std::string& b)
+{
+    auto it = std::search(
+        b.begin(), b.end(),
+        a.begin(), a.end(),
+        [](unsigned char c1, unsigned char c2) {
+            return std::tolower(c1) == std::tolower(c2);
+        }
+    );
+    return it != b.end();
+}
+
+// 提取 b 的大写字母后判断 a 是否在其中出现（不区分大小写，支持 "ABC" 式缩写检索，
+// 对应 IBR_Combo.cpp:118-129 contains_b_cap_ignore_case）
+static bool contains_b_cap_ignore_case(const std::string& a, const std::string& b)
+{
+    std::string caps;
+    for (unsigned char c : b)
+        if (std::isupper(c)) caps.push_back(static_cast<char>(c));
+    return contains_ignore_case(a, caps);
+}
+
+// 不分大小写，Name 或 DescShort 包含 str 就算匹配（对应 IBR_Combo.cpp:131-140 Matches）
+static bool SuggestionMatches(const std::string& str, const std::string& name, const IBB_IniLine_Default& opt)
+{
+    std::string pd = PoolDesc(opt.DescShort);
+    return contains_ignore_case(str, name) ||
+           contains_ignore_case(str, pd) ||
+           contains_b_cap_ignore_case(str, name) ||
+           contains_b_cap_ignore_case(str, pd);
+}
+
+// 该键是否属于当前模块的错误分区（定义在 IBR_SectionData.cpp:438，同 IBR_Combo.cpp:142 前向声明）
+bool Acceptor_CheckSecType(StrPoolID SourceReg, StrPoolID SecType);
 
 void EditPanelController::setActive(qulonglong sectionId)
 {
@@ -440,6 +480,47 @@ QString EditPanelController::getInitialValue(const QString &key) const
     if (Str.empty()) return {};
 
     return QString::fromUtf8(Str.c_str());
+}
+
+QVariantMap EditPanelController::queryKeySuggestions(const QString &input) const
+{
+    // 对应 IBR_Combo.cpp:144-186 EditStringWithOptions：从默认类型列表检索匹配的 Key
+    // 返回 {items:[{name,descShort,descLong,inWrongSection}], tooMany}，最多 100 条
+    QVariantMap result;
+    QVariantList items;
+    result["tooMany"] = false;
+    if (m_isEmpty) return result;
+
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(m_currentSectionId));
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return result;
+
+    IBB_Section* pbk = it->second.GetBack_Inl();
+    if (!pbk) return result;
+
+    std::string str = input.toUtf8().toStdString();
+    if (str.empty()) return result;
+
+    int count = 0;
+    for (auto& [ID, Line] : IBF_Inst_DefaultTypeList.List.IniLine_MixedDefault)
+    {
+        if (!Line.Known) continue;
+        std::string nameStr = PoolStr(Line.Name);
+        if (!SuggestionMatches(str, nameStr, Line)) continue;
+        if (count++ >= 100)
+        {
+            // 展示 100 条后仍命中 → 提示"候选过多"（对应 TextDisabled(locc("GUI_TooManyOptions"))）
+            result["tooMany"] = true;
+            break;
+        }
+        QVariantMap item;
+        item["name"] = QString::fromUtf8(nameStr.c_str());
+        item["descShort"] = QString::fromUtf8(PoolDesc(Line.DescShort));
+        item["descLong"] = QString::fromUtf8(PoolDesc(Line.DescLong));
+        item["inWrongSection"] = !Acceptor_CheckSecType(pbk->Register, Line.SecType);
+        items << item;
+    }
+    result["items"] = items;
+    return result;
 }
 
 void EditPanelController::removeLine(const QString &key)
