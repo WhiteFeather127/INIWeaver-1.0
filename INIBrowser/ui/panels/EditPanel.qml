@@ -16,13 +16,14 @@ Item {
 
     // 新增行 Key 检索下拉状态：候选是否超过 100 条（决定 footer"候选过多"提示行是否显示）
     property bool keySuggestTooMany: false
+    // 检索列表是否显示（key 获得焦点即有候选时显示，失焦隐藏）
+    property bool keySuggestVisible: false
 
-    // 刷新新增行 Key 检索下拉（由 newKeyField.onTextChanged 调用，对应 EditStringWithOptions）
-    // 空输入/失焦时关闭；否则查询候选填充模型并打开弹层
+    // 刷新新增行 Key 检索下拉（由 newKeyField 的焦点/文本变化调用，对应 EditStringWithOptions）
+    // 失焦时隐藏；否则查询候选填充模型，有候选才显示（空输入显示全部）
     function refreshKeySuggestions() {
-        if (newKeyField.text.length === 0 || !newKeyField.activeFocus) {
-            keySuggestPopup.close()
-            keySuggestModel.clear()
+        if (!newKeyField.activeFocus) {
+            keySuggestVisible = false
             return
         }
         var r = editPanelController.queryKeySuggestions(newKeyField.text)
@@ -32,7 +33,7 @@ Item {
                 keySuggestModel.append(r.items[i])
         }
         keySuggestTooMany = !!(r && r.tooMany)
-        keySuggestPopup.open()
+        keySuggestVisible = keySuggestModel.count > 0
     }
 
     // 主容器
@@ -160,8 +161,8 @@ Item {
                     font.pixelSize: 13
                     background: Rectangle { color: "#2d2d2d"; border.color: newKeyField.activeFocus ? "#007acc" : "#3c3c3c"; border.width: 1; radius: 2 }
                     onTextChanged: editPanel.refreshKeySuggestions()
-                    onActiveFocusChanged: if (!activeFocus) keySuggestPopup.close()
-                    Keys.onEscapePressed: keySuggestPopup.close()
+                    onActiveFocusChanged: if (activeFocus) editPanel.refreshKeySuggestions(); else Qt.callLater(function() { keySuggestVisible = false })
+                    Keys.onEscapePressed: keySuggestVisible = false
                 }
                 Text { text: "="; color: "#cccccc"; font.pixelSize: 13 }
                 TextField {
@@ -187,78 +188,63 @@ Item {
             }
 
             // 新增行 Key 检索下拉（对应 IBR_Combo.cpp:144-186 EditStringWithOptions）
-            // 输入时实时从默认类型列表检索匹配键，点击填入，悬停显示长描述，错误分区项红色显示
+            // key 获得焦点即有候选时内联显示（不悬浮覆盖其他内容），点击填入，悬停显示长描述，错误分区项红色显示
             ListModel {
                 id: keySuggestModel
             }
-            Popup {
-                id: keySuggestPopup
-                parent: editPanel
-                x: 0
-                // 定位到两个输入框下方（newKeyField 底边相对 editPanel 的位置），撑满整个侧边栏宽度
-                y: newKeyField.mapToItem(editPanel, 0, newKeyField.height).y + 2
-                width: editPanel.width
-                padding: 0
-                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-                background: Rectangle {
-                    color: "#2d2d2d"
-                    border.color: "#3c3c3c"
-                    border.width: 1
-                    radius: 0
+            ListView {
+                id: keySuggestList
+                visible: keySuggestVisible
+                Layout.fillWidth: true
+                height: visible ? Math.min(contentHeight, 26 * 9) : 0
+                clip: true
+                model: keySuggestModel
+                // 候选超过 100 条的提示行（对应 TextDisabled(locc("GUI_TooManyOptions"))）
+                footer: Text {
+                    visible: keySuggestTooMany
+                    height: visible ? 24 : 0
+                    text: (i18n.rev, i18n.tr("GUI_TooManyOptions"))
+                    color: "#808080"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
                 }
-                contentItem: ListView {
-                    id: keySuggestList
-                    clip: true
-                    model: keySuggestModel
-                    // 最多 9 行高（对齐原版 LastCount>=9 固定 9 行）
-                    implicitHeight: Math.min(contentHeight, 26 * 9)
-                    // 候选超过 100 条的提示行（对应 TextDisabled(locc("GUI_TooManyOptions"))）
-                    footer: Text {
-                        visible: keySuggestTooMany
-                        height: visible ? 24 : 0
-                        text: (i18n.rev, i18n.tr("GUI_TooManyOptions"))
-                        color: "#808080"
-                        font.pixelSize: 12
-                        leftPadding: 8
-                        verticalAlignment: Text.AlignVCenter
-                    }
 
-                    delegate: Rectangle {
-                        required property string name
-                        required property string descShort
-                        required property string descLong
-                        required property bool inWrongSection
-                        width: keySuggestList.width
-                        height: 26
-                        color: hoverArea.containsMouse ? "#3e3e3e" : "transparent"
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            anchors.right: parent.right
-                            anchors.rightMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: parent.name + " : " + parent.descShort
-                            color: parent.inWrongSection ? "#f48771" : "#d4d4d4"
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
+                delegate: Rectangle {
+                    required property string name
+                    required property string descShort
+                    required property string descLong
+                    required property bool inWrongSection
+                    width: keySuggestList.width
+                    height: 26
+                    color: hoverArea.containsMouse ? "#3e3e3e" : "transparent"
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: parent.name + " : " + parent.descShort
+                        color: parent.inWrongSection ? "#f48771" : "#d4d4d4"
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+                    MouseArea {
+                        id: hoverArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: {
+                            // 悬停显示长描述（对齐原版 IsItemHovered → IBR_ToolTip(PoolDesc(DescLong))）
+                            if (parent.descLong.length > 0) {
+                                var g = parent.mapToGlobal(parent.width / 2, parent.height + 4)
+                                appToolTip.show(parent.descLong, g.x, g.y)
+                            }
                         }
-                        MouseArea {
-                            id: hoverArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onEntered: {
-                                // 悬停显示长描述（对齐原版 IsItemHovered → IBR_ToolTip(PoolDesc(DescLong))）
-                                if (parent.descLong.length > 0) {
-                                    var g = parent.mapToGlobal(parent.width / 2, parent.height + 4)
-                                    appToolTip.show(parent.descLong, g.x, g.y)
-                                }
-                            }
-                            onExited: appToolTip.hide()
-                            onClicked: {
-                                // 点击填入 Key（对齐原版 Selectable → str = NameStr）
-                                newKeyField.text = parent.name
-                                keySuggestPopup.close()
-                            }
+                        onExited: appToolTip.hide()
+                        onPressed: {
+                            // 用 onPressed 而非 onClicked：按下即填入，避免列表因失焦在抬起前被销毁导致点击失效
+                            newKeyField.text = parent.name
+                            keySuggestVisible = false
                         }
                     }
                 }

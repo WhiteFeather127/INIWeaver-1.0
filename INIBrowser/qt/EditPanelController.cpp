@@ -498,7 +498,7 @@ QVariantMap EditPanelController::queryKeySuggestions(const QString &input) const
     if (!pbk) return result;
 
     std::string str = input.toUtf8().toStdString();
-    if (str.empty()) return result;
+    // 空输入时 contains_ignore_case(str,...) 恒匹配 → 显示全部候选（对应原版 EditStringWithOptions 空串行为）
 
     int count = 0;
     for (auto& [ID, Line] : IBF_Inst_DefaultTypeList.List.IniLine_MixedDefault)
