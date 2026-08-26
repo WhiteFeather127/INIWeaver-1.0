@@ -7,17 +7,16 @@
 #   # 最小包（仅 EXE + Qt 运行库）
 #   .\deploy.ps1
 #
-#   # 连同应用数据一起发布并打 zip
-#   .\deploy.ps1 -AppData "C:\Program Files (x86)\INIWeaver 1.0.9 Test2" `
-#                -OutZip ".\INIWeaver-1.0.9-Release.zip"
+#   # 连同应用数据一起发布并打 zip（-AppData 指向含 Global/、Resources/ 的安装目录）
+#   .\deploy.ps1 -AppData ".\install" -OutZip ".\INIWeaver-Release.zip"
 #
 # 参数：
-#   -QtBin   windeployqt 所在目录（默认 C:/Qt6/6.8.1/msvc2022_64/bin）
+#   -QtBin   windeployqt 所在目录（缺省自动探测：QTDIR 环境变量 → PATH）
 #   -Target  发布目录（默认 <根>/publish）
 #   -AppData 已有安装目录，取其 Global/、Resources/ 作为应用数据（可选）
 #   -OutZip  打成的 zip 路径（可选）
 param(
-    [string]$QtBin   = "C:\Qt6\6.8.1\msvc2022_64\bin",
+    [string]$QtBin   = "",
     [string]$Target  = "",
     [string]$AppData = "",
     [string]$OutZip  = ""
@@ -41,6 +40,19 @@ New-Item -ItemType Directory -Path $Target | Out-Null
 Copy-Item $exeSrc -Destination $Target
 
 # ---- 3) windeployqt 生成 Qt 运行库（DLL + 平台/QML 插件）----
+# 未显式指定 -QtBin 时自动探测：QTDIR 环境变量（指向含 bin\windeployqt.exe 的目录）→ PATH
+if ($QtBin -eq "") {
+    if ($env:QTDIR -and (Test-Path (Join-Path $env:QTDIR "bin\windeployqt.exe"))) {
+        $QtBin = Join-Path $env:QTDIR "bin"
+        Write-Host "==> 使用 QTDIR 环境变量: $QtBin"
+    } else {
+        $wdqCmd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+        if ($wdqCmd -and $wdqCmd.Source) {
+            $QtBin = Split-Path $wdqCmd.Source
+            Write-Host "==> 使用 PATH 中的 windeployqt: $QtBin"
+        }
+    }
+}
 $wdq = Join-Path $QtBin "windeployqt.exe"
 if (-not (Test-Path $wdq)) {
     Write-Error "找不到 windeployqt: $wdq（请用 -QtBin 指定 windeployqt 所在目录）"
