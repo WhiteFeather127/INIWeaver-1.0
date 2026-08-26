@@ -59,9 +59,9 @@ Item {
     scale: isSubModule ? 1.0 : _r
     transformOrigin: Item.TopLeft
     // ===== 缩放方案结束 =====
-    readonly property int fontTitle: 12
-    readonly property int fontBody: 11
-    readonly property int fontSmall: 10
+    readonly property int fontTitle: Math.round(12 * settingController.fontScale)
+    readonly property int fontBody: Math.round(11 * settingController.fontScale)
+    readonly property int fontSmall: Math.round(10 * settingController.fontScale)
     readonly property int fontBtn: 11
 
     // 尺寸（由内容自适应驱动；缩放方案下为逻辑尺寸，视觉尺寸 = 逻辑 × scale(_r)）

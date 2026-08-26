@@ -38,8 +38,6 @@ class ProjectController : public QObject
     Q_PROPERTY(QString versionString READ versionString CONSTANT)
     // AppName 本地化（对应 locc("AppName")，MainStage.h:167 GUI_TopRightHint 第一个参数）
     Q_PROPERTY(QString appName READ appName NOTIFY languageChanged)
-    // 阶段 8.3：ITD 输入表单是否打开（对应 IBR_TopMost::MenuMatchesSource(MenuItemID_DEBUG, 114514)）
-    Q_PROPERTY(bool itdFormOpen READ itdFormOpen NOTIFY itdFormOpenChanged)
 
 public:
     explicit ProjectController(QObject *parent = nullptr);
@@ -68,7 +66,6 @@ public:
     QString lastQueryResult() const;
     QString versionString() const;
     QString appName() const;
-    bool itdFormOpen() const;
 
 public slots:
     // 项目操作（委托给 IBR_ProjectManager）
@@ -142,9 +139,6 @@ public slots:
     Q_INVOKABLE void triggerRefreshLink();
     // 清空一次性调试信息（对应 IBR_Debug.cpp:194 ClearOnceInfo）
     Q_INVOKABLE void clearOnceInfo();
-    // 打开/关闭 TopMost 输入表单（对应 IBR_Debug.cpp:102-115）
-    Q_INVOKABLE void itdOpenInputForm();
-    Q_INVOKABLE void itdCloseInputForm();
     // 阶段 8.3：标记鼠标左键双击事件（对应 ImGui IsMouseDoubleClicked），由 WorkspaceView onDoubleClicked 调用
     Q_INVOKABLE void markDblClickLeft();
 
@@ -170,8 +164,6 @@ signals:
     void hintMessage(const QString &text);
     // 调试信息刷新信号
     void debugInfoChanged();
-    // 阶段 8.3：ITD 表单开闭状态变化信号
-    void itdFormOpenChanged();
     // 语言切换信号（对应 IBR_L10n::SetLanguage 后通知 appName 等本地化属性刷新）
     void languageChanged();
 

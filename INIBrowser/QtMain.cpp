@@ -10,6 +10,7 @@
 #include <QThread>
 #include <QElapsedTimer>
 #include <atomic>
+#include <string>
 #include <QLoggingCategory>
 #include <QQuickStyle>
 #include <QFont>
@@ -113,6 +114,7 @@ static void debugLog(const char* msg)
 #include "qt/SectionListModel.h"
 #include "qt/MenuController.h"
 #include "qt/SettingController.h"
+#include "cjson/cJSON.h"
 
 #include "qt/LocalizationController.h"
 #include "qt/DialogController.h"
@@ -123,6 +125,44 @@ static void debugLog(const char* msg)
 // LoadDatabaseComplete 在 Initialize.cpp 中定义，未在头文件中声明
 // IBR_ProjManager.cpp 的 Load() 内部会 while(!LoadDatabaseComplete) 阻塞等待
 extern std::atomic_bool LoadDatabaseComplete;
+
+// 从 Resources\config.json 读取 HotKeys，返回 动作名 -> QKeySequence 字符串。
+// 对应 ImGui 的 Initialize::InitializeHotKeys（Initialize.cpp:153-158，Qt 版不执行 Stage_IV 故自行加载）。
+// config 缺失/无效/某项为空时返回空 map（QML 采用默认键位兜底）。
+static QVariantMap qtLoadHotKeyMap()
+{
+    QVariantMap map;
+    QFile file(QStringLiteral(".\\Resources\\config.json"));
+    if (!file.open(QIODevice::ReadOnly)) return map;
+    const QByteArray raw = file.readAll();
+    file.close();
+    const std::string buf(raw.constData(), size_t(raw.size()));
+    cJSON *root = cJSON_Parse(buf.c_str());
+    if (!root) return map;
+    cJSON *hot = cJSON_GetObjectItem(root, "HotKeys");
+    if (hot && hot->type == cJSON_Object) {
+        for (cJSON *it = hot->child; it; it = it->next) {
+            const char *name = it->string;
+            if (!name || it->type != cJSON_Array) continue;
+            QStringList mods, keys;
+            for (cJSON *k = it->child; k; k = k->next) {
+                if (k->type != cJSON_String || !k->valuestring) continue;
+                QString tok = QString::fromUtf8(k->valuestring);
+                if (tok == QLatin1String("Ctrl")) mods << QLatin1String("Ctrl");
+                else if (tok == QLatin1String("Shift")) mods << QLatin1String("Shift");
+                else if (tok == QLatin1String("Alt")) mods << QLatin1String("Alt");
+                else if (tok == QLatin1String("Super")) mods << QLatin1String("Meta");
+                else keys << tok;
+            }
+            if (keys.isEmpty()) continue;
+            QString seq = mods.join(QLatin1Char('+'));
+            map.insert(QString::fromUtf8(name),
+                       seq.isEmpty() ? keys.last() : (seq + QLatin1Char('+') + keys.last()));
+        }
+    }
+    cJSON_Delete(root);
+    return map;
+}
 
 int main(int argc, char* argv[])
 {
@@ -425,6 +465,8 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty("dialogController", &dialogController);
     engine.rootContext()->setContextProperty("workspaceController", &workspaceController);
     engine.rootContext()->setContextProperty("editPanelController", &editPanelController);
+    // 可配置快捷键（从 Resources\config.json 的 HotKeys 读取；缺失时 QML 用默认键位）
+    engine.rootContext()->setContextProperty("hotKeyMap", qtLoadHotKeyMap());
     debugLog("loading QML Main.qml");
 
     // 捕获 QML 警告/错误到日志文件
@@ -517,7 +559,17 @@ int main(int argc, char* argv[])
         //    不经过定时器数据节流的 UI 变化。
     };
     applyFrameRateLimit();
-    QObject::connect(&settingController, &SettingController::settingsChanged, [&]() { applyFrameRateLimit(); });
+    // 全局字号缩放（对应 ImGui InitializeStyle 的 FontSize）：设置变化时重设 QApplication 字体
+    auto applyUiFont = [&]() {
+        QFont uiFont(QStringLiteral("Microsoft YaHei"));
+        uiFont.setPointSizeF(double(9) * settingController.fontScale());
+        QApplication::setFont(uiFont);
+    };
+    applyUiFont();
+    QObject::connect(&settingController, &SettingController::settingsChanged, [&]() {
+        applyFrameRateLimit();
+        applyUiFont();
+    });
     if (rootWindow) {
         QObject::connect(rootWindow, &QQuickWindow::beforeRendering,
                          [&frameClock, &g_frameIntervalUs, &g_nextFrameUs]() {

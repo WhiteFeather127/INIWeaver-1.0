@@ -18,6 +18,13 @@ int SettingController::frameRateLimit() const { return IBF_Inst_Setting.FrameRat
 int SettingController::autoWrapThreshold() const { return IBF_Inst_Setting.List.Pack.AutoWrapThreshold; }
 // v3 批次 1.1：透明度基准（对应 IBF_Inst_Setting.TransparencyBase() = WindowTransparencyLevel * 0.1f）
 float SettingController::transparencyBase() const { return IBF_Inst_Setting.TransparencyBase(); }
+// 全局 UI / 节点字号缩放基准（对应 ImGui FontSize，默认 24，scale=1.0 无回归）
+qreal SettingController::fontScale() const
+{
+    const int fz = IBF_Inst_Setting.List.Pack.FontSize;
+    constexpr int base = 24; // IBB_Setting.h ____FontSize_Def
+    return (fz > 0) ? (static_cast<qreal>(fz) / base) : 1.0;
+}
 QString SettingController::outputDir() const
 {
     return QString::fromUtf8(IBF_Inst_Setting.OutputDir());

@@ -17,8 +17,8 @@ Item {
     property var sectionData: ({})
     property var lineModel: null
     property int rowIndex: -1
-    property int fontBody: 11
-    property int fontSmall: 10
+    property int fontBody: Math.round(11 * settingController.fontScale)
+    property int fontSmall: Math.round(10 * settingController.fontScale)
 
     // model roles 绑定（由 SectionNode delegate 显式传入）
     property string onShowText: ""

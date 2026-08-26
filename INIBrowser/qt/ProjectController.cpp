@@ -37,11 +37,6 @@ namespace IBR_WorkSpace
     extern ImVec2 MassAfter_RightDownPos;
 }
 
-// ITD 输入表单函数（对应 IBR_Debug.cpp:13-15 的前向声明，实现在 IBR_InputTypeDebug.cpp）
-void ITD_Init();
-void ITD_Column1();
-void ITD_Column2();
-
 // 静态成员定义（对应 IBR_Debug.cpp:85 的 static bool Ext）
 bool ProjectController::s_debugOutputExtra = false;
 
@@ -929,12 +924,6 @@ QString ProjectController::appName() const
     return QString::fromUtf8(locc("AppName"));
 }
 
-bool ProjectController::itdFormOpen() const
-{
-    // 阶段 8.3：对应 IBR_Debug.cpp:100 IBR_TopMost::MenuMatchesSource(MenuItemID_DEBUG, 114514)
-    return IBR_TopMost::MenuMatchesSource(MenuItemID_DEBUG, 114514);
-}
-
 // ===== 阶段 8.1 新增：Debug setter =====
 
 void ProjectController::setDebugOutputExtra(bool v)
@@ -1056,30 +1045,6 @@ void ProjectController::clearOnceInfo()
     // 对应 IBR_Debug.cpp:194 ClearOnceInfo
     IBR_Inst_Debug.DebugVecOnce.clear();
     emit debugInfoChanged();
-}
-
-void ProjectController::itdOpenInputForm()
-{
-    // 对应 IBR_Debug.cpp:105-115 ITDOpenInputForm
-    // 注意：OpenTopMostFrom 的回调依赖 ImGui 渲染循环，Qt 版本中回调不会执行
-    // 但保持 API 调用一致性，避免后端状态不一致
-    ITD_Init();
-    IBR_TopMost::OpenTopMostFrom(MenuItemID_DEBUG, 114514, []() {
-        // ImGui 侧会渲染 ITD_Column1/ITD_Column2 两列布局
-        // Qt 版本中此回调不会被调用
-        ITD_Column1();
-        ITD_Column2();
-    });
-    emit itdFormOpenChanged();
-    emit hintMessage(QString::fromUtf8(u8"已打开输入表单调试窗口"));
-}
-
-void ProjectController::itdCloseInputForm()
-{
-    // 对应 IBR_Debug.cpp:102-104 ITDCloseInputForm
-    IBR_TopMost::CloseTopMostMenu();
-    emit itdFormOpenChanged();
-    emit hintMessage(QString::fromUtf8(u8"已关闭输入表单调试窗口"));
 }
 
 void ProjectController::markDblClickLeft()

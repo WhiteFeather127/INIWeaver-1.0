@@ -228,31 +228,6 @@ ScrollView {
                     }
                 }
 
-                // 第二行：ITDOpenInputForm + ITDCloseInputForm（对应 IBR_Debug.cpp:100-115）
-                // 阶段 8.3：两按钮互斥显示，对应 ImGui if(MenuMatchesSource) ShowClose else ShowOpen
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 4
-
-                    StyledButton {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 26
-                        visible: !projectController.itdFormOpen
-                        text: (i18n.rev, i18n.tr("GUI_ITDOpenInputForm") + " (ITDOpen)")
-                        font.pixelSize: 11
-                        onClicked: projectController.itdOpenInputForm()
-                    }
-
-                    StyledButton {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 26
-                        visible: projectController.itdFormOpen
-                        text: (i18n.rev, i18n.tr("GUI_ITDCloseInputForm") + " (ITDClose)")
-                        font.pixelSize: 11
-                        onClicked: projectController.itdCloseInputForm()
-                    }
-                }
-
                 // 第三行：TriggerRefreshLink + ClearOnceInfo（对应 IBR_Debug.cpp:150-153, 194）
                 RowLayout {
                     Layout.fillWidth: true

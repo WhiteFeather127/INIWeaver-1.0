@@ -24,6 +24,8 @@ class SettingController : public QObject
     // v3 批次 1.1：全局透明度基准（对应 IBF_Inst_Setting.TransparencyBase()）
     // 默认 WindowTransparencyLevel=8，TransparencyBase=0.8
     Q_PROPERTY(float transparencyBase READ transparencyBase NOTIFY transparencyBaseChanged)
+    // 全局 UI / 节点字号缩放基准（FontSize / 默认24，默认=1.0 无回归）
+    Q_PROPERTY(qreal fontScale READ fontScale NOTIFY settingsChanged)
 
 public:
     explicit SettingController(QObject *parent = nullptr);
@@ -36,6 +38,8 @@ public:
     QString outputDir() const;
     // v3 批次 1.1：透明度基准（对应 IBF_Inst_Setting.TransparencyBase() = WindowTransparencyLevel * 0.1f）
     float transparencyBase() const;
+    // 全局 UI / 节点字号缩放基准（对应 ImGui FontSize，默认 24）
+    qreal fontScale() const;
 
     // 阶段 13.1：语言相关接口（对应 IBR_L10n::RenderUI / SetLanguage）
     QString currentLanguage() const;
