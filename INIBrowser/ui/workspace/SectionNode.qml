@@ -281,15 +281,14 @@ Item {
                 id: headLineRN
                 // Import 块 RadioButton 居中（对应 ImGui ImportCount>0 时 X=半宽-0.5*FontHeight）
                 // 普通块 RadioButton 在左侧（对应 ImGui X=0.7*FontHeight）
-                anchors.horizontalCenter: root.isImport ? parent.horizontalCenter : undefined
-                anchors.left: root.isImport ? undefined : parent.left
-                anchors.leftMargin: root.isImport ? 0 : 8
-                anchors.verticalCenter: parent.verticalCenter
-                // 与键行 LinkNode 同尺寸同样式（统一节点视觉）：fontSmall*1.5 逻辑尺寸，circle 圆点
-                // 两层绘制：底层透明灰色圆（hover 提亮），上层不透明颜色层
+                // 注意：必须用显式 x/y 定位（不要 anchors.left / anchors.horizontalCenter）。
+                // 连接使其 isImport 翻转(左→中)时，left 与 horizontalCenter 同时生效会把
+                // 圆点横向拉伸成整块宽(392px, r=196)的巨型圆（-ENDPOINT-DIAG 实测）。固定尺寸 + 手动定位。
                 width: root.fontSmall * 1.5
                 height: width
                 radius: width / 2  // Circle 样式（对应 GlobalNodeStyle=Circle）
+                x: root.isImport ? Math.round((parent.width - width) / 2) : 8
+                y: Math.round((parent.height - height) / 2)
                 // 低一位图层：透明灰色圆，鼠标放上后提高亮度
                 // 内层颜色圆用 anchors.centerIn 与之同心（颜色圆圆心 = 灰圆圆心）
                 color: headRNMouseArea.containsMouse ? "#c0c8c8c8" : "#77a0a0a0"

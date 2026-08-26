@@ -4,6 +4,13 @@ project(INIWeaver VERSION 1.0.9 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 诊断日志开关（INIWEAVER_DIAG）
+# 建议用独立构建树启用，避免整树重编并保留正常二进制：
+#   正常(默认 OFF)：cmake -S . -B build
+#   诊断(ON)：       cmake -S . -B build-diag -DINIWEAVER_ENABLE_DIAG=ON \
+#                      -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="<根>\bin-diag"
+option(INIWEAVER_ENABLE_DIAG "Enable INIWEAVER_DIAG diagnostic logging" OFF)
+
 # MSVC 动态运行时（Qt6 标准发行版使用 /MD，需匹配；原 ImGui 版用 /MT）
 # 必须区分配置：Debug 用 /MDd（MSVCP140D.dll），Release 用 /MD（MSVCP140.dll）
 # 否则 Debug EXE 链接 Release CRT，与 Qt 的 Debug DLL（MSVCP140D.dll）跨边界
@@ -60,10 +67,14 @@ set(IB_RESOURCES
 # 可执行目标
 # --------------------------------------------------------------------------
 # VS 多配置生成器会在 RUNTIME_OUTPUT_DIRECTORY 后自动追加 <CONFIG> 子目录，
-# 故把源根设为运行时输出目录，最终 EXE 自然落点：
+# 故默认把源根设为运行时输出目录，最终 EXE 自然落点：
 #   Release 配置 -> <root>\Release\INIWeaver.exe（与原 ImGui 旧版本部署结构对齐）
 #   Debug 配置   -> <root>\Debug\INIWeaver.exe
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+# 诊断构建树可用 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=<其它目录> 覆盖，
+# 避免与正常构建的 Release\INIWeaver.exe 相互覆盖（见顶部 INIWEAVER_ENABLE_DIAG 说明）。
+if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
 qt_add_executable(INIWeaver WIN32
     INIBrowser/QtMain.cpp
@@ -103,11 +114,13 @@ target_compile_definitions(INIWeaver PRIVATE
     UNICODE
     _UNICODE
     NOMINMAX
-    # 诊断模式：开启后编译 [ONSHOW-DIAG]/[LINK-DIAG] 日志，QML diagLogEnabled() 返回 true
-    # 定位完 bug 后注释掉此行重新配置 cmake，所有诊断日志编译不进去
-    # 2026-08-23 release 打包：关闭诊断宏，Release 零诊断日志
-    # INIWEAVER_DIAG
+    # 诊断模式：见顶部 INIWEAVER_ENABLE_DIAG 选项（开启后编译 [ONSHOW-DIAG]/[LINK-DIAG]，
+    # QML diagLogEnabled() 返回 true）。定位完 bug 后关掉即可，Release 默认零诊断日志。
 )
+# 诊断宏按 option 条件并入（独立构建树可配置不同值，避免整树重编/互相覆盖）
+if(INIWEAVER_ENABLE_DIAG)
+    target_compile_definitions(INIWeaver PRIVATE INIWEAVER_DIAG)
+endif()
 
 # 匹配原 vcxproj AdditionalOptions：禁用 C++20 distinct char8_t 类型
 # （代码中存在 u8"..." 字面量与 std::string 直接拼接的写法）
