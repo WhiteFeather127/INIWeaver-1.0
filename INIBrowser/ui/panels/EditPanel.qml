@@ -945,10 +945,10 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时先复位 currentIndex 再赋回，触发 highlightFollowsCurrentItem 自行滚动对齐（无轮询）
+                                                                // 打开时先清偏移再读 delegate 实排 y 定准（自终止重试）
                                                                 onOpened: {
-                                                                    comboList.currentIndex = -1
-                                                                    comboList.currentIndex = comboCtrl.currentIndex
+                                                                    comboList.contentY = 0
+                                                                    comboList.ensureTop()
                                                                     console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                                                 + " contentH=" + comboList.contentHeight)
                                                                     Qt.callLater(() => console.log("[COMBO-DIAG] after posY=" + comboList.contentY))
@@ -968,18 +968,13 @@ Item {
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
                                                                     // 关键修复：仅弹层打开时才允许滚轮滚动，否则关闭后滚轮事件泄漏进隐藏列表导致再次打开位置偏
                                                                     interactive: comboCtrl.popup.opened
-                                                                    // 方案1：透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）
-                                                                    highlightFollowsCurrentItem: true
-                                                                    highlight: Component {
-                                                                        // 透明、无鼠标 handler，纯驱动跟随，不参与命中
-                                                                        Item {}
+                                                                    // 事件驱动的自终止重试：读选中项 delegate 实排 y 设 contentY（顶对齐、随缩放自洽）
+                                                                    function ensureTop() {
+                                                                        var it = comboList.itemAtIndex(comboCtrl.currentIndex)
+                                                                        if (it) comboList.contentY = it.y
+                                                                        else Qt.callLater(comboList.ensureTop)
                                                                     }
-                                                                    onContentHeightChanged: {
-                                                                        // 缩放后几何变化强制 highlight 重新跟随（事件驱动）
-                                                                        if (comboList.currentIndex !== comboCtrl.currentIndex) {
-                                                                            comboList.currentIndex = comboCtrl.currentIndex
-                                                                        }
-                                                                    }
+                                                                    onContentHeightChanged: comboList.ensureTop()
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {

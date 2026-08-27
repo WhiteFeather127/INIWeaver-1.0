@@ -1145,10 +1145,10 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时：先复位 currentIndex 再赋回选中值，触发 highlightFollowsCurrentItem 自行滚动对齐（无轮询）
+                                    // 打开时先清偏移再读 delegate 实排 y 定准（自终止重试）
                                     onOpened: {
-                                        comboList.currentIndex = -1
-                                        comboList.currentIndex = comboCtrl.currentIndex
+                                        comboList.contentY = 0
+                                        comboList.ensureTop()
                                         console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
                                                     + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                     + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
@@ -1180,28 +1180,14 @@ Item {
                                         // 关键修复：只有弹层打开时才允许滚轮滚动。否则关闭后缩放用的滚轮
                                         // 事件仍会泄漏进这个隐藏 ListView 把它 contentY 滚走，导致再次打开位置偏。
                                         interactive: comboCtrl.popup.opened
-                                        // 方案1：让 Qt 通过透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）。
-                                        // 每次打开先把 currentIndex 置 -1 再赋回 comboCtrl 值，保证触发 highlight 重新跟随（即使值相同）。
-                                        highlightFollowsCurrentItem: true
-                                        highlight: Component {
-                                            id: comboHighlight
-                                            // 透明、无鼠标 handler，纯驱动跟随，不参与命中，不影响点选
-                                            Item {}
-                                        }
-                                        onContentHeightChanged: {
-                                            // 缩放后几何变化，强制 highlight 重新跟随（仅事件驱动，非轮询）
-                                            if (comboList.currentIndex !== comboCtrl.currentIndex) {
-                                                comboList.currentIndex = comboCtrl.currentIndex
-                                            }
-                                        }
-                                        /*
-                                        // 方案2 备选：事件驱动的自终止重试（如需要可启用）
+                                        // 事件驱动的自终止重试：读选中项 delegate 实排 y 设为 contentY（顶对齐，随缩放自洽）。
+                                        // 项尚未实例化时顺延重试，一经排好立即定准并停止——不是常驻轮询。
                                         function ensureTop() {
                                             var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                             if (it) comboList.contentY = it.y
                                             else Qt.callLater(comboList.ensureTop)
                                         }
-                                        */
+                                        onContentHeightChanged: comboList.ensureTop()
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {
