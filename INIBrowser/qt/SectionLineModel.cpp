@@ -17,6 +17,7 @@
 #include "IBB_PropStringPool.h"    // PoolCStr 宏
 #include "FromEngine/global_tool_func.h"  // UTF8toUnicode/UnicodetoUTF8
 #include "IBG_InputType_Derived.h"  // IIC_* 输入组件类型（IIF 多分量导出/渲染）
+#include "IBG_InputType.h"         // IBG_InputType::AcceptorSetting（accept 目标判定）
 #include "IifComponentHelper.h"    // 画布/侧边栏共用 IIF 分量导出辅助（统一类型判定）
 #include "IBB_Components.h"        // IBB_Section_Desc
 #include <cstdlib>
@@ -72,6 +73,8 @@ QHash<int, QByteArray> SectionLineModel::roleNames() const
         {InputOnShowRole, "inputOnShow"},
         {KeyTypeRole,    "keyType"},
         {BoolCheckedRole, "boolChecked"},
+        {IsAcceptorRole,  "isAcceptor"},
+        {AcceptorColorRole,"acceptorColor"},
     };
     return names;
 }
@@ -109,6 +112,8 @@ QVariant SectionLineModel::data(const QModelIndex &index, int role) const
     case InputOnShowRole: return m_inputOnShow.value(e.keyId, false);
     case KeyTypeRole:     return e.keyType;
     case BoolCheckedRole: return e.boolChecked;
+    case IsAcceptorRole:  return e.isAcceptor;
+    case AcceptorColorRole: return e.acceptorColor;
     }
     return {};
 }
@@ -204,7 +209,72 @@ void SectionLineModel::rebuildEntries()
         // 缺失此调用会导致 SubSecOrder 为空，行数据遍历不执行，节点显示"无行数据"
         bsec->CheckSubsecOrder();
 
+        // MultipleCollector（顺序集线器等）：acceptor 基键（MultColl，注册 MultipleCollector.0，FullArea）
+        // + 它的数字后缀槽（MultColl.N，取值源 FromKey）本是同一收集单元。ImGui 只画一行——
+        // 显示槽键（MultColl.1）并把集线器方形挂在该行上，基键不单独成行。这里：
+        //   1. 基键有槽时不单发基键行；2. 槽行继承基键的 acceptor 方形/颜色。
+        std::set<QString> acceptorBases;
+        std::map<QString, QColor> baseColorByName;
+        for (auto subIdx0 : bsec->SubSecOrder) {
+            auto &sub0 = bsec->SubSecs[subIdx0];
+            if (!sub0.Default) continue;
+            for (auto keyId0 : bsec->LineOrder) {
+                if (!sub0.CanOwnKey(keyId0)) continue;
+                auto *l0 = bsec->GetLineFromSubSecs(keyId0);
+                if (!l0 || !l0->Default) continue;
+                if (auto &acc0 = l0->Default->GetInputType().AcceptorSetting; acc0) {
+                    QString nm0 = QString::fromUtf8(PoolStr(keyId0));
+                    acceptorBases.insert(nm0);
+                    QColor c0(255, 255, 180);
+                    if (acc0->NodeColor) { const auto &v = acc0->NodeColor->Value; c0 = QColor::fromRgbF(v.x, v.y, v.z, v.w); }
+                    baseColorByName[nm0] = c0;
+                }
+            }
+        }
+        std::set<QString> baseWithSlotNames;      // 基键名（有数字后缀槽 → 不发基键行）
+        QHash<QString, QColor> slotColorByKeyName; // 槽键名 -> 基键 acceptor 颜色
+        if (!acceptorBases.empty()) {
+            for (auto subIdx0 : bsec->SubSecOrder) {
+                auto &sub0 = bsec->SubSecs[subIdx0];
+                if (!sub0.Default) continue;
+                for (auto keyId0 : bsec->LineOrder) {
+                    if (!sub0.CanOwnKey(keyId0)) continue;
+                    auto *l0 = bsec->GetLineFromSubSecs(keyId0);
+                    if (!l0 || !l0->Default) continue;
+                    QString nm = QString::fromUtf8(PoolStr(keyId0));
+                    int dot = nm.indexOf(QLatin1Char('.'));
+                    if (dot <= 0 || dot == nm.length() - 1) continue;
+                    QString base = nm.left(dot);
+                    if (!acceptorBases.count(base)) continue;
+                    bool numeric = true;
+                    for (int c = dot + 1; c < nm.length(); ++c)
+                        if (!nm.at(c).isDigit()) { numeric = false; break; }
+                    if (numeric) {
+                        baseWithSlotNames.insert(base);
+                        slotColorByKeyName.insert(nm, baseColorByName[base]);
+                    }
+                }
+            }
+        }
+
         // 对应 ImGui RenderUI_Lines（IBR_SectionData.cpp:955-974）
+#ifdef INIWEAVER_DIAG
+        for (auto subIdxD : bsec->SubSecOrder) {
+            auto &sd0 = bsec->SubSecs[subIdxD];
+            if (!sd0.Default) continue;
+            for (auto kD : bsec->LineOrder) {
+                if (!sd0.CanOwnKey(kD)) continue;
+                auto *ld = bsec->GetLineFromSubSecs(kD);
+                if (!ld || !ld->Default) continue;
+                QString nmD = QString::fromUtf8(PoolStr(kD));
+                bool accD = bool(ld->Default->GetInputType().AcceptorSetting);
+                qDebug("[MERGE-DIAG] sec=%llu key=%s acc=%d baseHasSlot=%d isSlot=%d",
+                       (unsigned long long)m_sectionId, qUtf8Printable(nmD), accD ? 1 : 0,
+                       baseWithSlotNames.count(nmD) ? 1 : 0,
+                       slotColorByKeyName.contains(nmD) ? 1 : 0);
+            }
+        }
+#endif
         for (auto subIdx : bsec->SubSecOrder) {
             auto &sub = bsec->SubSecs[subIdx];
             if (!sub.Default) continue;
@@ -220,6 +290,11 @@ void SectionLineModel::rebuildEntries()
 
                 auto *line = bsec->GetLineFromSubSecs(keyId);
                 if (!line || !line->Default) continue;
+                // MultipleCollector：基键有槽时不单发基键行（槽行会继承方形），保一行。
+                {
+                    QString bn = QString::fromUtf8(PoolStr(keyId));
+                    if (baseWithSlotNames.count(bn)) continue;
+                }
 
                 // 共享字段（所有分量相同，提取到循环外避免重复计算）
                 const auto &onShowDesc = bsec->GetOnShow(keyId);
@@ -247,6 +322,21 @@ void SectionLineModel::rebuildEntries()
                 QString linkTypeStr = QString::fromUtf8(PoolStr(ln.LinkType));
                 int linkLimitVal = ln.LinkLimit;
                 bool hasLinkNodeVal = IBB_DefaultRegType::HasRegType(ln.LinkType);
+
+                // 键是否为 accept 目标：InputType 带 AcceptType（AcceptorSetting）。
+                // 对应 ImGui IBR_Misc.cpp:101（Back.Default->GetInputType().AcceptorSetting）：
+                // 这类键在行左侧画方形接收点，可被拖线作为「具体键」连接目标，写入 sec$$Key。
+                bool isAcceptor = false;
+                QColor acceptorColor;
+                if (auto &acc = line->Default->GetInputType().AcceptorSetting; acc) {
+                    isAcceptor = true;
+                    if (acc->NodeColor) {
+                        const auto &v = acc->NodeColor->Value;  // ImVec4 0..1
+                        acceptorColor = QColor::fromRgbF(v.x, v.y, v.z, v.w);
+                    } else {
+                        acceptorColor = QColor(255, 255, 180);  // 兜底浅黄（对齐默认 NodeColor）
+                    }
+                }
 
                 // 修复：lineIdx 必须用 keyId 在 sub.Lines_ByName 中的位置索引，
                 // 对应 IBB_SubSec::UpdateAll 中 `for (auto&& [LineIdx, L] : zip(iota(0u), Lines_ByName))`
@@ -284,6 +374,14 @@ void SectionLineModel::rebuildEntries()
                     e.linkType = linkTypeStr;
                     e.linkLimit = linkLimitVal;
                     e.hasLinkNode = hasLinkNodeVal;
+                    // MultipleCollector：槽行继承基键的 acceptor 方形/颜色（ImGui 把集线器方形挂在槽行上）
+                    if (slotColorByKeyName.contains(e.keyName)) {
+                        e.isAcceptor = true;
+                        e.acceptorColor = slotColorByKeyName.value(e.keyName);
+                    } else {
+                        e.isAcceptor = isAcceptor;
+                        e.acceptorColor = acceptorColor;
+                    }
                     e.lineIdx = static_cast<int>(lineIdx);
                     e.lineMult = static_cast<int>(mult);  // 多分量索引
                     e.compIdx = 0;
@@ -556,6 +654,23 @@ QPointF SectionLineModel::acceptCenterByKey(const QString &keyName, int lineMult
         QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
     if (it != m_acceptCentersByKey.constEnd()) return it.value();
     return QPointF();  // 未找到（QML 尚未回写该行接受点）
+}
+
+void SectionLineModel::setAcceptorCenter(const QString &keyName, int lineMult, qreal x, qreal y)
+{
+    // accept 目标键（Collector/Armor）方形接收点回写。
+    // 对应 ImGui IBR_Misc.cpp:120 AcceptCenter = {Cursor.x - LH*0.7, ...}（行左侧方形）。
+    // 与行右圆点（m_acceptCentersByKey）分开存储：accept 目标的连线终点应连到该方形。
+    m_acceptorCentersByKey.insert(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult), QPointF(x, y));
+}
+
+QPointF SectionLineModel::acceptorCenterByKey(const QString &keyName, int lineMult) const
+{
+    auto it = m_acceptorCentersByKey.constFind(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
+    if (it != m_acceptorCentersByKey.constEnd()) return it.value();
+    return QPointF();
 }
 
 QStringList SectionLineModel::acceptCenterKeys() const
@@ -1074,6 +1189,58 @@ void SectionLineModel::toggleInputMode(int row)
     QModelIndex idx = index(row);
     emit dataChanged(idx, idx, {IsInputModeRole});
     // 通知侧边栏刷新（画布上切换 Input/Link 态后，侧边栏需同步显示）
+    emit sectionDataChanged(m_sectionId);
+}
+
+// 双击键名 → 切换整键的 Input/Link 态（对应 ImGui 双击键名切换该键所有输入框和节点）
+// Data_String：翻共享 Status_Workspace；Data_IIF：翻全部分量 ComponentStatus
+void SectionLineModel::toggleKeyInputMode(int row)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    auto &e = m_entries[row];
+    auto rsec = IBR_Inst_Project.GetSectionFromID(static_cast<ModuleID_t>(m_sectionId));
+    auto bsec = rsec.GetBack_Unsafe();
+    if (!bsec) return;
+    auto *line = bsec->GetLineFromSubSecs(e.keyId);
+    if (!line) return;
+    auto dataPtr = line->Indexed(static_cast<size_t>(e.lineMult));
+    if (!dataPtr) return;
+
+    if (auto strData = dataPtr->GetData<IBB_IniLine_Data_String>(); strData) {
+        strData->Status_Workspace.InputMethod =
+            (strData->Status_Workspace.InputMethod == IICStatus::Input) ? IICStatus::Link : IICStatus::Input;
+        e.isInputMode = !(strData->Status_Workspace.InputMethod == IICStatus::Link);
+    } else if (auto iifData = dataPtr->GetData<IBB_IniLine_Data_IIF>(); iifData && iifData->Value) {
+        auto &cs = iifData->Value->GetComponentStatus();
+        for (auto &c : cs)
+            c.InputMethod = (c.InputMethod == IICStatus::Input) ? IICStatus::Link : IICStatus::Input;
+        e.isInputMode = true;  // IIF 行恒为 flow 态，重读分量状态由其各自 isLink 呈现
+        emit iifDataChanged(row);  // 翻全部分量后强制 Repeater 重读 iifComponents（节点/输入框切换）
+    }
+    emit dataChanged(index(row), index(row), {IsInputModeRole});
+    emit sectionDataChanged(m_sectionId);
+}
+
+// 双击某分量 → 只切换该分量的 Input/Link 态（对应 ImGui 双击分量切该分量状态，按 compIdx）
+void SectionLineModel::toggleComponentInputMode(int row, int compIdx)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    auto &e = m_entries[row];
+    auto rsec = IBR_Inst_Project.GetSectionFromID(static_cast<ModuleID_t>(m_sectionId));
+    auto bsec = rsec.GetBack_Unsafe();
+    if (!bsec) return;
+    auto *line = bsec->GetLineFromSubSecs(e.keyId);
+    if (!line) return;
+    auto dataPtr = line->Indexed(static_cast<size_t>(e.lineMult));
+    if (!dataPtr) return;
+    auto iifData = dataPtr->GetData<IBB_IniLine_Data_IIF>();
+    if (!iifData || !iifData->Value) return;
+    auto &cs = iifData->Value->GetComponentStatus();
+    if (compIdx < 0 || static_cast<size_t>(compIdx) >= cs.size()) return;
+    cs[static_cast<size_t>(compIdx)].InputMethod =
+        (cs[compIdx].InputMethod == IICStatus::Input) ? IICStatus::Link : IICStatus::Input;
+    emit iifDataChanged(row);  // 翻转单分量后强制 Repeater 重读 iifComponents（节点/输入框切换）
+    emit dataChanged(index(row), index(row), {IsInputModeRole});
     emit sectionDataChanged(m_sectionId);
 }
 

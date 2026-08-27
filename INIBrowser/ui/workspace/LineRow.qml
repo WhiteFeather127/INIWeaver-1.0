@@ -50,6 +50,9 @@ Item {
     property bool isInputMode: false
     property int keyType: 0  // 键输入类型：0=String, 1=Bool, 2=IIF
     property bool boolChecked: false  // Bool 键当前布尔值（keyType==1 时有效）
+    // 是否为 accept 目标键（InputType 带 AcceptType）：行左侧画方形接收点，可被作为具体键拖线连入
+    property bool isAcceptor: false
+    property color acceptorColor: "#ffffb4"
     // IIF 多分量单行自然宽度（供 SectionNode 扩展模块宽度以容纳 IIF，0=非 IIF）
     property real iifNaturalWidth: 0
     // IIF 分量列表刷新计数：写回共享 ValueID 后递增，强制 Repeater 重读 iifComponents，
@@ -454,6 +457,20 @@ Item {
     // 注：画布平移/缩放/拖拽 dragOffset 变化由 SectionNode.updateAllCenters() 统一触发，
     //     此处不再单独监听，避免重复回写
 
+    // 行为A：拖线悬停本 acceptor 键行时画整行高亮框（acceptorColor 半透明边框/底色）。
+    // 对应 ImGui IBR_Misc.cpp:100-122 AcceptFullArea 整行 DropTarget 预览。
+    Rectangle {
+        anchors.fill: parent
+        visible: root.isAcceptor
+                 && (workspaceController.dragAcceptorSectionId === (root.sectionData.sectionId || 0))
+                 && (workspaceController.dragAcceptorRowKey === root.keyName)
+        color: Qt.rgba(root.acceptorColor.r, root.acceptorColor.g, root.acceptorColor.b, 0.16)
+        border.color: root.acceptorColor
+        border.width: 1.5
+        radius: 2
+        z: -1
+    }
+
     // 左侧 OnShow 描述文本（对应 ImGui wline.RenderUI(OnShow)）
     Text {
         id: onShowLabel
@@ -480,7 +497,7 @@ Item {
         font.pixelSize: root.fontBody
         elide: Text.ElideRight
 
-        // 双击切换 Input 态（对应 IBG_InputType.cpp:307 翻转 IICStatus）
+        // 双击切换 Input 态（对应 IBG_InputType.cpp:307 翻转 IICStatus）——整键所有分量
         // 用 TapHandler 而非 MouseArea，避免拦截单击（单击需穿透到 nodeMouseArea 选中模块）
         TapHandler {
             acceptedButtons: Qt.LeftButton
@@ -488,7 +505,7 @@ Item {
             onTapped: {
                 if (tapCount === 2) {
                     if (root.lineModel) {
-                        root.lineModel.toggleInputMode(root.rowIndex)
+                        root.lineModel.toggleKeyInputMode(root.rowIndex)
                     }
                 }
             }
@@ -515,6 +532,28 @@ Item {
                     appToolTip.hide()
                 }
             }
+        }
+    }
+
+    // 左侧 acceptor 方形接收点（对应 ImGui IBR_Misc.cpp:101-141）
+    // 带 AcceptType 的键（Collector/Armor 等）在行左侧画一个方形彩色点，可被拖线作为「具体键」连入。
+    Rectangle {
+        id: acceptorNode
+        visible: root.isAcceptor
+        anchors.right: onShowLabel.left
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.fontSmall * 1.4
+        height: width
+        radius: 2  // 圆角方（对齐 ImGui AddRectFilled(square_sz*0.1f)）
+        color: "transparent"
+        border.color: root.acceptorColor
+        border.width: 1
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: Math.max(1.0, parent.width / 6.0)
+            radius: parent.radius - 0.5
+            color: root.acceptorColor
         }
     }
 
@@ -551,8 +590,9 @@ Item {
         keyName: root.keyName
         lineMult: root.lineMult
 
-        // Input 态不显示 LinkNode（对应 ImGui Input 分支不调 RenderUI_Node）
-        visible: root.hasLinkNode && !root.isInputMode
+        // Input 态同样显示 LinkNode（对应 ImGui Input 分支仍调 RenderUI_Node 用 DefaultCenter），
+        // 否则双击切到输入框后节点被藏，无法再拖线连接。
+        visible: root.hasLinkNode
         // D14：双击 LinkNode 切回 Link 态（对应 IBG_InputType.cpp 双击 Hint 切换）
         // 通过 toggleInputMode 写回业务层 Data
         onDoubleClicked: {
@@ -582,7 +622,7 @@ Item {
         height: 10
         radius: root.isInherit ? 1 : 5
         color: "#5a5a5a"
-        visible: !root.hasLinkNode && !root.isInputMode
+        visible: !root.hasLinkNode
 
         // 修复：无 LinkNode 的行也需回写位置，否则 Data_String 类型行
         // （键值为块名）的连线源端点 LastCenter 始终为 (0,0) 导致连线不可见
@@ -1028,6 +1068,16 @@ Item {
                                     if (root.lineModel)
                                         root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, text)
                                 }
+                                // 双击该分量输入框 → 只切该分量节点（对应 ImGui 双击分量切该分量状态）
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    onTapped: {
+                                        if (tapCount === 2 && root.lineModel) {
+                                            root.lineModel.toggleComponentInputMode(root.rowIndex, cc.idx || cc.compIdx)
+                                        }
+                                    }
+                                }
                             }
 
                             // 下拉组合框（combo）
@@ -1205,6 +1255,16 @@ Item {
                                         if (root.lineModel)
                                             root.lineModel.setIifComponentValue(root.rowIndex, cc.idx || cc.compIdx, text)
                                     }
+                                    // 双击该分量输入框 → 只切该分量节点（对应 ImGui 双击分量切该分量状态）
+                                    TapHandler {
+                                        acceptedButtons: Qt.LeftButton
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                        onTapped: {
+                                            if (tapCount === 2 && root.lineModel) {
+                                                root.lineModel.toggleComponentInputMode(root.rowIndex, cc.idx || cc.compIdx)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -1338,9 +1398,9 @@ Item {
                         isImport: false
                         fontSmall: root.fontSmall
                         linkType: cc ? (cc.linkType || "") : ""
-                        // 双击切回 Input 态（对应 RenderUI_Node 双击 Status.InputMethod=Input）
+                        // 双击该分量 → 只切该分量输入框/节点（对应 ImGui 双击分量切该分量状态，按 compIdx）
                         onDoubleClicked: {
-                            if (root.lineModel) root.lineModel.toggleInputMode(root.rowIndex)
+                            if (root.lineModel) root.lineModel.toggleComponentInputMode(root.rowIndex, compIdx)
                         }
                     }
                 }
@@ -1567,6 +1627,15 @@ Item {
         }
     }
 
+    // 行为A：向外部（SectionNode/WorkspaceView 命中）暴露 acceptor 方形接收点中心（workspaceView 坐标）。
+    // 不能直接暴露 QML id（acceptorNode）——id 只在本组件作用域可见，外部访问 item.acceptorNode 为 undefined。
+    function acceptorCenterWs() {
+        if (visible && root.isAcceptor && acceptorNode && acceptorNode.visible) {
+            return acceptorNode.mapToItem(workspaceView, acceptorNode.width / 2, acceptorNode.height / 2)
+        }
+        return null
+    }
+
     function doUpdateLinkNodeCenter(force) {
         if (!root.lineModel || root.rowIndex < 0) return
         // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomTransform 叠加渲染），
@@ -1613,5 +1682,10 @@ Item {
         // 按 keyName+mult 直接回写：rowIndex 在 m_entries 重建后可能错位，
         // setAcceptCenter(row) 会存错行导致 Warhead 被 Projectile 坐标覆盖，改按 key 免疫
         root.lineModel.setAcceptCenterByKey(root.keyName, root.lineMult, cx - dx, cy - dy)
+        // accept 目标键（Collector/Armor）：左侧方形接收点坐标回写，供连线终点连到方形
+        if (acceptorNode.visible) {
+            var aPos = acceptorNode.mapToItem(workspaceView, acceptorNode.width / 2, acceptorNode.height / 2)
+            root.lineModel.setAcceptorCenter(root.keyName, root.lineMult, aPos.x - dx, aPos.y - dy)
+        }
     }
 }
