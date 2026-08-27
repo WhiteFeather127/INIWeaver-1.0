@@ -209,8 +209,8 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         // 点击即收起悬停提示（对应 imgui 每帧 IsItemHovered 判断：点击后 hover 变 false 提示消失；
-                        // 否则 onExited 只在移出触发，点选模块后提示会一直挂着）
-                        appToolTip.hide(mouseArea)
+                        // dismiss 立即隐藏并短暂抑制，防止条目重建 onEntered 立刻又 show）
+                        appToolTip.dismiss(mouseArea)
                         if (isFolder) {
                             moduleTreeModel.toggleExpanded(index)
                         } else {

@@ -99,6 +99,9 @@ Item {
     // place=摆放方位（可选）："below"→ 居中显示在参考点正下方（顶边栏按钮用），不跟随鼠标；
     //                         缺省→ 跟随鼠标（对齐 imgui GetMousePos 逐帧定位）
     function show(text, screenX, screenY, source, place) {
+        // dismiss 后的短暂抑制期：点选后即使条目重建 onEntered 立即 show 也忽略，
+        // 避免提示框刚消失又冒出来
+        if (Date.now() < root._suppressUntil) return
         activeSource = source || null
         tipText.text = text || ""
         hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
@@ -149,5 +152,21 @@ Item {
         }
         hideTimer.start()
         followTimer.stop()
+    }
+
+    // 立即隐藏（不等防抖），并短暂抑制重显：用于"点选后提示应消失"——
+    // 鼠标仍悬停在原条目上，若条目重建触发 onEntered 重新 show，这里用抑制时间窗挡住，
+    // 避免点选后提示立刻又冒出来。
+    property int _suppressUntil: 0
+    function dismiss(source) {
+        if (source) {
+            if (activeSource !== null && source !== activeSource) return
+        }
+        followTimer.stop()
+        hideTimer.stop()
+        root.visible = false
+        tipText.text = ""
+        root.activeSource = null
+        root._suppressUntil = Date.now() + 250
     }
 }

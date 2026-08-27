@@ -151,7 +151,12 @@ Popup {
             subH += (subDescs[si].type === "separator") ? 7 : 30
         lv.width = subW
         lv.height = subH
-        lv.x = root.clampMenuX(o.x, lv.width)
+        // 右侧放不下子菜单时，翻到请求它的那一层（ref）的左侧，而非仅从本条右缘左移一个菜单宽
+        //（左移一个宽会仍压在父菜单上）。ref 为主菜单时为 root Popup（x=root.x）。
+        var parentLeft = (ref && ref.x !== undefined) ? ref.x : o.x
+        lv.x = (o.x + lv.width <= Overlay.overlay.width - 2)
+               ? Math.max(2, o.x)
+               : Math.max(2, parentLeft - lv.width)
         lv.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - lv.height - 2))
         lv.actionTriggered.connect((a) => root.dispatchAction(a))
         lv.submenuRequested.connect((d, g, r) => root.openChildFor(d, g, r))

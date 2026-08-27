@@ -1145,8 +1145,9 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时把当前选中项滚动到可见，避免选中项在列表外却未自动定位
-                                    onOpened: comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Center)
+                                    // 打开时把当前选中项滚动到可见（最小移动量），等一帧等 delegate 完成排布，
+                                    // 否则内容未布局就 positionViewAtIndex 会锚到错误偏移（定位不准）
+                                    onOpened: Qt.callLater(() => comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain))
                                     // popup.x/y 是相对下拉框(comboCtrl)的本地坐标，Qt 经 parent(含 GPU scale)
                                     // 映射 → y 用本地 comboCtrl.height 即贴下缘且随缩放正确；绝不手动×ratio
                                     // 或赋 overlay 绝对坐标（会造成二次偏移/带飞）。

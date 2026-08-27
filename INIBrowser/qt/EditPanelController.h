@@ -100,6 +100,9 @@ signals:
     void displayNameChanged();
     void isEmptyChanged();
     void editLinesChanged();
+    // 编辑行列表重建前发出：QML 端用于在 rebuild（改值/切 onshow 等）前保存滚动位置，
+    // 因为 editLines 是 QVariantList，整体替换会让 ListView 回顶端
+    void aboutToRebuildEditLines();
     void onTextEditChanged();
     void textEditContentChanged();
     void needtoMangleChanged();

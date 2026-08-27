@@ -253,6 +253,8 @@ static std::string Edit_IIC_HintLong(const IBG_InputComponent *comp)
 
 void EditPanelController::rebuildEditLines()
 {
+    // 重建前让 QML 保存编辑列表滚动位置（QVariantList 整体替换会导致 ListView 回顶端）
+    emit aboutToRebuildEditLines();
     // 对应 IBR_EditFrame::ResetEdit + RenderUI_Lines
     // 性能优化：直接从 IBR_Inst_Project.IBR_SectionMap + pbk->SubSecs 读取
     // 不读 IBR_EditFrame::EditLines（避免与 R 线程 ResetEdit 竞争）
