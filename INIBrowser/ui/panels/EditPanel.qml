@@ -945,11 +945,12 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时滚动到当前选中项；置 needPos，contentHeight 稳定后再按确定性公式重算一次
+                                                                // 打开时滚动到当前选中项(顶端)；置 needPos，contentHeight 稳定后由 settleTimer 定位一次
                                                                 onOpened: {
                                                                     comboList.needPos = true
+                                                                    comboList.settleTimer.restart()
                                                                     Qt.callLater(() => {
-                                                                        comboList.posSelected()
+                                                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
                                                                         console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                                                     + " contentH=" + comboList.contentHeight)
                                                                         console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
@@ -968,26 +969,23 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // 打开时滚动到当前选中项；contentHeight 变化时依确定性公式重算（避免 positionViewAtIndex 用陈旧几何）
-                                                                property bool needPos: false
-                                                                onContentHeightChanged: {
-                                                                    if (comboList.needPos) comboList.posSelected()
-                                                                }
-                                                                onMovementStarted: comboList.needPos = false
-                                                                function posSelected() {
-                                                                    var count = comboList.count
-                                                                    var idx = comboCtrl.currentIndex
-                                                                    if (count <= 0) return
-                                                                    var contentH = comboList.contentHeight
-                                                                    var availH = comboList.height
-                                                                    var itemH = contentH > 0 ? contentH / count : 0
-                                                                    if (itemH <= 0 || availH <= 0) return
-                                                                    var i = Math.max(0, Math.min(idx, count - 1))
-                                                                    // 选中项顶对齐视口顶（对应 positionViewAtIndex Beginning）
-                                                                    var t = i * itemH
-                                                                    t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
-                                                                    comboList.contentY = t
-                                                                }
+                                                                    // contentHeight 变化即重启 50ms 稳定定时器，连续无变化后才用 Qt 已排布几何定位一次(Beginning)，
+                                                                    // 避免过渡中拿中间几何导致随缩放偏差
+                                                                    property bool needPos: false
+                                                                    Timer {
+                                                                        id: settleTimer
+                                                                        interval: 50
+                                                                        onTriggered: {
+                                                                            if (comboList.needPos) {
+                                                                                comboList.needPos = false
+                                                                                comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    onContentHeightChanged: {
+                                                                        if (comboList.needPos) comboList.settleTimer.restart()
+                                                                    }
+                                                                    onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {

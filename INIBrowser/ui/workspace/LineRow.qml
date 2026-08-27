@@ -422,22 +422,6 @@ Item {
             console.log("[IIF-DIAG] totalHeight row=" + root.rowIndex + " key='" + root.keyName + "' rows=" + rows.length + " h=" + h)
         return h
     }
-    // 下拉框打开时把选中项滚动到列表顶端（对应 positionViewAtIndex(index, Beginning) 语义）。
-    // 确定性公式：itemH = contentHeight/count；contentY = idx*itemH（选中项顶对齐视口顶）
-    function comboPosSelected(list, combo) {
-        if (!list || !combo) return
-        var count = list.count
-        var idx = combo.currentIndex
-        if (count <= 0) return
-        var contentH = list.contentHeight
-        var availH = list.height
-        var itemH = contentH > 0 ? contentH / count : 0
-        if (itemH <= 0 || availH <= 0) return
-        var i = Math.max(0, Math.min(idx, count - 1))
-        var t = i * itemH
-        t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
-        list.contentY = t
-    }
     onIsInputModeChanged: root.recomputeIifNaturalWidth()
     onKeyTypeChanged: root.recomputeIifNaturalWidth()
     onRowIndexChanged: root.recomputeIifNaturalWidth()
@@ -1161,11 +1145,12 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时先把选中项滚动到可见；用确定性公式（posSelected），contentHeight 稳定后再重算一次
+                                    // 打开时先把选中项滚到顶端；置 needPos，contentHeight 稳定后由 settleTimer 定位一次
                                     onOpened: {
                                         comboList.needPos = true
+                                        comboList.settleTimer.restart()
                                         Qt.callLater(() => {
-                                            root.comboPosSelected(comboList, comboCtrl)
+                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
                                             console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
                                                         + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                         + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
@@ -1195,13 +1180,23 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
-                                        // 缩放后 contentHeight 变化时按确定性公式重定位选中项（见 posSelected）。
-                                        // 不用 positionViewAtIndex：它会用内部可能陈旧的几何判定可见性（放大时滚不准）。
+                                        // 缩放后 contentHeight 变化即重启 50ms 稳定定时器；连续无变化(稳定)后才 positionViewAtIndex 一次，
+                                        // 用 Qt 已排布好的几何定位（避免过渡中拿中间几何；确定性算的 itemH 与实测不一致会随缩放偏差）
                                         property bool needPos: false
-                                        onContentHeightChanged: {
-                                            if (comboList.needPos) root.comboPosSelected(comboList, comboCtrl)
+                                        Timer {
+                                            id: settleTimer
+                                            interval: 50
+                                            onTriggered: {
+                                                if (comboList.needPos) {
+                                                    comboList.needPos = false
+                                                    comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                }
+                                            }
                                         }
-                                        onMovementStarted: comboList.needPos = false
+                                        onContentHeightChanged: {
+                                            if (comboList.needPos) comboList.settleTimer.restart()
+                                        }
+                                        onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {
