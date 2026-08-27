@@ -1145,17 +1145,14 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时启动循环同步滚动（posTimer 追到 contentY==it.y 才停）
+                                    // 打开时：先复位 currentIndex 再赋回选中值，触发 highlightFollowsCurrentItem 自行滚动对齐（无轮询）
                                     onOpened: {
-                                        comboList.needPos = true
-                                        comboList.posTimer.start()
-                                        Qt.callLater(() => {
-                                            comboList.posCurrentTop()
-                                            console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
-                                                        + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                        + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
-                                            console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
-                                        })
+                                        comboList.currentIndex = -1
+                                        comboList.currentIndex = comboCtrl.currentIndex
+                                        console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
+                                                    + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                    + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
+                                        Qt.callLater(() => console.log("[COMBO-DIAG] after posY=" + comboList.contentY))
                                     }
                                     // popup.x/y 是相对下拉框(comboCtrl)的本地坐标，Qt 经 parent(含 GPU scale)
                                     // 映射 → y 用本地 comboCtrl.height 即贴下缘且随缩放正确；绝不手动×ratio
@@ -1180,34 +1177,28 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
-                                        // 打开后 30ms 循环与内容几何同步滚动：每拍读选中项 delegate 实排 y 设为 contentY，
-                                        // 直到 contentY==it.y 稳定才停。首次打开也能一路追到正确位置，不用等第二次。
-                                        property bool needPos: false
-                                        Timer {
-                                            id: posTimer
-                                            interval: 30
-                                            repeat: true
-                                            onTriggered: {
-                                                if (!comboList.needPos) { comboList.posTimer.stop(); return }
-                                                comboList.posCurrentTop()
-                                                var it = comboList.itemAtIndex(comboCtrl.currentIndex)
-                                                if (it && Math.abs(comboList.contentY - it.y) < 1) {
-                                                    comboList.needPos = false
-                                                    comboList.posTimer.stop()
-                                                }
-                                            }
+                                        // 方案1：让 Qt 通过透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）。
+                                        // 每次打开先把 currentIndex 置 -1 再赋回 comboCtrl 值，保证触发 highlight 重新跟随（即使值相同）。
+                                        highlightFollowsCurrentItem: true
+                                        highlight: Component {
+                                            id: comboHighlight
+                                            // 透明、无鼠标 handler，纯驱动跟随，不参与命中，不影响点选
+                                            Item {}
                                         }
                                         onContentHeightChanged: {
-                                            if (comboList.needPos) comboList.posCurrentTop()
+                                            // 缩放后几何变化，强制 highlight 重新跟随（仅事件驱动，非轮询）
+                                            if (comboList.currentIndex !== comboCtrl.currentIndex) {
+                                                comboList.currentIndex = comboCtrl.currentIndex
+                                            }
                                         }
-                                        onMovementStarted: { comboList.needPos = false; comboList.posTimer.stop() }
-                                        // 选中项顶对齐视口顶：直接读 delegate 实排 y 设为 contentY（Qt 实排几何，随缩放自洽）。
-                                        // delegate 未加载用 ListView.Beginning 兜底
-                                        function posCurrentTop() {
+                                        /*
+                                        // 方案2 备选：事件驱动的自终止重试（如需要可启用）
+                                        function ensureTop() {
                                             var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                             if (it) comboList.contentY = it.y
-                                            else comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                            else Qt.callLater(comboList.ensureTop)
                                         }
+                                        */
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {

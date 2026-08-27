@@ -945,16 +945,13 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时启动循环同步滚动（posTimer 追到 contentY==it.y 才停）
+                                                                // 打开时先复位 currentIndex 再赋回，触发 highlightFollowsCurrentItem 自行滚动对齐（无轮询）
                                                                 onOpened: {
-                                                                    comboList.needPos = true
-                                                                    comboList.posTimer.start()
-                                                                    Qt.callLater(() => {
-                                                                        comboList.posCurrentTop()
-                                                                        console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                                                    + " contentH=" + comboList.contentHeight)
-                                                                        console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
-                                                                    })
+                                                                    comboList.currentIndex = -1
+                                                                    comboList.currentIndex = comboCtrl.currentIndex
+                                                                    console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                                                + " contentH=" + comboList.contentHeight)
+                                                                    Qt.callLater(() => console.log("[COMBO-DIAG] after posY=" + comboList.contentY))
                                                                 }
                                                                 background: Rectangle {
                                                                     color: "#2d2d2d"
@@ -969,30 +966,17 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // 打开后 30ms 循环与内容几何同步滚动（contentY 追到选中项 delegate y 才停）
-                                                                    property bool needPos: false
-                                                                    Timer {
-                                                                        id: posTimer
-                                                                        interval: 30
-                                                                        repeat: true
-                                                                        onTriggered: {
-                                                                            if (!comboList.needPos) { comboList.posTimer.stop(); return }
-                                                                            comboList.posCurrentTop()
-                                                                            var it = comboList.itemAtIndex(comboCtrl.currentIndex)
-                                                                            if (it && Math.abs(comboList.contentY - it.y) < 1) {
-                                                                                comboList.needPos = false
-                                                                                comboList.posTimer.stop()
-                                                                            }
-                                                                        }
+                                                                    // 方案1：透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）
+                                                                    highlightFollowsCurrentItem: true
+                                                                    highlight: Component {
+                                                                        // 透明、无鼠标 handler，纯驱动跟随，不参与命中
+                                                                        Item {}
                                                                     }
                                                                     onContentHeightChanged: {
-                                                                        if (comboList.needPos) comboList.posCurrentTop()
-                                                                    }
-                                                                    onMovementStarted: { comboList.needPos = false; comboList.posTimer.stop() }
-                                                                    function posCurrentTop() {
-                                                                        var it = comboList.itemAtIndex(comboCtrl.currentIndex)
-                                                                        if (it) comboList.contentY = it.y
-                                                                        else comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                                        // 缩放后几何变化强制 highlight 重新跟随（事件驱动）
+                                                                        if (comboList.currentIndex !== comboCtrl.currentIndex) {
+                                                                            comboList.currentIndex = comboCtrl.currentIndex
+                                                                        }
                                                                     }
                                                                     delegate: Rectangle {
                                                                         required property int index
