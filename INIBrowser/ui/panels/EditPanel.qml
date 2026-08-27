@@ -945,11 +945,11 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时滚动到当前选中项；置 needPos 让 contentHeight 稳定后再补抛一次，覆盖首开错位
+                                                                // 打开时滚动到当前选中项；置 needPos，contentHeight 稳定后再按确定性公式重算一次
                                                                 onOpened: {
                                                                     comboList.needPos = true
                                                                     Qt.callLater(() => {
-                                                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                                                        comboList.posSelected()
                                                                         console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                                                     + " contentH=" + comboList.contentHeight)
                                                                         console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
@@ -968,14 +968,25 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // 放大时 contentHeight 增长需真正滚动，每次变化都重定位，直到用户手动滚动才停
-                                                                    property bool needPos: false
-                                                                    onContentHeightChanged: {
-                                                                        if (comboList.needPos) {
-                                                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
-                                                                        }
-                                                                    }
-                                                                    onMovementStarted: comboList.needPos = false
+                                                                    // 打开时滚动到当前选中项；contentHeight 变化时依确定性公式重算（避免 positionViewAtIndex 用陈旧几何）
+                                                                property bool needPos: false
+                                                                onContentHeightChanged: {
+                                                                    if (comboList.needPos) comboList.posSelected()
+                                                                }
+                                                                onMovementStarted: comboList.needPos = false
+                                                                function posSelected() {
+                                                                    var count = comboList.count
+                                                                    var idx = comboCtrl.currentIndex
+                                                                    if (count <= 0) return
+                                                                    var contentH = comboList.contentHeight
+                                                                    var availH = comboList.height
+                                                                    var itemH = contentH > 0 ? contentH / count : 0
+                                                                    if (itemH <= 0 || availH <= 0) return
+                                                                    var i = Math.max(0, Math.min(idx, count - 1))
+                                                                    var t = i * itemH - (availH - itemH) / 2
+                                                                    t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
+                                                                    comboList.contentY = t
+                                                                }
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {

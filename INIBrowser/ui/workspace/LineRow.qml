@@ -422,6 +422,22 @@ Item {
             console.log("[IIF-DIAG] totalHeight row=" + root.rowIndex + " key='" + root.keyName + "' rows=" + rows.length + " h=" + h)
         return h
     }
+    // 下拉框打开时把选中项滚动到可见（确定性公式，不依赖 positionViewAtIndex 的内部几何）。
+    // 委派等高 → itemH = contentHeight/count；目标把选中项居中：scrollY = idx*itemH-(availH-itemH)/2
+    function comboPosSelected(list, combo) {
+        if (!list || !combo) return
+        var count = list.count
+        var idx = combo.currentIndex
+        if (count <= 0) return
+        var contentH = list.contentHeight
+        var availH = list.height
+        var itemH = contentH > 0 ? contentH / count : 0
+        if (itemH <= 0 || availH <= 0) return
+        var i = Math.max(0, Math.min(idx, count - 1))
+        var t = i * itemH - (availH - itemH) / 2
+        t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
+        list.contentY = t
+    }
     onIsInputModeChanged: root.recomputeIifNaturalWidth()
     onKeyTypeChanged: root.recomputeIifNaturalWidth()
     onRowIndexChanged: root.recomputeIifNaturalWidth()
@@ -1145,16 +1161,14 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时把当前选中项滚动到可见（Contain）。先置 needPos 让 contentHeight 稳定后再补抛一次，
-                                    // 以覆盖缩放后首次打开内容未稳定的情况；立即也先定位一次（内容已稳定时直接生效）。
+                                    // 打开时先把选中项滚动到可见；用确定性公式（posSelected），contentHeight 稳定后再重算一次
                                     onOpened: {
                                         comboList.needPos = true
                                         Qt.callLater(() => {
-                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                            root.comboPosSelected(comboList, comboCtrl)
                                             console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
                                                         + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                        + " ratio=" + workspaceController.ratio
-                                                        + " contentH=" + comboList.contentHeight)
+                                                        + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
                                             console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
                                         })
                                     }
@@ -1181,14 +1195,11 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
-                                        // 缩放后放大时 contentHeight 需增长、要真正滚动；首次 onChange 拿到的可能是中途值，
-                                        // 故 contentHeight 每次变化都重定位，直到用户手动滚动列表(onMovementStarted)才停，
-                                        // 这样放大后首次打开也能滚到位。
+                                        // 缩放后 contentHeight 变化时按确定性公式重定位选中项（见 posSelected）。
+                                        // 不用 positionViewAtIndex：它会用内部可能陈旧的几何判定可见性（放大时滚不准）。
                                         property bool needPos: false
                                         onContentHeightChanged: {
-                                            if (comboList.needPos) {
-                                                comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
-                                            }
+                                            if (comboList.needPos) root.comboPosSelected(comboList, comboCtrl)
                                         }
                                         onMovementStarted: comboList.needPos = false
                                         delegate: Rectangle {
