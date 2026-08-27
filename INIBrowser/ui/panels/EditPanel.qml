@@ -968,14 +968,14 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // 首开 contentHeight 未稳定时抛一次再定位，保证缩放后首次打开位置正确
+                                                                    // 放大时 contentHeight 增长需真正滚动，每次变化都重定位，直到用户手动滚动才停
                                                                     property bool needPos: false
                                                                     onContentHeightChanged: {
                                                                         if (comboList.needPos) {
-                                                                            comboList.needPos = false
                                                                             comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
                                                                         }
                                                                     }
+                                                                    onMovementStarted: comboList.needPos = false
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {

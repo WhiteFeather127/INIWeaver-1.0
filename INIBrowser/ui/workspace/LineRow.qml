@@ -1181,15 +1181,16 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
-                                        // 缩放后首次打开 contentHeight 尚未稳定，positionViewAtIndex 会偏；
-                                        // 打开时置 needPos 跟踪，contentHeight 一旦变化抛一次再定位，首开即正确
+                                        // 缩放后放大时 contentHeight 需增长、要真正滚动；首次 onChange 拿到的可能是中途值，
+                                        // 故 contentHeight 每次变化都重定位，直到用户手动滚动列表(onMovementStarted)才停，
+                                        // 这样放大后首次打开也能滚到位。
                                         property bool needPos: false
                                         onContentHeightChanged: {
                                             if (comboList.needPos) {
-                                                comboList.needPos = false
                                                 comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
                                             }
                                         }
+                                        onMovementStarted: comboList.needPos = false
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {
