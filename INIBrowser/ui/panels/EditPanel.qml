@@ -950,7 +950,7 @@ Item {
                                                                     comboList.needPos = true
                                                                     comboList.settleTimer.restart()
                                                                     Qt.callLater(() => {
-                                                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                                        comboList.posCurrentTop()
                                                                         console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                                                     + " contentH=" + comboList.contentHeight)
                                                                         console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
@@ -969,8 +969,7 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // contentHeight 变化即重启 50ms 稳定定时器，连续无变化后才用 Qt 已排布几何定位一次(Beginning)，
-                                                                    // 避免过渡中拿中间几何导致随缩放偏差
+                                                                    // contentHeight 变化即重启 50ms 稳定定时器，稳定后把选中项顶对齐视口（读 delegate 实排 y）
                                                                     property bool needPos: false
                                                                     Timer {
                                                                         id: settleTimer
@@ -978,7 +977,7 @@ Item {
                                                                         onTriggered: {
                                                                             if (comboList.needPos) {
                                                                                 comboList.needPos = false
-                                                                                comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                                                comboList.posCurrentTop()
                                                                             }
                                                                         }
                                                                     }
@@ -986,6 +985,11 @@ Item {
                                                                         if (comboList.needPos) comboList.settleTimer.restart()
                                                                     }
                                                                     onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
+                                                                    function posCurrentTop() {
+                                                                        var it = comboList.itemAtIndex(comboCtrl.currentIndex)
+                                                                        if (it) comboList.contentY = it.y
+                                                                        else comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                                    }
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {

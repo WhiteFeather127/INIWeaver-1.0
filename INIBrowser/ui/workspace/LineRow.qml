@@ -1150,7 +1150,7 @@ Item {
                                         comboList.needPos = true
                                         comboList.settleTimer.restart()
                                         Qt.callLater(() => {
-                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                            comboList.posCurrentTop()
                                             console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
                                                         + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
                                                         + " ratio=" + workspaceController.ratio + " contentH=" + comboList.contentHeight)
@@ -1189,7 +1189,7 @@ Item {
                                             onTriggered: {
                                                 if (comboList.needPos) {
                                                     comboList.needPos = false
-                                                    comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                                    comboList.posCurrentTop()
                                                 }
                                             }
                                         }
@@ -1197,6 +1197,13 @@ Item {
                                             if (comboList.needPos) comboList.settleTimer.restart()
                                         }
                                         onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
+                                        // 选中项顶对齐视口顶：直接读 delegate 实际 y（Qt 实排几何，随缩放自洽，
+                                        // 不再算 itemH/不依赖 positionViewAtIndex 的内部判定）。delegate 未加载用 ListView.Beginning 兜底
+                                        function posCurrentTop() {
+                                            var it = comboList.itemAtIndex(comboCtrl.currentIndex)
+                                            if (it) comboList.contentY = it.y
+                                            else comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Beginning)
+                                        }
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {
