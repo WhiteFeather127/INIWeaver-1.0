@@ -422,8 +422,8 @@ Item {
             console.log("[IIF-DIAG] totalHeight row=" + root.rowIndex + " key='" + root.keyName + "' rows=" + rows.length + " h=" + h)
         return h
     }
-    // 下拉框打开时把选中项滚动到可见（确定性公式，不依赖 positionViewAtIndex 的内部几何）。
-    // 委派等高 → itemH = contentHeight/count；目标把选中项居中：scrollY = idx*itemH-(availH-itemH)/2
+    // 下拉框打开时把选中项滚动到列表顶端（对应 positionViewAtIndex(index, Beginning) 语义）。
+    // 确定性公式：itemH = contentHeight/count；contentY = idx*itemH（选中项顶对齐视口顶）
     function comboPosSelected(list, combo) {
         if (!list || !combo) return
         var count = list.count
@@ -434,7 +434,7 @@ Item {
         var itemH = contentH > 0 ? contentH / count : 0
         if (itemH <= 0 || availH <= 0) return
         var i = Math.max(0, Math.min(idx, count - 1))
-        var t = i * itemH - (availH - itemH) / 2
+        var t = i * itemH
         t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
         list.contentY = t
     }

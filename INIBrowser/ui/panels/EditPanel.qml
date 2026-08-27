@@ -983,7 +983,8 @@ Item {
                                                                     var itemH = contentH > 0 ? contentH / count : 0
                                                                     if (itemH <= 0 || availH <= 0) return
                                                                     var i = Math.max(0, Math.min(idx, count - 1))
-                                                                    var t = i * itemH - (availH - itemH) / 2
+                                                                    // 选中项顶对齐视口顶（对应 positionViewAtIndex Beginning）
+                                                                    var t = i * itemH
                                                                     t = Math.max(0, Math.min(t, Math.max(0, contentH - availH)))
                                                                     comboList.contentY = t
                                                                 }
