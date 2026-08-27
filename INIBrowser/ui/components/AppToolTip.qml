@@ -65,6 +65,12 @@ Item {
         repeat: true
         onTriggered: {
             if (!root.visible || !root.followMouse) return
+            // 任意左键按下即收起（对齐 imgui：点击后 IsItemHovered 变 false，提示消失）。
+            // 一次性 dismiss（可见变 false 后下一 tick 提前 return），并短暂抑制重显。
+            if (workspaceController.leftButtonDown()) {
+                root.dismiss()
+                return
+            }
             var m = workspaceController.globalMousePos()
             // 鼠标没动就不重排，避免静止时反复触发布局
             if (root._lastM && m.x === root._lastM.x && m.y === root._lastM.y) return

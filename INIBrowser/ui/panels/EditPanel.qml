@@ -945,12 +945,20 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时滚动到当前选中项（等一帧等 delegate 完成排布，避免定位偏移）
+                                                                // 打开时把当前选中项滚动到可见（居中），用确定性公式避免缩放后首次打开错位
                                                                 onOpened: Qt.callLater(() => {
-                                                                    console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                                                + " contentH=" + comboList.contentHeight + " availH=" + comboList.availableHeight)
-                                                                    comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
-                                                                    console.log("[COMBO-DIAG] after posY=" + comboList.contentY + " contH=" + comboList.contentHeight + " availH=" + comboList.height)
+                                                                    var itemH = comboCtrl.height
+                                                                    var availH = comboList.height
+                                                                    var contentH = comboList.contentHeight
+                                                                    var idx = comboCtrl.currentIndex
+                                                                    if (availH > 0 && contentH > availH && itemH > 0) {
+                                                                        var t = idx * itemH - (availH - itemH) / 2
+                                                                        t = Math.max(0, Math.min(t, contentH - availH))
+                                                                        comboList.contentY = t
+                                                                    }
+                                                                    console.log("[COMBO-DIAG] open cur=" + idx + " count=" + comboList.count
+                                                                                + " itemH=" + itemH + " contentH=" + contentH + " availH=" + availH)
+                                                                    console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
                                                                 })
                                                                 background: Rectangle {
                                                                     color: "#2d2d2d"

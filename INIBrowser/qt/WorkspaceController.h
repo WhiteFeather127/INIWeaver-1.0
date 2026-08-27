@@ -79,6 +79,10 @@ class WorkspaceController : public QObject
     Q_PROPERTY(QString dragTargetText READ dragTargetText NOTIFY dragTargetChanged)
     // 连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 里的源文本，IBR_LinkNode.cpp:570-573）
     Q_PROPERTY(QString dragSourceText READ dragSourceText NOTIFY dragTargetChanged)
+    // 行为A：拖线悬停 acceptor 键行时的整行高亮（对应 ImGui IBR_Misc.cpp:100-178 Acceptor Logic）
+    Q_PROPERTY(qulonglong dragAcceptorSectionId READ dragAcceptorSectionId NOTIFY dragAcceptorRowChanged)
+    Q_PROPERTY(QString dragAcceptorRowKey READ dragAcceptorRowKey NOTIFY dragAcceptorRowChanged)
+    Q_PROPERTY(QColor dragAcceptorColor READ dragAcceptorColor NOTIFY dragAcceptorRowChanged)
     // 是否正在拖拽连线（区分有无目标命中：无目标时仅显示源标签，对齐 imgui 拖拽图像）
     Q_PROPERTY(bool hasDraggingLink READ hasDraggingLink NOTIFY draggingActiveChanged)
     // 拖拽中的节点 ID（单节点拖拽用，0 表示无拖拽）
@@ -151,6 +155,12 @@ public:
     Q_INVOKABLE void clearDragTarget();
     // 设置连线拖拽的源预览标签（由 LinkNodePoint 拖动时调用，imgui BeginDragDropSource 源文本）
     Q_INVOKABLE void setDragSourceText(const QString &text);
+    // 行为A：拖线悬停 acceptor 键行 → 通知 LineRow 画整行高亮框 + 记录端点锚点目标
+    Q_INVOKABLE void setDragAcceptorRow(qulonglong sectionId, const QString &keyName, const QColor &color);
+    Q_INVOKABLE void clearDragAcceptorRow();
+    qulonglong dragAcceptorSectionId() const { return m_dragAcceptorSectionId; }
+    QString dragAcceptorRowKey() const { return m_dragAcceptorRowKey; }
+    QColor dragAcceptorColor() const { return m_dragAcceptorColor; }
     qulonglong dragTargetSectionId() const { return m_dragTargetSectionId; }
     bool hasDragTarget() const { return m_dragTargetSectionId != INVALID_MODULE_ID; }
     QString dragTargetColor() const { return m_dragTargetColor; }
@@ -232,6 +242,10 @@ public:
     // 类型校验预览（对应 Acceptor_CheckLinkType）
     // 返回：0=允许(绿色对勾), 1=类型不匹配(红色禁止), 2=无默认链接key(红色禁止), 3=无效链接(红色叉)
     Q_INVOKABLE int checkMergePreview(qulonglong sourceId, qulonglong destId, const QString &linkKey, bool isLinkDrag);
+    // 按 acceptor 键判定的类型校验（照抄 ImGui Acceptor_CheckLinkType(srcReg, KeyAcceptRegType, ...)，IBR_Misc.cpp:154）
+    // destKey 为 acceptor 键名，命中其 AcceptType.AcceptRegType 作为目标寄存器类型
+    Q_INVOKABLE int checkMergePreviewKey(qulonglong sourceId, qulonglong destId, const QString &destKey, const QString &linkKey);
+    Q_INVOKABLE QString mergePreviewTextKey(qulonglong sourceId, qulonglong destId, const QString &destKey, const QString &linkKey);
     // 获取拖拽预览文本（对应 DragConditionText / DragConditionTextAlt）
     Q_INVOKABLE QString mergePreviewText(qulonglong sourceId, qulonglong destId, const QString &linkKey, bool isLinkDrag);
     // 获取连线拖拽的源预览标签（对应 ImGui BeginDragDropSource 源文本，IBR_LinkNode.cpp:570-573）
@@ -251,6 +265,12 @@ public:
     Q_INVOKABLE void enterEditTextMode(qulonglong sectionId);
     // 查询节点是否为 Comment 块（对应 IBR_SectionData.cpp:584-626 Comment 分支）
     Q_INVOKABLE bool isCommentBlock(qulonglong sectionId) const;
+
+    // ===== 特殊块创建（补全：ImGui GUI_CreateCommentBlock/GUI_CreateSingleValBlock）=====
+    // 在空白右键处创建注释块/单值块（对应 IBR_WorkSpace.cpp:663-674 SendToR -> CreateCommentBlock(EqMouse)）。
+    // 参数为视图视口局部坐标 RePos（空白右键弹菜单处），由本方法换算成 Eq 后再创建。
+    Q_INVOKABLE void createCommentBlock(qreal reX, qreal reY);
+    Q_INVOKABLE void createSingleValBlock(qreal reX, qreal reY);
 
     // ===== 阶段 12.6：边界推回 + 触边提示 =====
     // 检查 EqCenter 是否在有效范围内（对应 EqPosInRange）
@@ -313,6 +333,8 @@ public:
     Q_INVOKABLE QString defaultModuleExportPath() const;
     // 获取鼠标全局（屏幕）坐标：供级联菜单"鼠标移出自动收起"轮询
     Q_INVOKABLE QPointF globalMousePos() const;
+    // 是否按住鼠标左键：供提示框"点击任意处即收起"轮询（对齐 imgui 点击后 IsItemHovered 变 false）
+    Q_INVOKABLE bool leftButtonDown() const;
 
     // ===== 阶段 7 新增：缺失的快捷键对应方法 =====
     // 反选（对应 Ctrl+Shift+I）
@@ -456,6 +478,8 @@ signals:
     void dragInvalidLinkChanged(bool invalid);
     // 拖拽目标命中变化通知（QML SectionNode 据此绑定预览框显示）
     void dragTargetChanged();
+    // 行为A：acceptor 键行拖拽高亮变化通知（QML LineRow 据此画/清整行高亮框）
+    void dragAcceptorRowChanged();
     // 连线拖拽开始/结束（驱动预览框是否有源标签显示）
     void draggingActiveChanged();
     // 拖拽节点 ID 变化通知（QML 据此决定是否应用 dragOffset）
@@ -544,6 +568,10 @@ private:
     QString m_dragTargetColor;
     QString m_dragTargetText;
     QString m_dragSourceText;
+    // 行为A：acceptor 键行拖拽高亮（QML LinkNodePoint 命中 acceptor 行时设置，clearDraggingLink 清零）
+    qulonglong m_dragAcceptorSectionId{INVALID_MODULE_ID};
+    QString m_dragAcceptorRowKey;
+    QColor m_dragAcceptorColor;
     // 拖拽中的节点 ID（单节点拖拽，INVALID_MODULE_ID=无拖拽）
     // 修复：不能用 0 作为"无拖拽"哨兵值，因为 0 是合法的 sectionId（第一个新建模块 ID=0）
     // 否则第一个新建模块会因 sectionId(0) === draggingSectionId(0) 永远显示 isDragging 蓝框

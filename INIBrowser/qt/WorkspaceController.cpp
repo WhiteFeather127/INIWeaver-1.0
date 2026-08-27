@@ -38,6 +38,37 @@ void Acceptor_RefusePreview(StrPoolID SourceReg, StrPoolID TargetReg, StrPoolID 
 bool Acceptor_CheckLinkType(StrPoolID SourceReg, StrPoolID TargetReg, StrPoolID LinkType);
 bool Acceptor_CheckSecType(StrPoolID SourceReg, StrPoolID SecType);
 
+// ===== 行为B：块是否显示标题栏（对应 ImGui RenderUI: if(!Bsec->SingleVal && !Bsec->SkipTitle) RenderUI_TitleBar) =====
+// 仅按 SkipTitle/SingleVal 判定（与 ImGui 完全一致）。集线器/单值块模块在定义里设了
+// SkipTitle=true（如 Hub.ini）→ 无标题；字符串列表（List.ini）未设 → 保留标题。
+// 注意：不要用"可见行是否全为 acceptor"这类启发式——字符串列表的 StringList 头键
+// 会被误判为 acceptor，导致列表块被错当成集线器而无标题。
+static bool SectionBlockShowTitle(IBB_Section* bsec)
+{
+    if (!bsec) return true;
+    return !(bsec->SingleVal || bsec->SkipTitle);
+}
+
+// 行为B：返回块内首个可见行的 keyId（无标题块连线终点兜底），无则 EmptyPoolStr
+static StrPoolID SectionBlockFirstVisibleKey(IBB_Section* bsec)
+{
+    if (!bsec) return EmptyPoolStr;
+    bsec->CheckSubsecOrder();
+    for (auto subIdx : bsec->SubSecOrder) {
+        const auto &sub = bsec->SubSecs[subIdx];
+        if (!sub.Default) continue;
+        if (sub.Default->Type == IBB_SubSec_Default::Inherit && bsec->Inherit.empty()) continue;
+        for (auto keyId : bsec->LineOrder) {
+            if (!sub.CanOwnKey(keyId)) continue;
+            if (!bsec->IsOnShow(keyId)) continue;
+            auto *line = bsec->GetLineFromSubSecs(keyId);
+            if (!line || !line->Default) continue;
+            return keyId;
+        }
+    }
+    return EmptyPoolStr;
+}
+
 // 前向声明 IBR_WorkSpace.cpp 内 Qt 导出模块函数（该 namespace 无头文件）
 namespace IBR_WorkSpace {
     void ExportSelectedModuleQt(const std::string &Utf8Name, const std::string &Utf8Desc, const std::string &Utf8Path);
@@ -891,6 +922,31 @@ void WorkspaceController::toggleSelectSection(qulonglong sectionId)
     emit selectedRevisionChanged();
 }
 
+// 特殊块创建：对应 ImGui IBR_WorkSpace.cpp:663-674 空白右键
+// SendToR -> CreateCommentBlock(EqMouse) / CreateSingleValBlock(EqMouse)。
+// reX/reY 为视图视口局部坐标（RePos），先换算成 Eq 再创建，随后全量刷新。
+static void createSpecialBlockAt(IBR_Project &proj, WorkspaceController *self,
+                                 qreal reX, qreal reY, bool comment)
+{
+    QPointF eq = self->screenToEq(QPointF(reX, reY));
+    ImVec2 eqPos(static_cast<float>(eq.x()), static_cast<float>(eq.y()));
+    IBRF_CoreBump.SendToR({ [&proj, eqPos, comment]() {
+        if (comment) proj.CreateCommentBlock(eqPos);
+        else proj.CreateSingleValBlock(eqPos);
+    } });
+    self->refresh();
+}
+
+void WorkspaceController::createCommentBlock(qreal reX, qreal reY)
+{
+    createSpecialBlockAt(IBR_Inst_Project, this, reX, reY, /*comment=*/true);
+}
+
+void WorkspaceController::createSingleValBlock(qreal reX, qreal reY)
+{
+    createSpecialBlockAt(IBR_Inst_Project, this, reX, reY, /*comment=*/false);
+}
+
 void WorkspaceController::composeSelected()
 {
     // 编组：ComposeSelected 原生实现（IsMassAfter 多选态 → ComposeSections）。
@@ -958,6 +1014,11 @@ QPointF WorkspaceController::globalMousePos() const
 {
     // 全局屏幕坐标（多显示器可用），QML 侧用 Overlay.mapFromGlobal 折算
     return QCursor::pos();
+}
+
+bool WorkspaceController::leftButtonDown() const
+{
+    return QGuiApplication::mouseButtons().testFlag(Qt::LeftButton);
 }
 
 void WorkspaceController::freezeSelected(bool frozen)
@@ -1633,6 +1694,8 @@ void WorkspaceController::clearDraggingLink()
         m_dragSourceText.clear();
         emit dragTargetChanged();
     }
+    // 行为A：拖拽结束同时清除 acceptor 键行整行高亮
+    clearDragAcceptorRow();
 }
 
 // v3 批次 1.4：DropArea 接收 linkLimit=0 拖拽时通知源 LinkNode 显示"无效链接"提示
@@ -1674,6 +1737,29 @@ void WorkspaceController::setDragSourceText(const QString &text)
     if (m_dragSourceText == text) return;
     m_dragSourceText = text;
     emit dragTargetChanged();
+}
+
+// 行为A：拖线悬停 acceptor 键行 → 设置整行高亮（QML LineRow 据此画高亮框）
+void WorkspaceController::setDragAcceptorRow(qulonglong sectionId, const QString &keyName, const QColor &color)
+{
+    if (m_dragAcceptorSectionId == sectionId && m_dragAcceptorRowKey == keyName
+        && m_dragAcceptorColor == color)
+        return;
+    m_dragAcceptorSectionId = sectionId;
+    m_dragAcceptorRowKey = keyName;
+    m_dragAcceptorColor = color;
+    emit dragAcceptorRowChanged();
+}
+
+void WorkspaceController::clearDragAcceptorRow()
+{
+    if (m_dragAcceptorSectionId == INVALID_MODULE_ID && m_dragAcceptorRowKey.isEmpty()
+        && m_dragAcceptorColor == QColor())
+        return;
+    m_dragAcceptorSectionId = INVALID_MODULE_ID;
+    m_dragAcceptorRowKey.clear();
+    m_dragAcceptorColor = QColor();
+    emit dragAcceptorRowChanged();
 }
 
 void WorkspaceController::refresh()
@@ -2108,10 +2194,13 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
         // ImportCount > 0 表示该块是被导入的（对应 ImGui NotAsImported=false 分支）
         // ImGui 中导入块的 RadioButton 居中显示（IBR_SectionData.cpp:745-754）
         item["isImport"] = bsec->Dynamic.ImportCount > 0;
+        // 行为B：块是否显示标题栏（单值块/集线器块隐藏标题栏与头节点）
+        item["hasTitle"] = SectionBlockShowTitle(bsec);
     } else {
         item["widthBase"] = static_cast<double>(FontHeight) * 17.0 * 1.0;  // 默认 WidthRatio=1
         item["widthFix"] = 0.0;
         item["isImport"] = false;
+        item["hasTitle"] = true;
     }
 
     // 屏幕坐标
@@ -2600,6 +2689,55 @@ void WorkspaceController::rebuildLinkEndpoints()
                      << "acceptPt=" << (itD != m_sectionAcceptPoint.end() ? QString("(%1,%2)").arg(itD->x()).arg(itD->y()) : QStringLiteral("none"))
                      << "pb=(" << pbX << "," << pbY << ")";
 #endif
+        }
+
+        // accept 目标键（Collector/Armor 等带 AcceptType）：连线终点连到该键左侧方形接收点。
+        // 判定：link.DestKey 指定 且 目标键是 accept 目标（InputType 带 AcceptorSetting）。
+        // 对应 ImGui RenderUI_Acceptor -> AcceptCenter（IBR_Misc.cpp:101-141，方形 = Cursor.x - LH*0.7）。
+        // 仅 accept 目标键才连到方形；普通 DLK 目标（如 UseFlagPack，无 AcceptType）仍走标题栏。
+        if (!pbValid && link.DestKey != EmptyPoolStr && dstBsec && !sv.Collapsed)
+        {
+            auto *dstAcceptLine = dstBsec->GetLineFromSubSecs(link.DestKey);
+            if (dstAcceptLine && dstAcceptLine->Default
+                && dstAcceptLine->Default->GetInputType().AcceptorSetting)
+            {
+                auto itDstModel = m_lineModels.find(static_cast<qulonglong>(dstActualId));
+                if (itDstModel != m_lineModels.end() && *itDstModel)
+                {
+                    QPointF dstAcc = (*itDstModel)->acceptorCenterByKey(
+                        QString::fromUtf8(PoolStr(link.DestKey)), 0);
+                    if (!dstAcc.isNull())
+                    {
+                        pbX = dstAcc.x();
+                        pbY = dstAcc.y();
+                        pbValid = true;
+#ifdef INIWEAVER_DIAG
+                        qDebug() << "[ACCEPT-LINK] dst=" << static_cast<qulonglong>(dstActualId)
+                                 << "key=" << PoolCStr(link.DestKey)
+                                 << "pb=(" << pbX << "," << pbY << ")";
+#endif
+                    }
+                }
+            }
+        }
+
+        // 行为B：无标题块（单值块/集线器块）无标题栏/头节点。
+        // 集线器块的 acceptor 键在上方 acceptor 分支命中（连到方形）；此处兜底单值块等。
+        // 无标题块一律连到块左端（ReOffset=0.7*FontHeight，同普通块标题栏 RAB 的左锚）——
+        // 不要用行右圆点：单值块的输入框会把端点拉到右端，与 ImGui 左锚不符。
+        if (!pbValid && dstBsec && !SectionBlockShowTitle(dstBsec))
+        {
+            if (dstData)
+            {
+                ImVec2 rePosT = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+                pbX = static_cast<qreal>(rePosT.x + fontHeightScaled * 0.7f);
+                pbY = static_cast<qreal>(rePosT.y + halfLine);
+                pbValid = true;
+#ifdef INIWEAVER_DIAG
+                qDebug() << "[TITLELESS-LINK] dst=" << static_cast<qulonglong>(dstActualId)
+                         << "leftpb=(" << pbX << "," << pbY << ")";
+#endif
+            }
         }
 
         // 从键拖线落到块上 → 目标端点统一连到「标题栏接受点」（headLineRN/m_sectionAcceptPoint）。
@@ -3276,23 +3414,49 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
     auto dstSec = IBR_Inst_Project.GetSectionFromID(dstId);
     auto srcBack = srcSec.GetBack_Unsafe();
     auto dstBack = dstSec.GetBack_Unsafe();
-    if (!srcBack || !dstBack) return false;
+    if (!srcBack || !dstBack) {
+#ifdef INIWEAVER_DIAG
+        qDebug("[LINK-FAIL] createLinkFromDrag no back src=%llu dst=%llu", (unsigned long long)srcId, (unsigned long long)dstId);
+#endif
+        return false;
+    }
 
     auto dstData = dstSec.GetSectionData();
-    if (!dstData) return false;
+    if (!dstData) {
+#ifdef INIWEAVER_DIAG
+        qDebug("[LINK-FAIL] createLinkFromDrag no dstData dst=%llu", (unsigned long long)dstId);
+#endif
+        return false;
+    }
 
     StrPoolID srcKeyId = NewPoolStr(sourceKeyName.toUtf8().constData());
     auto *line = srcBack->GetLineFromSubSecs(srcKeyId);
-    if (!line || !line->Default) return false;
+    if (!line || !line->Default) {
+#ifdef INIWEAVER_DIAG
+        qDebug("[LINK-FAIL] createLinkFromDrag src line missing key='%s'", qUtf8Printable(sourceKeyName));
+#endif
+        return false;
+    }
 
     // 类型校验（对应 Acceptor_CheckLinkType）
     StrPoolID linkType = line->Default->LinkNode.LinkType;
     bool check = Acceptor_CheckLinkType(srcBack->Register, dstBack->Register, linkType);
-    if (!check) return false;
+    if (!check) {
+#ifdef INIWEAVER_DIAG
+        qDebug("[LINK-FAIL] createLinkFromDrag type mismatch srcReg='%s' dstReg='%s' linkType='%s'",
+               PoolCStr(srcBack->Register), PoolCStr(dstBack->Register), PoolCStr(linkType));
+#endif
+        return false;
+    }
+#ifdef INIWEAVER_DIAG
+    qDebug("[LINK-FAIL] createLinkFromDrag OK srcReg='%s' dstReg='%s' linkType='%s' destKey='%s'",
+           PoolCStr(srcBack->Register), PoolCStr(dstBack->Register), PoolCStr(linkType), qUtf8Printable(destKey));
+#endif
 
     // 目标 key：若未指定，用目标的 DLK（DefaultLinkKey）
+    bool dstKeyExplicit = (!destKey.isEmpty() && destKey != QLatin1String("default"));
     StrPoolID finalDstKey = 0;
-    if (!destKey.isEmpty() && destKey != QLatin1String("default")) {
+    if (dstKeyExplicit) {
         finalDstKey = NewPoolStr(destKey.toUtf8().constData());
     }
     if (finalDstKey == 0) {
@@ -3303,7 +3467,7 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
     size_t srcLineMult = static_cast<size_t>(sourceLineMult);
     size_t dstMult = static_cast<size_t>(destMult);
 
-    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, finalDstKey, dstMult, dstData, sourceKeyName, this]() {
+    IBRF_CoreBump.SendToR({ [srcId, dstId, srcKeyId, srcLineMult, finalDstKey, dstMult, dstData, sourceKeyName, dstKeyExplicit, this]() {
         auto srcRsec = IBR_Inst_Project.GetSectionFromID(srcId);
         auto dstRsec = IBR_Inst_Project.GetSectionFromID(dstId);
         auto srcBsec = srcRsec.GetBack_Unsafe();
@@ -3313,12 +3477,15 @@ bool WorkspaceController::createLinkFromDrag(qulonglong sourceId, const QString 
         auto *ln = srcBsec->GetLineFromSubSecs(srcKeyId);
         if (!ln || !ln->Default) return;
 
-        // 构建 newTarget：节点级落点只写目标节名，不拼 $$<DLK>。
-        // 对应 ImGui acceptLineDrag -> pSession->ValueToMerge = Desc.Sec（IBR_SectionData.cpp:548）。
-        // DLK 在反向连接/渲染时按目标寄存器解析，不写入键值（否则值变成 sec$$UseFlagPack）。
-        (void)finalDstKey;
-        (void)dstMult;
-        std::string newTarget = dstData->Desc.Sec;
+        // 目标值编码（严格按 ImGui）：
+        // - 落到具体目标键（explicit destKey）：写 sec$$Key（+@@mult），端点落到该键节点。
+        //   对应 ImGui RenderUI_Node/acceptor -> pSession->ValueToMerge=TargetValueStr(sec,Key,mult)
+        //   （IBR_Misc.cpp:163，IBB_SubSec.cpp:43-47）
+        // - 落到模块（destKey 空→DLK 隐式）：只写 sec，端点落到标题栏。
+        //   对应 ImGui acceptLineDrag -> ValueToMerge=Desc.Sec（IBR_SectionData.cpp:548）
+        std::string newTarget = dstKeyExplicit
+            ? TargetValueStr(dstData->Desc.Sec, finalDstKey, dstMult)
+            : dstData->Desc.Sec;
 
         // 找到包含该 key 的 SubSec 及其 lineIdx（对应 Lines_ByName 中的位置索引）
         IBB_SubSec *foundSub = nullptr;
@@ -3526,6 +3693,36 @@ void WorkspaceController::refreshLinkEndpoint(qulonglong srcId, const QString &f
             }
             pbValid = true;
         }
+        // acceptor 目标键（Collector/Armor）：连到该键左侧方形接收点（与 rebuildLinkEndpoints 一致）。
+        // 新增连线走本增量路径，也必须走方形，否则新建的 acceptor 连线会落到右侧圆点。
+        if (!pbValid && link.DestKey != EmptyPoolStr && dstBsec && !sv.Collapsed && !dstCollapsed)
+        {
+            auto *dstAcceptLine = dstBsec->GetLineFromSubSecs(link.DestKey);
+            if (dstAcceptLine && dstAcceptLine->Default
+                && dstAcceptLine->Default->GetInputType().AcceptorSetting)
+            {
+                auto itDstModel = m_lineModels.find(static_cast<qulonglong>(dstRsec.ID));
+                if (itDstModel != m_lineModels.end() && *itDstModel)
+                {
+                    QPointF dstAcc = (*itDstModel)->acceptorCenterByKey(
+                        QString::fromUtf8(PoolStr(link.DestKey)), 0);
+                    if (!dstAcc.isNull()) { pbX = dstAcc.x(); pbY = dstAcc.y(); pbValid = true; }
+                }
+            }
+        }
+        // 行为B：无标题块（单值块/集线器块）无标题栏/头节点，一惓用块左端锚（ReOffset=0.7*FontHeight），
+        // 与 rebuildLinkEndpoints 一致。不要用行右圆点（否则新建连线落到右侧，刷新后才回左）。
+        if (!pbValid && dstBsec && !dstCollapsed && !SectionBlockShowTitle(dstBsec))
+        {
+            if (dstData)
+            {
+                ImVec2 rePosT = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
+                pbX = static_cast<qreal>(rePosT.x + fontHeightScaled * 0.7f);
+                pbY = static_cast<qreal>(rePosT.y + halfLine);
+                pbValid = true;
+            }
+        }
+
         // 从键拖线落到块上 → 目标端点统一连到「标题栏接受点」（headLineRN/m_sectionAcceptPoint）。
         // 与 rebuildLinkEndpoints 一致：不再落到目标 DLK 键行圆点（对应 ImGui IBR_LineDrag）。
         // 跳过「行级接受点」分支，非折叠且行可见时也走下方 m_sectionAcceptPoint。
@@ -3673,6 +3870,59 @@ QString WorkspaceController::mergePreviewText(qulonglong sourceId, qulonglong de
         default:
             return QString::fromUtf8(u8"无效链接");
     }
+}
+
+// 按 acceptor 键判定的类型校验（照抄 ImGui Acceptor_CheckLinkType(srcReg, KeyAcceptRegType, ...)，
+// IBR_Misc.cpp:154）。destKey 为 acceptor 键名，以它的 AcceptType.AcceptRegType 作为目标寄存器类型，
+// 而不是模块寄存器类型。返回与 checkMergePreview 一致（0/1/3）。
+int WorkspaceController::checkMergePreviewKey(qulonglong sourceId, qulonglong destId,
+                                              const QString &destKey, const QString &linkKey)
+{
+    ModuleID_t srcId = static_cast<ModuleID_t>(sourceId);
+    ModuleID_t dstId = static_cast<ModuleID_t>(destId);
+    auto srcSec = IBR_Inst_Project.GetSectionFromID(srcId);
+    auto dstSec = IBR_Inst_Project.GetSectionFromID(dstId);
+    auto srcBack = srcSec.GetBack_Unsafe();
+    auto dstBack = dstSec.GetBack_Unsafe();
+    if (!srcBack || !dstBack) return 3;
+
+    StrPoolID typeAlt{0};
+    if (!linkKey.isEmpty() && linkKey != QLatin1String("default")) {
+        typeAlt = NewPoolStr(linkKey.toUtf8().constData());
+    }
+    // 解析 acceptor 键的 AcceptRegType（未命中回退模块寄存器）
+    StrPoolID acceptReg = EmptyPoolStr;
+    if (!destKey.isEmpty()) {
+        auto *cls = IBF_Inst_DefaultTypeList.List.KeyBelongToLine(
+            destKey.toUtf8().constData(), dstBack->Register);
+        if (cls) {
+            if (auto &acc = cls->GetInputType().AcceptorSetting; acc) acceptReg = acc->AcceptRegType;
+        }
+    }
+    if (acceptReg == EmptyPoolStr) acceptReg = dstBack->Register;
+
+    bool check = Acceptor_CheckLinkType(srcBack->Register, acceptReg, typeAlt);
+    if (!check) Acceptor_RefusePreview(srcBack->Register, acceptReg, typeAlt);
+    return check ? 0 : 1;
+}
+
+QString WorkspaceController::mergePreviewTextKey(qulonglong sourceId, qulonglong destId,
+                                                 const QString &destKey, const QString &linkKey)
+{
+    auto srcSec = IBR_Inst_Project.GetSectionFromID(static_cast<ModuleID_t>(sourceId));
+    auto dstSec = IBR_Inst_Project.GetSectionFromID(static_cast<ModuleID_t>(destId));
+    auto srcData = srcSec.GetSectionData();
+    auto dstData = dstSec.GetSectionData();
+    if (!srcData || !dstData) return QString::fromUtf8(u8"无效链接");
+
+    int status = checkMergePreviewKey(sourceId, destId, destKey, linkKey);
+    if (status == 0) {
+        return QString::fromUtf8(srcData->Desc.Ini) + u8" → " +
+               QString::fromUtf8(dstData->DisplayName) + u8" : " + destKey;
+    }
+    if (status == 1 && !IBR_Inst_Project.DragConditionTextAlt.empty())
+        return QString::fromUtf8(IBR_Inst_Project.DragConditionTextAlt.c_str());
+    return status == 1 ? QString::fromUtf8(u8"类型不匹配") : QString::fromUtf8(u8"无效链接");
 }
 
 QString WorkspaceController::lineDragSourcePreview(qulonglong sectionId, const QString &keyName)
