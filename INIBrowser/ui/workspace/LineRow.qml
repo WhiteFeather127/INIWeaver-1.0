@@ -653,6 +653,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         visible: root.isInputMode && root.keyType === 0  // 仅 String 用文本框（Bool/IIF 用专属控件）
         height: root.fontBody * 2
+        topPadding: 0
+        bottomPadding: 0
         // 绑定 exportValue：ImGui 每帧用 CurrentValue 重新渲染 InputText
         text: root.exportValue
         font.pixelSize: root.fontBody
@@ -1055,6 +1057,8 @@ Item {
                                 x: iifCell.ctlX
                                 width: parent.width - x
                                 height: root.fontBody * 2
+                                topPadding: 0
+                                bottomPadding: 0
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: cc.value || ""
                                 font.pixelSize: root.fontBody
@@ -1094,6 +1098,8 @@ Item {
                                 x: iifCell.ctlX
                                 width: parent.width - x
                                 height: root.fontBody * 2
+                                topPadding: 0
+                                bottomPadding: 0
                                 anchors.verticalCenter: parent.verticalCenter
                                 model: root.iifOptArr(cc)
                                 textRole: "label"
@@ -1244,6 +1250,8 @@ Item {
                                 TextField {
                                     text: cc.value || ""
                                     height: root.fontBody * 2
+                                    topPadding: 0
+                                    bottomPadding: 0
                                     width: parent.width - parent.spacing - (root.fontBody * 1.6)
                                     anchors.verticalCenter: parent.verticalCenter
                                     font.pixelSize: root.fontBody
