@@ -29,7 +29,7 @@ Item {
         font.pixelSize: 12
     }
 
-    // 菜单宽度 = 最长文本宽 + 行内边距；submenu 因带箭头比 item 更宽
+    // 菜单宽度 = 最长文本宽 + 行内边距；submenu 因带箭头比 item 更宽。无最小宽度（按内容走）
     function computedWidth() {
         var w = 0
         for (var i = 0; i < root.itemDescs.length; ++i) {
@@ -40,8 +40,8 @@ Item {
             var rowW = lw + pad
             if (rowW > w) w = rowW
         }
-        // 给个最小宽度，避免过窄；加边框余量
-        return Math.max(120, w + 8)
+        // 边框余量；不加最小宽度
+        return w + 8
     }
 
     // 菜单项描述（统一数据协议）

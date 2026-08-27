@@ -149,7 +149,7 @@ Popup {
         var subH = 0
         for (var si = 0; si < subDescs.length; ++si)
             subH += (subDescs[si].type === "separator") ? 7 : 30
-        lv.width = Math.max(120, lv.contentItem.implicitWidth)
+        lv.width = lv.contentItem.implicitWidth
         lv.height = subH
         // 子菜单永远在右侧展开（不左翻），仅钳到屏内避免超出右缘
         lv.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - lv.width - 2))
