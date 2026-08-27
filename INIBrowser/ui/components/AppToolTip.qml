@@ -48,9 +48,28 @@ Item {
         id: hideTimer
         interval: 120
         onTriggered: {
+            followTimer.stop()
             root.visible = false
             tipText.text = ""
             root.activeSource = null
+        }
+    }
+
+    // 跟随鼠标：默认 hover 提示锚在光标下方（对齐 imgui IBR_ToolTip 用 GetMousePos 每帧定位，
+    // PosY = MouseY + LineHeight，底部放不下才上移）。"below" 按钮提示不跟随。
+    property bool followMouse: true
+    property var _lastM: null
+    Timer {
+        id: followTimer
+        interval: 33   // ~30fps，逐帧跟随鼠标（imgui 本来每帧重定位）
+        repeat: true
+        onTriggered: {
+            if (!root.visible || !root.followMouse) return
+            var m = workspaceController.globalMousePos()
+            // 鼠标没动就不重排，避免静止时反复触发布局
+            if (root._lastM && m.x === root._lastM.x && m.y === root._lastM.y) return
+            root._lastM = m
+            root.repositionToMouse()
         }
     }
 
@@ -75,37 +94,45 @@ Item {
         wrapMode: Text.Wrap
     }
 
-    // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（自动转 Overlay 坐标并钳制到屏幕内）
+    // 统一显示入口：text=提示内容，screenX/Y=屏幕坐标（"below" 用；跟随鼠标时仅作参考，忽略坐标）
     // source=归属源对象（可选）：相邻条目切换时用它校验滞后的 hide，避免误关提示
-    // place=摆放方位（可选）："below"→ 居中显示在参考点正下方（顶边栏按钮用）；缺省→ 右偏8px+上方优先
+    // place=摆放方位（可选）："below"→ 居中显示在参考点正下方（顶边栏按钮用），不跟随鼠标；
+    //                         缺省→ 跟随鼠标（对齐 imgui GetMousePos 逐帧定位）
     function show(text, screenX, screenY, source, place) {
         activeSource = source || null
         tipText.text = text || ""
         hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
         // 内容换行宽度：受 maxTipWidth 限制；再据此算框总尺寸（内容 + 内边距 + 边框）
         tipText.width = (tipText.implicitWidth > maxTipWidth) ? maxTipWidth : tipText.implicitWidth
-        var ww = tipText.width + 16                       // 左7 + 右7 + 边框2
-        var hh = tipText.implicitHeight + 12              // 上5 + 下5 + 边框2
-        // 屏幕坐标 → Overlay 坐标
-        var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        var x, y
+        root.width = tipText.width + 16                       // 左7 + 右7 + 边框2
+        root.height = tipText.implicitHeight + 12             // 上5 + 下5 + 边框2
+        followMouse = (place !== "below")
         if (place === "below") {
             // 顶边栏按钮：框水平居中对齐按钮中心，显示在按钮正下方
-            x = Math.max(2, Math.min(o.x - ww / 2, Math.max(2, Overlay.overlay.width - ww - 2)))
-            y = o.y + 4
-            y = Math.min(y, Math.max(4, Overlay.overlay.height - hh - 4))
+            var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
+            root.x = Math.max(2, Math.min(o.x - root.width / 2, Math.max(2, Overlay.overlay.width - root.width - 2)))
+            root.y = Math.min(o.y + 4, Math.max(4, Overlay.overlay.height - root.height - 4))
         } else {
-            // 默认：水平右偏 8px（贴近而不遮鼠标），垂直优先上方（不遮鼠标前进路径）
-            x = Math.max(2, Math.min(o.x + 8, Math.max(2, Overlay.overlay.width - ww - 2)))
-            var above = o.y - hh - 10
-            var below = o.y + 12
-            y = (above >= 4) ? above : Math.min(below, Overlay.overlay.height - hh - 4)
+            // 跟随鼠标初始定位一次，并启动跟随定时器
+            followTimer.restart()
+            root.repositionToMouse()
         }
+        root.visible = true
+    }
+
+    // 按当前光标定位（imgui IBR_ToolTip）：锚在光标 x、光标 y 下方一行，
+    // 底部放不下则上移；右侧放不下则翻到光标左侧。关键：始终在光标下方，绝不遮住指针。
+    function repositionToMouse() {
+        if (!workspaceController) return
+        var m = workspaceController.globalMousePos()
+        var o = Overlay.overlay.mapFromGlobal(m.x, m.y)
+        var rightOK = o.x + root.width <= Overlay.overlay.width - 2
+        var x = rightOK ? Math.max(2, o.x) : Math.max(2, o.x - root.width)
+        var y = o.y + 14   // 光标下方一行（line height 约 14）
+        if (y + root.height > Overlay.overlay.height - 4)
+            y = Math.max(4, Overlay.overlay.height - root.height - 4)
         root.x = x
         root.y = y
-        root.width = ww
-        root.height = hh
-        root.visible = true
     }
 
     // source=归属源对象（可选）。带 source 的 hide 仅在 source 为当前显示源时才生效，
@@ -121,5 +148,6 @@ Item {
             }
         }
         hideTimer.start()
+        followTimer.stop()
     }
 }

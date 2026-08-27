@@ -143,6 +143,20 @@ Item {
         visible: !moduleTreeModel.isEmpty
         clip: true
         model: moduleTreeModel
+        property real _savedY: 0
+
+        // 展开/折叠/过滤等 rebuild 会 beginResetModel 导致列表回顶；重建前保存 contentY、
+        // modelReset 后恢复，避免浏览到中部时点一下文件夹就跳到顶端
+        Connections {
+            target: moduleTreeModel
+            function onBeforeReset() {
+                treeView._savedY = treeView.contentY
+            }
+            function onModelReset() {
+                if (treeView._savedY > 0)
+                    Qt.callLater(() => { treeView.contentY = treeView._savedY })
+            }
+        }
 
         delegate: Item {
             width: treeView.width
@@ -194,6 +208,9 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        // 点击即收起悬停提示（对应 imgui 每帧 IsItemHovered 判断：点击后 hover 变 false 提示消失；
+                        // 否则 onExited 只在移出触发，点选模块后提示会一直挂着）
+                        appToolTip.hide(mouseArea)
                         if (isFolder) {
                             moduleTreeModel.toggleExpanded(index)
                         } else {

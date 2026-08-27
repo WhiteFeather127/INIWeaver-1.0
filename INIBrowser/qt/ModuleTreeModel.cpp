@@ -101,6 +101,7 @@ void ModuleTreeModel::refresh()
 void ModuleTreeModel::rebuild()
 {
     bool wasEmpty = m_nodes.empty();
+    emit beforeReset();   // 供 QML 保存滚动位置（beginResetModel 前同步触发）
     beginResetModel();
     m_nodes.clear();
     if (m_includeSpecial)

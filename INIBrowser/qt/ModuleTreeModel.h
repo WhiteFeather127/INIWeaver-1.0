@@ -81,6 +81,8 @@ signals:
     void includeSpecialChanged();
     void isEmptyChanged();
     void filterChanged();
+    // 在 beginResetModel 之前发出：QL 端用于在模型重建（展开/折叠/过滤等）前保存滚动位置
+    void beforeReset();
 
 private:
     struct Node {

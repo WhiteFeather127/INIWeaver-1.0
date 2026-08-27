@@ -82,9 +82,16 @@ Popup {
         root._handler = (typeof handler === "function") ? handler : null
         // 屏幕坐标 → Overlay 坐标，钳制到可用区域（对齐 ImGui 越界校正 IBR_Components.cpp:640-653）
         var o = Overlay.overlay.mapFromGlobal(screenX, screenY)
-        root.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - root.implicitWidth - 2))
+        root.x = root.clampMenuX(o.x, root.implicitWidth)
         root.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - root.implicitHeight - 2))
         root.open()
+    }
+
+    // 垂直/水平定位辅助：水平位置优先从参考点向右展开，右侧空间不足则翻到参考点左侧，
+    // 避免菜单/子层被钳到屏幕右缘而远离光标（对齐 ImGui 越界校正，但向左翻转而非硬钳制）
+    function clampMenuX(x, w) {
+        if (x + w <= Overlay.overlay.width - 2) return Math.max(2, x)
+        return Math.max(2, x - w)
     }
 
     function hide() {
@@ -144,7 +151,7 @@ Popup {
             subH += (subDescs[si].type === "separator") ? 7 : 30
         lv.width = subW
         lv.height = subH
-        lv.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - lv.width - 2))
+        lv.x = root.clampMenuX(o.x, lv.width)
         lv.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - lv.height - 2))
         lv.actionTriggered.connect((a) => root.dispatchAction(a))
         lv.submenuRequested.connect((d, g, r) => root.openChildFor(d, g, r))
@@ -223,6 +230,9 @@ Popup {
         descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_SelectAll")), action: "selectAll", enabled: hasSections })
         descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_Paste")), action: "paste" })
         descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_RefreshAllRegName")), action: "refreshRegName" })
+        // 特殊块创建（对应 ImGui IBR_WorkSpace.cpp:663-674）
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_CreateCommentBlock")), action: "createComment" })
+        descs.push({ type: "item", text: (i18n.rev, i18n.tr("GUI_CreateSingleValBlock")), action: "createSingleVal" })
         descs.push({ type: "separator" })
         descs = descs.concat(root.treeItemsToDescs(al))
         return descs
