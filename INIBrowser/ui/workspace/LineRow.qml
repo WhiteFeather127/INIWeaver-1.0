@@ -1145,21 +1145,14 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时把当前选中项滚动到可见（居中）。不用 positionViewAtIndex：它依赖列表内部排布时序，
-                                    // 缩放后首次打开内容未稳定会滚到错位（第二次才正确）。改按当前 ratio 确定性算出居中偏移。
+                                    // 打开时把当前选中项滚动到可见（Contain，最小移动量）。恢复此前可用的 positionViewAtIndex；
+                                    // 等一帧等 delegate 基本排布后再定位，避免首帧内容未布局。
                                     onOpened: Qt.callLater(() => {
-                                        var itemH = comboCtrl.height * workspaceController.ratio
-                                        var availH = comboList.height
-                                        var contentH = comboList.contentHeight
-                                        var idx = comboCtrl.currentIndex
-                                        if (availH > 0 && contentH > availH && itemH > 0) {
-                                            var t = idx * itemH - (availH - itemH) / 2
-                                            t = Math.max(0, Math.min(t, contentH - availH))
-                                            comboList.contentY = t
-                                        }
+                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
                                         console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
-                                                    + "' cur=" + idx + " count=" + comboList.count + " ratio=" + workspaceController.ratio
-                                                    + " itemH=" + itemH + " contentH=" + contentH + " availH=" + availH)
+                                                    + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                    + " ratio=" + workspaceController.ratio
+                                                    + " contentH=" + comboList.contentHeight)
                                         console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
                                     })
                                     // popup.x/y 是相对下拉框(comboCtrl)的本地坐标，Qt 经 parent(含 GPU scale)
