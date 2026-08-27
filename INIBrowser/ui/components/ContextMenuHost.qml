@@ -143,19 +143,16 @@ Popup {
         var lv = subLevelComp.createObject(Overlay.overlay)
         lv.itemDescs = subDescs
         lv.checkedStates = root.checkedStates
-        // 动态 Popup 不依赖内容隐式尺寸（动态创建时 contentItem 可能未布局），显式计算：
-        // 菜单项 30px / 分隔线 7px（与 ContextMenuItemList delegate 高度一致）
-        var subW = 180
+        // 宽度按内容自适应（ContextMenuItemList.computedWidth 已据 itemDescs 算好）；
+        // 动态 Popup 的隐式宽度在创建时未必已算，故直接读取 contentItem 的 implicitWidth。
+        // 高度显式计算：菜单项 30px / 分隔线 7px（与 ContextMenuItemList delegate 高度一致）
         var subH = 0
         for (var si = 0; si < subDescs.length; ++si)
             subH += (subDescs[si].type === "separator") ? 7 : 30
-        lv.width = subW
+        lv.width = Math.max(120, lv.contentItem.implicitWidth)
         lv.height = subH
-        // 右侧放不下子菜单时，翻到最外层（第一层）菜单的左侧，而不是本层/本条目的左侧。
-        // 用户明确要求"去第一层左边"：始终以根菜单左边缘 root.x 为基准左移一个子菜单宽。
-        lv.x = (o.x + lv.width <= Overlay.overlay.width - 2)
-               ? Math.max(2, o.x)
-               : Math.max(2, root.x - lv.width)
+        // 子菜单永远在右侧展开（不左翻），仅钳到屏内避免超出右缘
+        lv.x = Math.max(2, Math.min(o.x, Overlay.overlay.width - lv.width - 2))
         lv.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - lv.height - 2))
         lv.actionTriggered.connect((a) => root.dispatchAction(a))
         lv.submenuRequested.connect((d, g, r) => root.openChildFor(d, g, r))

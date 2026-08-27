@@ -19,9 +19,30 @@ import QtQuick.Controls
 Item {
     id: root
     // 尺寸由宿主控制（anchors.fill）；implicit 尺寸供 Popup 自适应
-    // 宽度固定 _minWidth（对齐 ImGui 按钮固定宽度）；高度按内容（delegate implicitHeight 累加）
-    implicitWidth: root._minWidth
+    // 宽度随最长文本自适应（不再固定 180）；高度按内容（delegate implicitHeight 累加）
+    implicitWidth: root.computedWidth()
     implicitHeight: contentCol.implicitHeight
+
+    // 文本度量：用真实像素宽（advanceWidth）算菜单宽度，配合文字自适应
+    FontMetrics {
+        id: menuFont
+        font.pixelSize: 12
+    }
+
+    // 菜单宽度 = 最长文本宽 + 行内边距；submenu 因带箭头比 item 更宽
+    function computedWidth() {
+        var w = 0
+        for (var i = 0; i < root.itemDescs.length; ++i) {
+            var d = root.itemDescs[i]
+            if (!d || d.type === "separator") continue
+            var lw = menuFont.advanceWidth(d.text || "")
+            var pad = (d.type === "submenu") ? (26 + 18 + 6) : (d.checkable ? 26 + 10 : 12 + 10)
+            var rowW = lw + pad
+            if (rowW > w) w = rowW
+        }
+        // 给个最小宽度，避免过窄；加边框余量
+        return Math.max(120, w + 8)
+    }
 
     // 菜单项描述（统一数据协议）
     property var itemDescs: []
@@ -38,7 +59,7 @@ Item {
 
     Column {
         id: contentCol
-        width: Math.max(root._minWidth, contentCol.implicitWidth)
+        width: root.implicitWidth
         spacing: 0
 
         Repeater {
@@ -186,7 +207,4 @@ Item {
             }
         }
     }
-
-    // 菜单最小宽度（与 ImGui 按钮宽度 FontHeight*9 ≈ 117px 相当）
-    readonly property real _minWidth: 180
 }
