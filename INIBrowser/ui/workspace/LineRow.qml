@@ -1177,6 +1177,9 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
+                                        // 关键修复：只有弹层打开时才允许滚轮滚动。否则关闭后缩放用的滚轮
+                                        // 事件仍会泄漏进这个隐藏 ListView 把它 contentY 滚走，导致再次打开位置偏。
+                                        interactive: comboCtrl.popup.opened
                                         // 方案1：让 Qt 通过透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）。
                                         // 每次打开先把 currentIndex 置 -1 再赋回 comboCtrl 值，保证触发 highlight 重新跟随（即使值相同）。
                                         highlightFollowsCurrentItem: true

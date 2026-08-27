@@ -966,6 +966,8 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
+                                                                    // 关键修复：仅弹层打开时才允许滚轮滚动，否则关闭后滚轮事件泄漏进隐藏列表导致再次打开位置偏
+                                                                    interactive: comboCtrl.popup.opened
                                                                     // 方案1：透明 highlight 跟随 currentIndex 自行滚动（零常驻轮询）
                                                                     highlightFollowsCurrentItem: true
                                                                     highlight: Component {
