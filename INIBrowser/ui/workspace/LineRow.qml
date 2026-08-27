@@ -1145,10 +1145,10 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时先把选中项滚到顶端；置 needPos，contentHeight 稳定后由 settleTimer 定位一次
+                                    // 打开时启动循环同步滚动（posTimer 追到 contentY==it.y 才停）
                                     onOpened: {
                                         comboList.needPos = true
-                                        comboList.settleTimer.restart()
+                                        comboList.posTimer.start()
                                         Qt.callLater(() => {
                                             comboList.posCurrentTop()
                                             console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
@@ -1180,25 +1180,29 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
-                                        // 缩放后 contentHeight 变化即重启 50ms 稳定定时器；连续无变化(稳定)后才 positionViewAtIndex 一次，
-                                        // 用 Qt 已排布好的几何定位（避免过渡中拿中间几何；确定性算的 itemH 与实测不一致会随缩放偏差）
+                                        // 打开后 30ms 循环与内容几何同步滚动：每拍读选中项 delegate 实排 y 设为 contentY，
+                                        // 直到 contentY==it.y 稳定才停。首次打开也能一路追到正确位置，不用等第二次。
                                         property bool needPos: false
                                         Timer {
-                                            id: settleTimer
-                                            interval: 50
+                                            id: posTimer
+                                            interval: 30
+                                            repeat: true
                                             onTriggered: {
-                                                if (comboList.needPos) {
+                                                if (!comboList.needPos) { comboList.posTimer.stop(); return }
+                                                comboList.posCurrentTop()
+                                                var it = comboList.itemAtIndex(comboCtrl.currentIndex)
+                                                if (it && Math.abs(comboList.contentY - it.y) < 1) {
                                                     comboList.needPos = false
-                                                    comboList.posCurrentTop()
+                                                    comboList.posTimer.stop()
                                                 }
                                             }
                                         }
                                         onContentHeightChanged: {
-                                            if (comboList.needPos) comboList.settleTimer.restart()
+                                            if (comboList.needPos) comboList.posCurrentTop()
                                         }
-                                        onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
-                                        // 选中项顶对齐视口顶：直接读 delegate 实际 y（Qt 实排几何，随缩放自洽，
-                                        // 不再算 itemH/不依赖 positionViewAtIndex 的内部判定）。delegate 未加载用 ListView.Beginning 兜底
+                                        onMovementStarted: { comboList.needPos = false; comboList.posTimer.stop() }
+                                        // 选中项顶对齐视口顶：直接读 delegate 实排 y 设为 contentY（Qt 实排几何，随缩放自洽）。
+                                        // delegate 未加载用 ListView.Beginning 兜底
                                         function posCurrentTop() {
                                             var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                             if (it) comboList.contentY = it.y

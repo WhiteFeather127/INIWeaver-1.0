@@ -945,10 +945,10 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时滚动到当前选中项(顶端)；置 needPos，contentHeight 稳定后由 settleTimer 定位一次
+                                                                // 打开时启动循环同步滚动（posTimer 追到 contentY==it.y 才停）
                                                                 onOpened: {
                                                                     comboList.needPos = true
-                                                                    comboList.settleTimer.restart()
+                                                                    comboList.posTimer.start()
                                                                     Qt.callLater(() => {
                                                                         comboList.posCurrentTop()
                                                                         console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
@@ -969,22 +969,26 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
-                                                                    // contentHeight 变化即重启 50ms 稳定定时器，稳定后把选中项顶对齐视口（读 delegate 实排 y）
+                                                                    // 打开后 30ms 循环与内容几何同步滚动（contentY 追到选中项 delegate y 才停）
                                                                     property bool needPos: false
                                                                     Timer {
-                                                                        id: settleTimer
-                                                                        interval: 50
+                                                                        id: posTimer
+                                                                        interval: 30
+                                                                        repeat: true
                                                                         onTriggered: {
-                                                                            if (comboList.needPos) {
+                                                                            if (!comboList.needPos) { comboList.posTimer.stop(); return }
+                                                                            comboList.posCurrentTop()
+                                                                            var it = comboList.itemAtIndex(comboCtrl.currentIndex)
+                                                                            if (it && Math.abs(comboList.contentY - it.y) < 1) {
                                                                                 comboList.needPos = false
-                                                                                comboList.posCurrentTop()
+                                                                                comboList.posTimer.stop()
                                                                             }
                                                                         }
                                                                     }
                                                                     onContentHeightChanged: {
-                                                                        if (comboList.needPos) comboList.settleTimer.restart()
+                                                                        if (comboList.needPos) comboList.posCurrentTop()
                                                                     }
-                                                                    onMovementStarted: { comboList.needPos = false; comboList.settleTimer.stop() }
+                                                                    onMovementStarted: { comboList.needPos = false; comboList.posTimer.stop() }
                                                                     function posCurrentTop() {
                                                                         var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                                                         if (it) comboList.contentY = it.y
