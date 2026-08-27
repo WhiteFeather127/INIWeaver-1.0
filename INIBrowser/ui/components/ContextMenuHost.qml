@@ -151,12 +151,11 @@ Popup {
             subH += (subDescs[si].type === "separator") ? 7 : 30
         lv.width = subW
         lv.height = subH
-        // 右侧放不下子菜单时，翻到请求它的那一层（ref）的左侧，而非仅从本条右缘左移一个菜单宽
-        //（左移一个宽会仍压在父菜单上）。ref 为主菜单时为 root Popup（x=root.x）。
-        var parentLeft = (ref && ref.x !== undefined) ? ref.x : o.x
+        // 右侧放不下子菜单时，翻到最外层（第一层）菜单的左侧，而不是本层/本条目的左侧。
+        // 用户明确要求"去第一层左边"：始终以根菜单左边缘 root.x 为基准左移一个子菜单宽。
         lv.x = (o.x + lv.width <= Overlay.overlay.width - 2)
                ? Math.max(2, o.x)
-               : Math.max(2, parentLeft - lv.width)
+               : Math.max(2, root.x - lv.width)
         lv.y = Math.max(2, Math.min(o.y, Overlay.overlay.height - lv.height - 2))
         lv.actionTriggered.connect((a) => root.dispatchAction(a))
         lv.submenuRequested.connect((d, g, r) => root.openChildFor(d, g, r))

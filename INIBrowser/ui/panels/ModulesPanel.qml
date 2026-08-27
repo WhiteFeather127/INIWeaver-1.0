@@ -146,15 +146,17 @@ Item {
         property real _savedY: 0
 
         // 展开/折叠/过滤等 rebuild 会 beginResetModel 导致列表回顶；重建前保存 contentY、
-        // modelReset 后恢复，避免浏览到中部时点一下文件夹就跳到顶端
+        // modelReset 后恢复，避免浏览到中部时点一下文件夹就跳到顶端。同步设置防"回弹一帧顶端"。
         Connections {
             target: moduleTreeModel
             function onBeforeReset() {
                 treeView._savedY = treeView.contentY
             }
             function onModelReset() {
-                if (treeView._savedY > 0)
-                    Qt.callLater(() => { treeView.contentY = treeView._savedY })
+                if (treeView._savedY > 0) {
+                    treeView.contentY = treeView._savedY
+                    Qt.callLater(() => treeView.contentY = treeView._savedY)
+                }
             }
         }
 

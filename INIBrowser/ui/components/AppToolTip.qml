@@ -101,10 +101,11 @@ Item {
     function show(text, screenX, screenY, source, place) {
         // dismiss 后的短暂抑制期：点选后即使条目重建 onEntered 立即 show 也忽略，
         // 避免提示框刚消失又冒出来
-        if (Date.now() < root._suppressUntil) return
+        if (Date.now() < root._suppressUntil) { console.log("[TIP-DIAG] show SUPPRESSED until=" + root._suppressUntil + " now=" + Date.now()); return }
         activeSource = source || null
         tipText.text = text || ""
         hideTimer.stop()  // 新的 show 取消 pending 的防抖隐藏
+        console.log("[TIP-DIAG] show src=" + (source ? source.toString().slice(-20) : "<none>") + " text='" + (text||"").slice(0,20) + "' place=" + (place||"-"))
         // 内容换行宽度：受 maxTipWidth 限制；再据此算框总尺寸（内容 + 内边距 + 边框）
         tipText.width = (tipText.implicitWidth > maxTipWidth) ? maxTipWidth : tipText.implicitWidth
         root.width = tipText.width + 16                       // 左7 + 右7 + 边框2
@@ -144,12 +145,15 @@ Item {
         if (source) {
             // 当前显示无源提示（或源不匹配）时，忽略此带源 hide —— 属滞后/串扰事件
             if (activeSource === null && tipText.text.length > 0) {
+                console.log("[TIP-DIAG] hide IGNORED (no activeSource but has text)")
                 return
             }
             if (activeSource !== null && source !== activeSource) {
+                console.log("[TIP-DIAG] hide IGNORED src mismatch ask=" + source.toString().slice(-20) + " active=" + activeSource.toString().slice(-20))
                 return
             }
         }
+        console.log("[TIP-DIAG] hide start")
         hideTimer.start()
         followTimer.stop()
     }
@@ -160,8 +164,12 @@ Item {
     property int _suppressUntil: 0
     function dismiss(source) {
         if (source) {
-            if (activeSource !== null && source !== activeSource) return
+            if (activeSource !== null && source !== activeSource) {
+                console.log("[TIP-DIAG] dismiss IGNORED src mismatch ask=" + source.toString().slice(-20) + " active=" + activeSource.toString().slice(-20))
+                return
+            }
         }
+        console.log("[TIP-DIAG] dismiss (immediate, suppress 250ms)")
         followTimer.stop()
         hideTimer.stop()
         root.visible = false

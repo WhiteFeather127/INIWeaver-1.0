@@ -284,15 +284,18 @@ Item {
                     property real _savedY: 0
 
                     // 改值/切 onshow 等会整体替换 editLines（QVariantList）导致列表回顶端；
-                    // 重建前（aboutToRebuildEditLines）保存 contentY，重建后（editLinesChanged）恢复
+                    // 重建前（aboutToRebuildEditLines）保存 contentY，重建后（editLinesChanged）恢复。
+                    // 同步设置避免"回弹一帧顶端"：若延迟一帧(callLater)才设，首帧会画在顶端再跳回。
                     Connections {
                         target: editPanelController
                         function onAboutToRebuildEditLines() {
                             linesListView._savedY = linesListView.contentY
                         }
                         function onEditLinesChanged() {
-                            if (linesListView._savedY > 0)
+                            if (linesListView._savedY > 0) {
+                                linesListView.contentY = linesListView._savedY
                                 Qt.callLater(() => linesListView.contentY = linesListView._savedY)
+                            }
                         }
                     }
 
@@ -943,7 +946,12 @@ Item {
                                                                 width: comboCtrl.width
                                                                 padding: 0
                                                                 // 打开时滚动到当前选中项（等一帧等 delegate 完成排布，避免定位偏移）
-                                                                onOpened: Qt.callLater(() => comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain))
+                                                                onOpened: Qt.callLater(() => {
+                                                                    console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                                                + " contentH=" + comboList.contentHeight + " availH=" + comboList.availableHeight)
+                                                                    comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                                                    console.log("[COMBO-DIAG] after posY=" + comboList.contentY + " contH=" + comboList.contentHeight + " availH=" + comboList.height)
+                                                                })
                                                                 background: Rectangle {
                                                                     color: "#2d2d2d"
                                                                     border.color: "#3c3c3c"
