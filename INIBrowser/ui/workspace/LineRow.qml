@@ -1145,16 +1145,19 @@ Item {
                                     // 缩放结束后重新打开即在正确位置（消除缩放偏移）
                                     property real ratioWatch: workspaceController.ratio
                                     onRatioWatchChanged: if (comboCtrl.popup.opened) comboCtrl.popup.close()
-                                    // 打开时把当前选中项滚动到可见（Contain，最小移动量）。恢复此前可用的 positionViewAtIndex；
-                                    // 等一帧等 delegate 基本排布后再定位，避免首帧内容未布局。
-                                    onOpened: Qt.callLater(() => {
-                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
-                                        console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
-                                                    + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                    + " ratio=" + workspaceController.ratio
-                                                    + " contentH=" + comboList.contentHeight)
-                                        console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
-                                    })
+                                    // 打开时把当前选中项滚动到可见（Contain）。先置 needPos 让 contentHeight 稳定后再补抛一次，
+                                    // 以覆盖缩放后首次打开内容未稳定的情况；立即也先定位一次（内容已稳定时直接生效）。
+                                    onOpened: {
+                                        comboList.needPos = true
+                                        Qt.callLater(() => {
+                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                            console.log("[COMBO-DIAG] open row=" + root.rowIndex + " key='" + root.keyName
+                                                        + "' cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                        + " ratio=" + workspaceController.ratio
+                                                        + " contentH=" + comboList.contentHeight)
+                                            console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
+                                        })
+                                    }
                                     // popup.x/y 是相对下拉框(comboCtrl)的本地坐标，Qt 经 parent(含 GPU scale)
                                     // 映射 → y 用本地 comboCtrl.height 即贴下缘且随缩放正确；绝不手动×ratio
                                     // 或赋 overlay 绝对坐标（会造成二次偏移/带飞）。
@@ -1178,6 +1181,15 @@ Item {
                                         // 行高=下拉框高（紧凑），列表高度上限 7 项防过高，超出滚动
                                         implicitHeight: Math.min(contentHeight,
                                             (comboCtrl.height + 2) * 7 * workspaceController.ratio)
+                                        // 缩放后首次打开 contentHeight 尚未稳定，positionViewAtIndex 会偏；
+                                        // 打开时置 needPos 跟踪，contentHeight 一旦变化抛一次再定位，首开即正确
+                                        property bool needPos: false
+                                        onContentHeightChanged: {
+                                            if (comboList.needPos) {
+                                                comboList.needPos = false
+                                                comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                            }
+                                        }
                                         delegate: Rectangle {
                                             required property int index
                                             readonly property var opt: {

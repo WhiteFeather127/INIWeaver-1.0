@@ -945,13 +945,16 @@ Item {
                                                                 y: comboCtrl.height
                                                                 width: comboCtrl.width
                                                                 padding: 0
-                                                                // 打开时滚动到当前选中项（Contain，最小移动量），等一帧等 delegate 排布后再定位
-                                                                onOpened: Qt.callLater(() => {
-                                                                    comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
-                                                                    console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
-                                                                                + " contentH=" + comboList.contentHeight)
-                                                                    console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
-                                                                })
+                                                                // 打开时滚动到当前选中项；置 needPos 让 contentHeight 稳定后再补抛一次，覆盖首开错位
+                                                                onOpened: {
+                                                                    comboList.needPos = true
+                                                                    Qt.callLater(() => {
+                                                                        comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                                                        console.log("[COMBO-DIAG] open cur=" + comboCtrl.currentIndex + " count=" + comboList.count
+                                                                                    + " contentH=" + comboList.contentHeight)
+                                                                        console.log("[COMBO-DIAG] after posY=" + comboList.contentY)
+                                                                    })
+                                                                }
                                                                 background: Rectangle {
                                                                     color: "#2d2d2d"
                                                                     border.color: "#3c3c3c"
@@ -965,6 +968,14 @@ Item {
                                                                     model: iifOptArr(iifCell.comp).length
                                                                     width: comboCtrl.width
                                                                     implicitHeight: Math.min(contentHeight, (comboCtrl.height + 2) * 7)
+                                                                    // 首开 contentHeight 未稳定时抛一次再定位，保证缩放后首次打开位置正确
+                                                                    property bool needPos: false
+                                                                    onContentHeightChanged: {
+                                                                        if (comboList.needPos) {
+                                                                            comboList.needPos = false
+                                                                            comboList.positionViewAtIndex(comboCtrl.currentIndex, ListView.Contain)
+                                                                        }
+                                                                    }
                                                                     delegate: Rectangle {
                                                                         required property int index
                                                                         readonly property var opt: {
