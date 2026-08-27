@@ -592,7 +592,9 @@ Item {
 
         // Input 态同样显示 LinkNode（对应 ImGui Input 分支仍调 RenderUI_Node 用 DefaultCenter），
         // 否则双击切到输入框后节点被藏，无法再拖线连接。
-        visible: root.hasLinkNode
+        // IIF 键（keyType===2）无行级自节点（对应 ImGui IIF 只渲染各分量节点，整行没有独立节点），
+        // 故 IIF 隐藏此圆点，仅由 IIF 分量在 flow 内各自渲染节点。
+        visible: root.hasLinkNode && root.keyType !== 2
         // D14：双击 LinkNode 切回 Link 态（对应 IBG_InputType.cpp 双击 Hint 切换）
         // 通过 toggleInputMode 写回业务层 Data
         onDoubleClicked: {
@@ -622,7 +624,7 @@ Item {
         height: 10
         radius: root.isInherit ? 1 : 5
         color: "#5a5a5a"
-        visible: !root.hasLinkNode
+        visible: !root.hasLinkNode && root.keyType !== 2
 
         // 修复：无 LinkNode 的行也需回写位置，否则 Data_String 类型行
         // （键值为块名）的连线源端点 LastCenter 始终为 (0,0) 导致连线不可见
