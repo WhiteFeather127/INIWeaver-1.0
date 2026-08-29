@@ -50,6 +50,8 @@ public:
         InputOnShowRole,                     // bool: InputOnShow 编辑态（行右键菜单 EditDesc 切换）
         KeyTypeRole,                         // int: 键输入类型（0=String, 1=Bool, 2=IIF）
         BoolCheckedRole,                 // bool: Bool 键当前布尔值（仅 keyType==1 有意义）
+        IsAcceptorRole,                      // bool: 键是否为 accept 目标（InputType 带 AcceptType），左侧方形接收点
+        AcceptorColorRole,               // QColor: acceptor 节点颜色（AcceptType.NodeColor）
     };
     Q_ENUM(Roles)
 
@@ -88,6 +90,16 @@ public:
     // 阶段 3：按 keyName + lineMult 查询行接受点（供 WorkspaceController::rebuildLinkEndpoints 构建 pb）
     // 返回 QPointF() 表示无记录（调用方需回退到标题栏接受点）
     Q_INVOKABLE QPointF acceptCenterByKey(const QString &keyName, int lineMult) const;
+    // 行接受点的世界坐标（Eq 空间）镜像查询：懒加载 cull 节点的端点再投影用。
+    // 与 acceptCenterByKey 同键同时写入；返回 QPointF() 表示无记录。
+    QPointF acceptCenterEqByKey(const QString &keyName, int lineMult) const;
+    // 按 keyName+lineMult 定位行序号（m_entries 显示序）；未找到返回 -1。
+    // 懒加载兜底的行级 Y 估算用（从未渲染的节点无回写，按行序均匀估算行中心）。
+    int rowIndexOf(const QString &keyName, int lineMult) const;
+    // accept 目标键（Collector/Armor）左侧方形接收点回写（对应 ImGui AcceptCenter = Cursor.x - LH*0.7）
+    Q_INVOKABLE void setAcceptorCenter(const QString &keyName, int lineMult, qreal x, qreal y);
+    // accept 目标键方形接收点查询（连线终点连到方形）
+    Q_INVOKABLE QPointF acceptorCenterByKey(const QString &keyName, int lineMult) const;
     // 诊断：返回已回写接受点的全部 keyName@mult 复合键（排查 FromKey 查询不匹配）
     QStringList acceptCenterKeys() const;
 
@@ -112,6 +124,10 @@ public:
     // D14：切换 Input/Link 态（对应 ImGui 双击翻转 IICStatus.InputMethod）
     // 业务层 Data 为 Source of Truth，此处直接读写 Data 的 Status_Workspace/ComponentStatus
     Q_INVOKABLE void toggleInputMode(int row);
+    // D14b：双击键名 → 切换整键输入框/节点（IIF 翻全部分量）
+    Q_INVOKABLE void toggleKeyInputMode(int row);
+    // D14c：双击某分量 → 只切换该分量输入框/节点（按 compIdx）
+    Q_INVOKABLE void toggleComponentInputMode(int row, int compIdx);
 
     // 行级右键菜单（对应 IBR_Misc.cpp:201-252 WorkSpaceLine 右键菜单）
     // toggleSpecialAccept：翻转 SpecialAccept 临时态（画布会话级，不持久化到 INI）
@@ -184,6 +200,9 @@ private:
         bool isEmpty{ true };
         bool isInherit{ false };
         bool isImport{ false };
+        // 键是否为 accept 目标（InputType 带 AcceptType / AcceptorSetting），左侧方形接收点
+        bool isAcceptor{ false };
+        QColor acceptorColor;
         int lineIdx{ 0 };
         int lineMult{ 0 };
         int compIdx{ 0 };
@@ -214,6 +233,8 @@ private:
                 && isEmpty == o.isEmpty
                 && isInherit == o.isInherit
                 && isImport == o.isImport
+                && isAcceptor == o.isAcceptor
+                && acceptorColor == o.acceptorColor
                 && lineIdx == o.lineIdx
                 && lineMult == o.lineMult
                 && compIdx == o.compIdx
@@ -241,6 +262,12 @@ private:
     // 修复2：多分量键同名 key 的每个分量有独立圆点，仅按 keyName 会把多分量合并到最后一个坐标
     //（起点错位），复合 keyName@mult 精确区分各分量。
     QHash<QString, QPointF> m_acceptCentersByKey;
+    // 行接受点世界坐标镜像（Eq 空间，与 m_acceptCentersByKey 同键同时写入）：
+    // 懒加载 cull 节点无 delegate 回写，屏幕坐标会随平移/缩放过期；
+    // rebuildLinkEndpoints 对 cull 节点用世界坐标按当前视口再投影，端点保持精确
+    QHash<QString, QPointF> m_acceptCentersEqByKey;
+    // accept 目标键左侧方形接收点（keyName@mult -> 画布坐标）
+    QHash<QString, QPointF> m_acceptorCentersByKey;
 
     // SpecialAccept 临时态缓存（按 keyId 索引，跨 rebuild 保留）
     // 对应 ImGui WorkSpaceLine::SpecialAccept（画布会话级，不持久化到 INI）

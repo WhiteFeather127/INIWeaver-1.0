@@ -11,6 +11,8 @@ Canvas {
     property bool open: false
 
     onPaint: {
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.FolderIcon.onPaint")
         var ctx = getContext("2d")
         ctx.clearRect(0, 0, width, height)
         var s = Math.min(width, height)
@@ -50,6 +52,7 @@ Canvas {
             ctx.lineTo(s, 0)
             ctx.stroke()
         }
+        if (_perf) workspaceController.perfEnd()
     }
 
     onOpenChanged: requestPaint()

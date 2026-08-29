@@ -482,15 +482,24 @@ Item {
         anchors.top: root.keyType === 2 ? parent.top : undefined
         // 编辑行注释（inputOnShow）时隐藏原文本，由 descEditField 替代（对应 ImGui
         // InputOnShow 分支替换 onShow 文本输入框，而非叠加覆盖）
-        visible: !root.inputOnShow
+        // 多值键标签只在首值行显示（对齐 ImGui IBR_Misc.cpp:291：TextEx(Line) 在值循环外
+        // 只画一次，值 1..n-1 行左侧留空）。隐藏但保留作隐形占位：acceptorNode/值框等
+        // 锚点都挂在本元素上，各行的值/LinkNode 横向对齐保持一致（ImGui 同样为值 1+
+        // 保留标签列宽度）。副作用与 ImGui 一致：双击切 Input 态只在首值行可用。
+        visible: !root.inputOnShow && root.lineMult === 0
         // Input 态：文本占自然宽度（随字体等比缩放），输入框占剩余宽度
         //   对应 ImGui: TextEx(Hint.Short) 自然宽度 + SameLine + SetNextItemWidth(剩余)
         //   用 implicitWidth（Text 全文本自然宽度，不依赖布局完成，避免 contentWidth 初始为 0 导致塌缩）
         //   IIF 行：模块宽度已按"标签自然宽+分量宽"自适应预留，标签直接取全自然宽（不截断）；
         //   其他 Input 态（String）仍需 0.7 上限给输入框/圆点留空间。
+        //   多值键额外预留最小列宽（对应 ImGui :294-299 透明行号占位）：本行的 "+" 落在
+        //   标签列正下方，列宽不足时下一行值框（锚在本元素右侧）会与 "+" 重叠
         // Link 态：文本占满左侧，留出 LinkNode 空间
         width: root.isInputMode
-               ? (root.keyType === 2 ? implicitWidth : Math.min(implicitWidth, parent.width * 0.7))
+               ? (root.keyType === 2
+                  ? implicitWidth
+                  : Math.max(Math.min(implicitWidth, parent.width * 0.7),
+                             root.isMultiple ? root.fontBody * 2.5 : 0))
                : parent.width - linkNode.width - 24
         text: root.onShowText
         color: "#d4d4d4"
@@ -1449,21 +1458,14 @@ Item {
         id: addLineButton
         // 同一组键只有一个 "+"：仅第一个值行（lineMult===0）显示，追加的新值行不再显示
         visible: root.isMultiple && !root.inputOnShow && root.lineMult === 0
-        // Import 行 LinkNode 居中，"+" 放在居中点左侧；其他行放在 LinkNode 左侧；
-        // IIF 行（keyType==2）或 Input 态无行级 LinkNode 时，"+" 放在模块右端对齐节点。
-        x: (root.isImport && root.keyType !== 2)
-           ? (parent.width / 2 - width - 4)
-           : (root.keyType === 2)
-             // IIF 行：加号靠模块左侧、与第一行分量对齐（imgui 放 BaseCursorY=首行，EndCursor.x=左侧）
-             ? 6
-             : (root.isInputMode
-                ? (parent.width - width - 4)
-                : (linkNode.x - width - 4))
-        // IIF 行已按分量加高（多行堆叠），"+" 垂直居中会落到整个块中央，应对齐顶部第一行；
-        // 非 IIF 行保持垂直居中（行高即一行）。
+        // 位置对齐 ImGui IBR_Misc.cpp:359-368（!nlad：内容区左缘、键名行下方）：
+        // x = 标签左缘（键名正下方一列，替换原 import 居中/LinkNode 左侧特例）；
+        // y = 本行底部对齐（键名正下方）。IIF 行（keyType===2）保持原位
+        //（分量首行对齐，imgui EndCursor.x=左侧）。
+        x: root.keyType === 2 ? 6 : onShowLabel.x
         y: root.keyType === 2
            ? Math.round((root.fontBody * 2 - height) / 2)
-           : (parent.height - height) / 2
+           : parent.height - height
         width: root.fontSmall * 1.4
         height: root.fontSmall * 1.4
         radius: 2
@@ -1650,13 +1652,16 @@ Item {
     }
 
     function updateIifCompCenters(force) {
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
-        if (!iifRowsRepeater) return
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.LineRow.updateIifCompCenters")
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
+        if (!iifRowsRepeater) { if (_perf) workspaceController.perfEnd(); return }
         var rep = iifRowsRepeater
         for (var r = 0; r < rep.count; ++r) {
             // LinkNodePoint 在 RowLayout 内（iifRow 深层），递归查找
             pushCompNodesRecursive(rep.itemAt(r), force)
         }
+        if (_perf) workspaceController.perfEnd()
     }
 
     // 行为A：向外部（SectionNode/WorkspaceView 命中）暴露 acceptor 方形接收点中心（workspaceView 坐标）。
@@ -1669,12 +1674,14 @@ Item {
     }
 
     function doUpdateLinkNodeCenter(force) {
-        if (!root.lineModel || root.rowIndex < 0) return
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.LineRow.doUpdateLinkNodeCenter")
+        if (!root.lineModel || root.rowIndex < 0) { if (_perf) workspaceController.perfEnd(); return }
         // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomTransform 叠加渲染），
         // 跳过回写，避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
         // force=true 用于缩放收尾（SectionNode.updateAllCenters 传入）：缩放后必须回写缩放后
         // 坐标，否则重建端点表读到缩放前旧值 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
         // 对应 ImGui IBR_LinkNode::UpdateLink：对所有 Data_String 行无条件设置 LastCenter
         // ImGui: Center = IsImport ? ImportCenter() : DefaultCenter()
         //   DefaultCenter = GetLineEndPos() - {FontHeight*1.5, HalfLine}（行末位置）
@@ -1698,6 +1705,7 @@ Item {
             cx = pos.x
             cy = pos.y
         } else {
+            if (_perf) workspaceController.perfEnd()
             return
         }
         // 拖拽中：减去 dragOffset，存储原位置（不含拖拽位移）
@@ -1707,7 +1715,7 @@ Item {
         // 松手后：dragOffset=0，不减，LastCenter=新位置 → 无回弹
         var dx = root.isDragging ? workspaceController.dragOffset.x : 0
         var dy = root.isDragging ? workspaceController.dragOffset.y : 0
-        if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] LineRow doUpdate sid=" + root.sectionId + " row=" + root.rowIndex + " key=" + root.keyName + " cx=" + (cx-dx) + " cy=" + (cy-dy) + " isDragging=" + root.isDragging)
+        if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] LineRow doUpdate sid=" + (root.sectionData.sectionId || 0) + " row=" + root.rowIndex + " key=" + root.keyName + " cx=" + (cx-dx) + " cy=" + (cy-dy) + " isDragging=" + root.isDragging)
         root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
         // 阶段 3：同一 RadioButton 位置也作为行级接受点回写（对应 ImGui AcceptCenter）
         // 该坐标作为连线终点 pb 的行精确值
@@ -1719,5 +1727,6 @@ Item {
             var aPos = acceptorNode.mapToItem(workspaceView, acceptorNode.width / 2, acceptorNode.height / 2)
             root.lineModel.setAcceptorCenter(root.keyName, root.lineMult, aPos.x - dx, aPos.y - dy)
         }
+        if (_perf) workspaceController.perfEnd()
     }
 }

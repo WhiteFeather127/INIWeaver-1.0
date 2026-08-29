@@ -187,15 +187,26 @@ Item {
                     // IIF 分量节点：写入该分量 Value（compIdx）建链
                     root.lineModel.createLinkAt(root.rowIndex, root.compIdx, targetId, "")
                 } else {
+                    // 键连键（行为A）：落点在 acceptor 键行时——
+                    //   仅当目标是数字后缀槽（MultiColl 的 MultColl.N，如 MultColl.1）才传该键做 destKey
+                    //   （写 sec$$Key）；普通单 Collector（如 Hub 的 Collector）是模块级连接，传空（写 sec），
+                    //   否则会把断点当成具体键、连线创建失败。
+                    var accHit = workspaceView.findHitAcceptorPoint(toPos.x, toPos.y)
+                    var dstKey = ""
+                    if (accHit && Number(accHit.sectionId) === targetId
+                            && /\.\d+$/.test(accHit.keyName || "")) {
+                        dstKey = accHit.keyName
+                    }
                     workspaceController.createLinkFromDrag(
                         root.sectionData.sectionId, root.keyName || "", root.lineMult || 0,
-                        targetId, "", 0)
+                        targetId, dstKey, 0)
                 }
             }
             root.linkWasDragged = false
             root.released()
             // 拖拽结束：清除 Bezier 预览与目标预览
             workspaceController.clearDraggingLink()
+            workspaceController.clearDragAcceptorRow()
         }
 
         // 拖拽中：实时更新 Bezier 预览线 + 目标命中预览（对应 ImGui RenderUI_Links）
@@ -205,6 +216,34 @@ Item {
                 var fromPos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
                 // 终点 = 鼠标在 workspaceView 坐标系中的位置
                 var toPos = mapToItem(workspaceView, mouse.x, mouse.y)
+                // 行为A：拖线悬停 acceptor 键行 → 整行高亮 + 端点线终点锚到该行接收点中心
+                // （对应 ImGui IBR_Misc.cpp:100-178 AcceptFullArea 整行 DropTarget）。
+                var accHit = workspaceView.findHitAcceptorPoint(toPos.x, toPos.y)
+                if (accHit) {
+                    workspaceController.setDragAcceptorRow(
+                        Number(accHit.sectionId), accHit.keyName, accHit.color)
+                    // 预览线终点跟随鼠标（不锚到方形节点；高亮/判断仍按 acceptor 键）
+                    workspaceController.setDraggingLink(fromPos.x, fromPos.y, toPos.x, toPos.y)
+                    // 预览文字框位置跟随鼠标（draggingLinkCanvas 已画到接收点锚点）
+                    workspaceView.dragPreviewItem.x = toPos.x + 8
+                    workspaceView.dragPreviewItem.y = toPos.y + 8
+                    var accTar = Number(accHit.sectionId)
+                    if (root.linkLimit === 0) {
+                        workspaceController.setDragInvalidLink(true)
+                        workspaceController.setDragTarget(accTar, "#d63b3b", (i18n.rev, i18n.tr("GUI_Preview_InvalidLink")))
+                    } else {
+                        workspaceController.setDragInvalidLink(false)
+                        var accCode = workspaceController.checkMergePreviewKey(
+                        root.sectionData.sectionId, accTar, accHit.keyName, root.linkType)
+                    var accText = workspaceController.mergePreviewTextKey(
+                        root.sectionData.sectionId, accTar, accHit.keyName, root.linkType)
+                        workspaceController.setDragTarget(accTar,
+                            accCode === 0 ? "#4fc3f7" : "#d63b3b", accText)
+                    }
+                    return
+                } else {
+                    workspaceController.clearDragAcceptorRow()
+                }
                 workspaceController.setDraggingLink(fromPos.x, fromPos.y, toPos.x, toPos.y)
                 // 预览框跟随鼠标（对应 ImGui 拖拽图像）：toPos 已是 workspaceView 坐标
                 workspaceView.dragPreviewItem.x = toPos.x + 8
@@ -321,9 +360,11 @@ Item {
     // rebuildLinkEndpoints 的 priority 2 读到该分量圆点坐标 → 连线起点/终点正确。
     // 减 dragOffset 与 LineRow 一致：存储原位置，LinkRenderer 叠加拖拽位移动态修正。
     function pushCompCenter(force) {
-        if (!root.iifNode || !root.iifReady) return
-        if (!root.lineModel || root.compIdx < 0) return
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.LinkNodePoint.pushCompCenter")
+        if (!root.iifNode || !root.iifReady) { if (_perf) workspaceController.perfEnd(); return }
+        if (!root.lineModel || root.compIdx < 0) { if (_perf) workspaceController.perfEnd(); return }
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
         var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
         // 对齐 LineRow.doUpdateLinkNodeCenter：仅拖拽中减去 dragOffset（存储原位置，
         // 由 LinkRenderer 叠加 dragOffset 实时跟随）；松手后 dragOffset 不清零但模块已
@@ -336,6 +377,7 @@ Item {
         // 按 keyName 稳定定位：rowIndex 在 rebuildEntries 重建后可能错位，
         // setLinkNodeCenterAt(row) 会算错 sessionId → 连线端点漂移
         root.lineModel.setLinkNodeCenterAtKey(root.keyName, root.lineMult, root.compIdx, pos.x - dx, pos.y - dy)
+        if (_perf) workspaceController.perfEnd()
     }
 
     onXChanged: root.pushCompCenter()

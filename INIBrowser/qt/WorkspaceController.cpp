@@ -2,6 +2,9 @@
 // 工作区控制器实现：桥接 IBR_WorkSpace / IBR_FullView / IBR_RealCenter
 #include "WorkspaceController.h"
 #include "WorkspaceSectionModel.h"
+
+// 节点当前 EqPos（QPointF）：世界坐标缓存的相对偏移换算用（定义在文件后部）
+static QPointF nodeEqPos(const std::map<ModuleID_t, IBR_SectionData> &map, qulonglong id);
 #include "EditPanelController.h"
 #include "MenuController.h"
 #include "Global.h"
@@ -82,6 +85,9 @@ WorkspaceController::WorkspaceController(QObject *parent)
                                        std::numeric_limits<qreal>::max());
     // C11：Paste 节流计时器
     m_uptimeTimer.start();
+#ifdef INIWEAVER_DIAG
+    m_perfClock.start();  // 渲染性能探针纳秒时钟（构造即启动，探针取差值）
+#endif
 
     // 增量 Section 模型（QML Repeater 使用，整表替换会重建全部节点）
     m_sectionsModel = new WorkspaceSectionModel(this);
@@ -449,7 +455,8 @@ void WorkspaceController::onWheel(qreal x, qreal y, qreal delta)
 
 void WorkspaceController::applyZoomRatio(float newRatio)
 {
-    if (std::abs(newRatio - IBR_FullView::Ratio) < 1e-6f) return;
+    perfBegin(QStringLiteral("C++.applyZoomRatio"));
+    if (std::abs(newRatio - IBR_FullView::Ratio) < 1e-6f) { perfEnd(); return; }
     // 锚点由 onWheel 在滚轮事件时更新（连续滚轮取最新位置），动画期间保持不变
     const QPointF anchorScreen = m_zoomAnchorScreen;
     bool dragging = (m_dragSectionId != INVALID_MODULE_ID || m_massDragging);
@@ -497,6 +504,7 @@ void WorkspaceController::applyZoomRatio(float newRatio)
     // 性能优化：QML 根据 ratio 和 eqCenter 实时计算屏幕坐标，不需要全量 refresh
     emit ratioChanged();
     emit eqCenterChanged();
+    perfEnd();
 }
 
 void WorkspaceController::zoomTweenFinished()
@@ -637,6 +645,24 @@ void WorkspaceController::centerViewTo(qreal eqX, qreal eqY)
     emit eqCenterChanged();
     emit workspaceRectChanged();
     m_linkEndpointsDirty = true;  // EqCenter 变化导致节点位置变化，需重建端点表
+    // 跳转必须原子切换（一次做完）：
+    // 1) eqCenterChanged 已同步驱动 QML 重定位 + 回写（壳的 syncVisibleNode）
+    // 2) 清缩放补间与防抖窗口：finishZoomTweenNow 只清 m_zoomAnimating 不清
+    //    m_zoomPending，而缩放后 m_zoomPending 长期保持（防抖窗口），会拦住下方
+    //    重建入口守卫 → 迷你地图点击跳转后连线停留在旧基准（一直偏的根因）。
+    //    applyZoomRatio 推到目标 ratio 并发出 ratioChanged → 壳按最终 basis 重定位/回写
+    // 3) 同步重建端点表：pa/pb 与节点同帧切换到新基准，无中间帧脱节
+    if (m_zoomAnimating) {
+        applyZoomRatio(m_zoomTargetRatio);
+        emit zoomTweenAbortRequested();
+        m_zoomAnimating = false;
+    }
+    if (m_zoomPending) {
+        m_zoomPending = false;
+        emit zoomBaseChanged();
+    }
+    rebuildLinkEndpoints();
+    m_linkEndpointsDirty = false;
 }
 
 void WorkspaceController::moveToCenter()
@@ -880,8 +906,8 @@ void WorkspaceController::selectInvert()
             }
         }
     }
-    IBR_WorkSpace::MassTarget = newTarget;
-    if (newTarget.empty()) {
+    IBR_WorkSpace::SetMassTarget(std::move(newTarget));
+    if (IBR_WorkSpace::MassTarget.empty()) {
         updateInputState(0);  // Normal
     } else {
         updateInputState(4);  // MassAfter
@@ -912,8 +938,8 @@ void WorkspaceController::toggleSelectSection(qulonglong sectionId)
             if (b && b->Dynamic.Selected) newTarget.push_back(sid);
         }
     }
-    IBR_WorkSpace::MassTarget = newTarget;
-    if (newTarget.empty()) {
+    IBR_WorkSpace::SetMassTarget(std::move(newTarget));
+    if (IBR_WorkSpace::MassTarget.empty()) {
         updateInputState(0);  // Normal
     } else {
         updateInputState(4);  // MassAfter
@@ -1076,7 +1102,7 @@ void WorkspaceController::invertSelection()
         }
     }
     IBRF_CoreBump.SendToR({ [newTarget = std::move(newTarget)]() {
-        IBR_WorkSpace::MassTarget = newTarget;
+        IBR_WorkSpace::SetMassTarget(std::move(newTarget));
     } });
     // 性能优化：反选只改变 MassTarget，不改变 sections 数据
     // QML 的 isSelected 绑定到 selectedRevision
@@ -1313,32 +1339,21 @@ void WorkspaceController::endMoveSection()
     emit draggingSectionIdChanged();          // isDragging → false（LineRow 回写终点坐标）
     // 连线端点表需要重建（节点位置变了）
     m_linkEndpointsDirty = true;
-    QMetaObject::invokeMethod(this, [this, changedId]() {
-        emit sectionPositionChanged(changedId);  // 最终一致性兜底（先让节点位置同步）
-        QMetaObject::invokeMethod(this, [this]() {
-            m_suppressLinkRebuild = false;       // 恢复 tick 重建
+    // ===== 收尾同步化（一次做完）=====
+    // 旧实现：清 dragOffset + 重建放在两层 QueuedConnection 里，与松手帧之间隔了
+    // 1-2 个渲染帧——期间渲染"旧端点表 + 旧 dragOff"（节点已同步跳终点，连线滞后）
+    // → 拖模块结束的一帧偏移。现在回写级联（isDragging→false 的同步级联）已在上面
+    // 完成、壳已重定位到终点，收尾（清偏移 + 重建）可以同步执行：
+    // 同一次事件处理内完成"节点终点 + 端点表终点 + 偏移清零"，无中间态帧。
+    // suppress 一并清除：同步序列内不存在需要抑制的中间重建窗口。
+    m_suppressLinkRebuild = false;
+    m_dragOffset = QPointF();        // 叠加条件（lastDraggedId+dragOffset）失效
+    emit dragOffsetChanged();
+    rebuildLinkEndpoints();          // 端点表 → 终点（上面的同步回写已完成）
+    m_lastDraggedId = INVALID_MODULE_ID;  // 无异步过渡期，无需 overlay 桥接
 #ifdef INIWEAVER_DIAG
-            qDebug() << "[DRAG-DIAG] cleanup check: dragSectionId=" << m_dragSectionId
-                     << "inputState=" << m_inputState
-                     << "cond(dragSec==0 && state!=3)=" << (m_dragSectionId == INVALID_MODULE_ID && m_inputState != 3);
+    qDebug() << "[DRAG-DIAG] cleanup SYNC done, cleared lastDraggedId + dragOffset";
 #endif
-            if (m_dragSectionId == INVALID_MODULE_ID && m_inputState != 3) {
-                m_dragOffset = QPointF();        // 叠加条件（lastDraggedId+dragOffset）失效
-                emit dragOffsetChanged();
-                rebuildLinkEndpoints();          // 端点表 → 终点（LineRow 已回写），同回调渲染合并
-                // 过渡期结束：清 lastDraggedId，防止下次拖动其他模块时（dragOffset 非零）
-                // LinkRenderer 的 lastDraggedId+hasOffset 条件仍命中旧模块，把它的连线一起拖走
-                m_lastDraggedId = INVALID_MODULE_ID;
-#ifdef INIWEAVER_DIAG
-                qDebug() << "[DRAG-DIAG] cleanup PASSED, cleared lastDraggedId + dragOffset";
-#endif
-            } else {
-#ifdef INIWEAVER_DIAG
-                qDebug() << "[DRAG-DIAG] cleanup SKIPPED, lastDraggedId stays=" << m_lastDraggedId;
-#endif
-            }
-        }, Qt::QueuedConnection);
-    }, Qt::QueuedConnection);
 }
 
 void WorkspaceController::updateDrag(qreal curX, qreal curY)
@@ -1570,6 +1585,7 @@ void WorkspaceController::updateCommentText(qulonglong sectionId, const QString 
 // ===== 阶段 1：折叠态连线锚点回写（修复 D1）=====
 void WorkspaceController::setHeadLineRN(qulonglong sectionId, qreal x, qreal y)
 {
+    perfBegin(QStringLiteral("C++.setHeadLineRN"));
     // 对应 ImGui RenderUI_Collapsed（IBR_SectionData.cpp:835-868）：
     //   折叠态下所有连线的源端点汇聚到头部 RadioButton 位置
     //   遍历所有 SubSec 的 NewLinkTo，调 SetSessionStatus(SessionID, HeadLineRN, true)
@@ -1585,17 +1601,31 @@ void WorkspaceController::setHeadLineRN(qulonglong sectionId, qreal x, qreal y)
     // 优先级 2 找不到新鲜接受点，会落到基于 EqPos 的兜底，而子模块 EqPos 是组内相对坐标
     // → pb 错位（编组内子模块折叠时连线位置错误的根因）。setSectionAcceptPoint 只在非折叠态回写。
     m_sectionAcceptPoint[id] = QPointF(x, y);
+    m_sectionAcceptPointEq[id] =
+        screenToEq(QPointF(x, y)) - topAncestorEqPos(id);
     m_linkEndpointsDirty = true;  // D10：标记端点表脏，下次 refreshFromTimer 重建
+    perfEnd();
 }
 
 // ===== 阶段 3：终点 pb 精确化（修复 D3、D7）=====
 void WorkspaceController::setSectionAcceptPoint(qulonglong sectionId, qreal x, qreal y)
 {
+    perfBegin(QStringLiteral("C++.setSectionAcceptPoint"));
     // 非折叠态下，目标 section 的"接受点"为其标题栏 RadioButton 位置
     // 对应 ImGui RSD->ReWindowUL + RSD->ReOffset（标题栏中央节点）
     // 存入 m_sectionAcceptPoint，供 rebuildLinkEndpoints 构建 pb
     m_sectionAcceptPoint[sectionId] = QPointF(x, y);
+    // 世界镜像存【相对 EqPos 的偏移】（cull 节点端点再投影用，随节点移动自动跟随）
+    m_sectionAcceptPointEq[sectionId] =
+        screenToEq(QPointF(x, y)) - topAncestorEqPos(sectionId);
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[EP-DIAG] setSectionAcceptPoint sid=" << sectionId
+             << "pt=(" << x << "," << y << ")"
+             << "worldRel=" << m_sectionAcceptPointEq[sectionId]
+             << "anchor=" << topAncestorEqPos(sectionId);
+#endif
     m_linkEndpointsDirty = true;  // D10：标记端点表脏，下次 refreshFromTimer 重建
+    perfEnd();
 }
 
 // ===== 阶段 2 新增：连线系统 =====
@@ -1803,19 +1833,15 @@ void WorkspaceController::syncSectionSnapshotPos(ModuleID_t id)
     // 的 sections 绑定读取的正是 m_sections 快照 → 快照 eqX/eqY 过期则迷你地图模块
     // 位置不刷新。这里把 IBR_SectionMap 的最新 EqPos 同步回快照，由调用方 emit
     // sectionsChanged 触发 MiniMap 重绘。
-    for (auto &item : m_sections) {
-        const QVariantMap map = item.toMap();
-        if (map.value(QStringLiteral("sectionId")).toULongLong() != static_cast<qulonglong>(id))
-            continue;
-        auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-        if (it == IBR_Inst_Project.IBR_SectionMap.end())
-            return;
-        QVariantMap updated = map;
-        updated["eqX"] = static_cast<double>(it->second.EqPos.x);
-        updated["eqY"] = static_cast<double>(it->second.EqPos.y);
-        item = updated;
-        return;
-    }
+    // O(1) 行索引定位（此前 O(n) 全表扫描；多选拖拽结束时每个模块调一次）
+    const auto rowIt = m_sectionRowIndex.constFind(static_cast<qulonglong>(id));
+    if (rowIt == m_sectionRowIndex.constEnd()) return;
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
+    QVariantMap updated = m_sections.at(*rowIt).toMap();
+    updated["eqX"] = static_cast<double>(it->second.EqPos.x);
+    updated["eqY"] = static_cast<double>(it->second.EqPos.y);
+    m_sections[*rowIt] = updated;
 }
 
 void WorkspaceController::setViewportSize(qreal width, qreal height)
@@ -1874,8 +1900,12 @@ void WorkspaceController::refreshFromTimer()
         if (!m_sections.isEmpty()) {
             m_sectionsModel->updateFrom(QVariantList{});  // 同步清空增量模型
             m_sections.clear();
+            m_sectionRowIndex.clear();
+            m_pendingSizeRows.clear();
+            m_culledSections.clear();
             m_sectionDataRevision++;  // D20：递增版本号
             emit sectionsChanged();
+            emit sectionDataRevisionChanged();
         }
         if (!m_links.isEmpty()) {
             m_links.clear();
@@ -1945,8 +1975,37 @@ void WorkspaceController::refreshFromTimer()
         // 此时只重建端点表，不重建 sections/links（对应 ImGui 每帧用新 LastCenter 重绘连线）
         // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
         if (m_linkEndpointsDirty && !m_suppressLinkRebuild && !m_pendingRebuild) {
-            rebuildLinkEndpoints();
-            m_linkEndpointsDirty = false;
+            if (m_inputState == 1 || m_zoomPending) {
+                // 画布平移（inputState==1）/缩放叠加（zoomPending）中：端点表必须保持快照，
+                // 渲染靠 canvasDragOffset / zoomTransform 统一叠加（原设计："拖动画布中端点表
+                // 不重建，靠偏移叠加"）。此时重建会清零 canvasDragOffset，而表内未被 cull 的
+                // 节点仍是叠加前基准坐标（回写在叠加期间被 inputState==1 门控）→ 重建后全部
+                // 连线跳回旧位置。懒加载后叠加期间新增了两个置脏源（节点出入视口的
+                // setSectionCulled、新入视口 delegate 的 reportSectionSize），故在消费端统一
+                // 恢复不变量：叠加期间不重建，dirty 保留，由收尾链路（onInputStateChanged /
+                // onZoomFinalize → 回写 → 重建，或叠加结束后的本分支）处理。
+            } else {
+                // 统一走 m_pendingRebuild 队列（QueuedConnection）而非同步重建：
+                // 松手/缩放收尾的坐标回写经 Qt.callLater 入队（重入视口 delegate 的首次
+                // 回写同属 callLater）。同步重建可能抢在回写前执行——清零 canvasDragOffset
+                // 并用旧坐标画一帧，回写到了再修正（一帧偏移）。入队后本重建按 FIFO
+                // 排在所有已入队回写之后，读到全部新鲜坐标。窗口期内 writeback 触发的
+                // linkNodeCenterChanged 见 m_pendingRebuild=true 不会重复排队。
+                m_pendingRebuild = true;
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_pendingRebuild = false;
+                    // 执行时复核：排队期间可能进入松手过渡（suppress）/平移/缩放叠加/
+                    // 拖拽——该窗口内坐标回写尚未完成或带 dragOffset 残留，此时重建会
+                    // 固化错位基准（一帧偏移）。保留 dirty，由收尾路径（cleanup 内的
+                    // rebuildLinkEndpoints / 后续 tick 的本分支）处理。
+                    if (m_suppressLinkRebuild || m_inputState == 1 || m_zoomPending
+                        || m_dragSectionId != INVALID_MODULE_ID || m_massDragging) {
+                        return;
+                    }
+                    rebuildLinkEndpoints();
+                    m_linkEndpointsDirty = false;
+                }, Qt::QueuedConnection);
+            }
         }
         return;
     }
@@ -2010,9 +2069,17 @@ void WorkspaceController::refreshFromTimer()
     // 修复：rebuildLinkEndpoints 必须在 refreshSections/refreshLinks 之后执行
     // 因为 rebuildLinkEndpoints 依赖 m_lineModels（在 refreshSections 中创建）和 LinkList（在 refreshLinks→rebuildLinkList 中填充）
     // 松手过渡期（m_suppressLinkRebuild）跳过：避免叠加残留 dragOffset 导致偏移
+    // 平移/缩放叠加期（inputState==1/zoomPending）同样跳过（理由同早退分支）：
+    // 本路径新建 delegate 的回写被 inputState==1 门控，此时重建会固化叠加前坐标
+    // 并清零 canvasDragOffset → 连线整体跳回旧位置。dirty 保留，叠加结束后的
+    // 早退分支/收尾链路重建。
     if (m_linkEndpointsDirty && !m_suppressLinkRebuild && !m_pendingRebuild) {
-        rebuildLinkEndpoints();
-        m_linkEndpointsDirty = false;
+        if (m_inputState == 1 || m_zoomPending) {
+            // 叠加期：延迟重建
+        } else {
+            rebuildLinkEndpoints();
+            m_linkEndpointsDirty = false;
+        }
     }
     emit projectOpenChanged();
     emit ratioChanged();
@@ -2025,8 +2092,20 @@ void WorkspaceController::refreshFromTimer()
     m_lastLinkCount = static_cast<size_t>(IBR_Inst_Project.LinkList.size());
 }
 
+void WorkspaceController::flushPendingSectionSizes()
+{
+    m_pendingSizeFlushScheduled = false;
+    if (m_pendingSizeRows.isEmpty()) return;
+    m_pendingSizeRows.clear();
+    // 尺寸回写已在 reportSectionSize 中同步写入 m_sections，这里只发一次通知，
+    // MiniMap/LinkRenderer 按最终尺寸各重绘一次（导入 1471 模块场景 emit 次数
+    // 从 ~7000 次降为每个事件循环 1 次）
+    emit sectionsChanged();
+}
+
 void WorkspaceController::refreshSections()
 {
+    perfBegin(QStringLiteral("C++.refreshSections"));
     // v3 批次 3.1 修复：Sections 重建时同步更新 CurrentEqMax
     // 项目打开/增删模块后 EqMax 需重新计算，否则 EqPosFixRange 会用过小的旧值钳制 EqCenter
     // 导致拖动画布时模块跑出视口（对应 ImGui 每帧 UpdateCurrentEqMax）
@@ -2059,6 +2138,20 @@ void WorkspaceController::refreshSections()
     // 旧值（空），reportSectionSize 里遍历 m_sections 找不到匹配项 → foundInSnapshot=false
     // → MiniMap 收到 eqW=0 的模块（不可见）。关闭项目→新建项目→加模块不显示即此根因。
     m_sections = std::move(list);
+    // sectionId → 行索引（O(1) 定位）：必须在 updateFrom 之前建好——updateFrom 会同步
+    // 触发 QML Repeater 创建 delegate → SectionNode 渲染 → reportSectionSize 回调，
+    // 该回调依赖此索引把真实尺寸写回快照（旧实现每次回调 O(n) 全表扫描）。
+    m_sectionRowIndex.clear();
+    m_sectionRowIndex.reserve(m_sections.size());
+    for (int i = 0; i < m_sections.size(); ++i)
+        m_sectionRowIndex.insert(
+            m_sections.at(i).toMap().value(QStringLiteral("sectionId")).toULongLong(), i);
+    // 全量重建后 m_pendingSizeRows 里的旧行索引全部失效，由本次 emit 统一通知
+    m_pendingSizeRows.clear();
+    // culling 集合同步失效：delegate 随模型重建，可见节点由 shell 的 Loader
+    // onActiveChanged 重新上报；不可见节点回 EqPos 兜底（新加载项目 LastCenter
+    // 本就为 0，行为一致）。不清会让旧项目的 sid 残留、污染新项目的端点来源门控。
+    m_culledSections.clear();
     m_sectionsModel->updateFrom(m_sections);
     m_sectionDataRevision++;  // D20：递增版本号
 #ifdef INIWEAVER_DIAG
@@ -2066,6 +2159,8 @@ void WorkspaceController::refreshSections()
              << "smapSize=" << IBR_Inst_Project.IBR_SectionMap.size();
 #endif
     emit sectionsChanged();
+    emit sectionDataRevisionChanged();
+    perfEnd();
 }
 
 // 编辑侧边栏修改值后，只刷新指定 sectionId 的 SectionLineModel
@@ -2264,6 +2359,32 @@ QVariantMap WorkspaceController::buildSectionItem(ModuleID_t id, const IBR_Secti
         item["lineModel"] = QVariant();
     }
 
+    // ===== 懒加载尺寸兜底 =====
+    // shell+Loader 视口 culling 后，从未创建过 delegate 的节点没有 reportSectionSize
+    // 回写，EqSize 可能是 0（模块库新建时未初始化，见 reportSectionSize 注释）：
+    // hitTestSection 对 w/h<=0 直接跳过（框选/点选永远命不中）、MiniMap 矩形不可见。
+    // 此处用行模型行数估算（高度 = 标题栏 + 行数×行高 + 边距，宽度 = max(WidthFix,
+    // widthBase)，与 SectionNode implicitWidth 同式），写回 IBR_SectionMap（会话级）
+    // 并刷新本 item 的 eq/screen 字段；真实 delegate 创建后 reportSectionSize 覆盖为准确值。
+    if (sd.EqSize.x <= 0.0f || sd.EqSize.y <= 0.0f) {
+        auto mit = m_lineModels.find(id);
+        if (mit != m_lineModels.end() && *mit) {
+            const int rows = (*mit)->rowCount();
+            auto b = rsec.GetBack_Unsafe();
+            const float estW = b ? std::max(sd.WidthFix, FontHeight * 17.0f * b->WidthRatio)
+                                 : FontHeight * 17.0f;
+            const bool hasTitle = b ? SectionBlockShowTitle(b) : true;
+            const float estH = (hasTitle ? 28.0f : 0.0f) + rows * FontHeight * 0.9f + 8.0f;
+            auto smit = IBR_Inst_Project.IBR_SectionMap.find(id);
+            if (smit != IBR_Inst_Project.IBR_SectionMap.end())
+                smit->second.EqSize = ImVec2(estW, estH);
+            item["eqW"] = static_cast<double>(estW);
+            item["eqH"] = static_cast<double>(estH);
+            item["screenW"] = estW * IBR_FullView::Ratio;
+            item["screenH"] = estH * IBR_FullView::Ratio;
+        }
+    }
+
     // 折叠态连线锚点（标题栏右端点，QML layout 后回写）
     // 对应 ImGui HeadLineRN（IBR_SectionData.cpp:1063）
     item["collapsedCenterX"] = 0.0;
@@ -2450,6 +2571,7 @@ void WorkspaceController::refreshLinks()
 
 void WorkspaceController::rebuildLinkEndpoints()
 {
+    perfBegin(QStringLiteral("C++.rebuildLinkEndpoints"));
     // 缩放进行中（补间动画或防抖窗口）禁止重建端点表：
     // 重建会调用 finishZoomTweenNow 中止进行中的补间动画，且清 zoomPending 后
     // LinkRenderer 换算失效，连线以旧端点表无换算渲染 → 与节点错位。
@@ -2458,6 +2580,7 @@ void WorkspaceController::rebuildLinkEndpoints()
     // endMoveSection/endMassDrag）都在调用本函数前清除了 zoom 状态，不受此守卫影响。
     if (m_zoomAnimating || m_zoomPending) {
         m_linkEndpointsDirty = true;
+        perfEnd();
         return;
     }
     // 缩放叠加结束：先强制完成补间（重建后 Ratio 不得再变，否则连线与节点错位），
@@ -2518,7 +2641,10 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 与隐藏行起点一致。直接计算并跳过后面的优先级。
         auto srcDataFull = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
         bool srcCollapsed = srcDataFull && (srcDataFull->CollapsedInComposed || srcDataFull->UICollapsed);
-        if (srcCollapsed && srcDataFull)
+        // srcCulled：节点被懒加载 cull 后无 delegate 回写，屏幕坐标来源（LastCenter/
+        // acceptCenter/acceptPoint）全部过期（平移/缩放后大偏差根因），全部跳过。
+        const bool srcCulled = m_culledSections.contains(static_cast<qulonglong>(link.SrcModuleID));
+        if (srcCollapsed && srcDataFull && !srcCulled)
         {
             // 折叠子模块在 QML 里被堆叠在父虚拟块内（同 x 列、不同 y），其实际可见位置是
             // QML 回写的 m_sectionAcceptPoint（headLineRN/RadioButton 中心）。不能用各子模块
@@ -2550,10 +2676,53 @@ void WorkspaceController::rebuildLinkEndpoints()
 #endif
         }
 
+        // ===== 世界坐标缓存（pa 首选来源，全部节点）=====
+        // 回写时已换算存储【相对顶层祖先 EqPos 的偏移】（Eq 空间，视口无关）：
+        // 此处按当前视口投影 → 画布平移/小地图拖动/缩放后端点都精确跟随。
+        // 此前世界缓存只对 culled 节点生效：小地图拖动（inputState==1 回写被门控）
+        // 时屏幕坐标来源全部过期，编组成员连线冻结不跟随（根因）。
+        // 拖拽中的节点：缓存是拖拽前基准，LinkRenderer 叠加 dragOffset 修正
+        //（对可见/被 cull 的被拖节点一致正确），故无需按拖拽状态区分。
+        if (!paValid && srcLineVisible && !srcCollapsed)
+        {
+            QPointF lcEq = sessionCenterEq(link.SourceID);
+            if (!lcEq.isNull())
+            {
+                QPointF sp = eqToScreen(lcEq + topAncestorEqPos(link.SrcModuleID));
+                paX = sp.x(); paY = sp.y(); paValid = true;
+            }
+        }
+        if (!paValid && srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
+        {
+            auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
+            if (itSrcModel != m_lineModels.end() && *itSrcModel)
+            {
+                QPointF srcAcEq = (*itSrcModel)->acceptCenterEqByKey(
+                    QString::fromUtf8(PoolStr(link.FromKey)), static_cast<int>(link.SrcMult));
+                if (!srcAcEq.isNull())
+                {
+                    QPointF sp = eqToScreen(srcAcEq + topAncestorEqPos(link.SrcModuleID));
+                    paX = sp.x(); paY = sp.y(); paValid = true;
+                }
+            }
+        }
+        if (!paValid && srcLineVisible && !srcCollapsed)
+        {
+            QPointF apEq = sectionAcceptPointEq(static_cast<qulonglong>(link.SrcModuleID));
+            if (!apEq.isNull())
+            {
+                QPointF sp = eqToScreen(apEq + topAncestorEqPos(link.SrcModuleID));
+                paX = sp.x(); paY = sp.y(); paValid = true;
+            }
+        }
+
         // 优先级 1：QML 回写的 LastCenter（分量节点经 pushCompCenter → setLinkNodeCenterAt
         // 按分量 sessionId（Comp=cidx）回写，与 UpdateAll 建链的 SourceID 一致；行级节点
         // Comp=0 的链接同样命中）。LastCenter 优先可保证分量连线起点落在分量圆点上。
-        if (srcLineVisible && !srcCollapsed && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
+        // srcCulled：节点被懒加载 cull 后无回写，LastCenter 是旧屏幕坐标（平移后大偏差
+        // 根因），必须跳过 → 走下方世界坐标缓存再投影，最后才落 EqPosToRePos 兜底。
+        if (srcLineVisible && !srcCollapsed && !srcCulled
+            && (sv.LastCenter.x != 0.0f || sv.LastCenter.y != 0.0f))
         {
             paX = static_cast<qreal>(sv.LastCenter.x);
             paY = static_cast<qreal>(sv.LastCenter.y);
@@ -2561,7 +2730,8 @@ void WorkspaceController::rebuildLinkEndpoints()
         }
         // 优先级 2：行级接受点兜底（按 FromKey 查行级圆点坐标）。
         // 仅当 LastCenter 未回写时使用（首帧/行级节点 Comp 不匹配时），避免覆盖分量圆点坐标。
-        if (!paValid && srcLineVisible && !srcCollapsed && link.FromKey != EmptyPoolStr)
+        // srcCulled：cull 后行级 acceptCenter 同样过期，跳过。
+        if (!paValid && srcLineVisible && !srcCollapsed && !srcCulled && link.FromKey != EmptyPoolStr)
         {
             auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
             if (itSrcModel != m_lineModels.end() && *itSrcModel)
@@ -2607,24 +2777,52 @@ void WorkspaceController::rebuildLinkEndpoints()
                 paValid = true;
             }
         }
-        // 兜底：用源 section 的 EqPos 直接计算标题栏 RadioButton 中心
-        // 对应 ImGui ReWindowUL + ReOffset = EqPosToRePos(EqPos) + {FontHeight*0.7, HalfLine}
+        // 兜底（行级估算优先）：从未渲染过的节点无任何回写，标题栏锚点的偏差 =
+        // 目标行到标题栏的距离（大模块数百 px）。行模型在 buildSectionItem 时已构建
+        //（无需 delegate），按 FromKey 定位行序号、按行数均匀估算行中心 Y；
+        // x 取 LinkNode 侧（普通行右端 / 导入行居中）。IIF 行高度不均匀会有残差。
+        // 仍无行模型时退回标题栏 RadioButton 中心（对应 ImGui ReWindowUL + ReOffset）。
         if (!paValid)
         {
             auto srcData = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
             if (srcData)
             {
                 ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(srcData->EqPos);
-                // 判断源是否导入块（ReOffset 不同）
                 auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
                 auto srcBsec = srcRsec.GetBack_Unsafe();
                 bool isImport = srcBsec && srcBsec->Dynamic.ImportCount > 0;
-                float reOffsetX = isImport
-                    ? (srcData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
-                    : (fontHeightScaled * 0.7f);
-                paX = static_cast<qreal>(rePos.x + reOffsetX);
-                paY = static_cast<qreal>(rePos.y + halfLine);
-                paValid = true;
+                bool paDone = false;
+                auto itSrcModel = m_lineModels.find(static_cast<qulonglong>(link.SrcModuleID));
+                if (itSrcModel != m_lineModels.end() && *itSrcModel && srcLineVisible
+                    && link.FromKey != EmptyPoolStr)
+                {
+                    int rowIdx = (*itSrcModel)->rowIndexOf(
+                        QString::fromUtf8(PoolStr(link.FromKey)), static_cast<int>(link.SrcMult));
+                    int rows = (*itSrcModel)->rowCount();
+                    if (rowIdx >= 0 && rows > 0)
+                    {
+                        bool hasTitle = srcBsec ? SectionBlockShowTitle(srcBsec) : true;
+                        float contentTop = (hasTitle ? 28.0f : 4.0f);
+                        float contentH = srcData->EqSize.y - contentTop - 4.0f;
+                        float rowH = contentH / rows;
+                        float anchorX = isImport
+                            ? (srcData->EqSize.x * ratio * 0.5f)
+                            : (srcData->EqSize.x * ratio - fontHeightScaled * 0.7f);
+                        paX = static_cast<qreal>(rePos.x + anchorX);
+                        paY = static_cast<qreal>(rePos.y + contentTop + (rowIdx + 0.5f) * rowH);
+                        paValid = true;
+                        paDone = true;
+                    }
+                }
+                if (!paDone)
+                {
+                    float reOffsetX = isImport
+                        ? (srcData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
+                        : (fontHeightScaled * 0.7f);
+                    paX = static_cast<qreal>(rePos.x + reOffsetX);
+                    paY = static_cast<qreal>(rePos.y + halfLine);
+                    paValid = true;
+                }
             }
         }
         ep["x"] = paX;
@@ -2645,6 +2843,7 @@ void WorkspaceController::rebuildLinkEndpoints()
         auto dstIdOpt = IBR_Inst_Project.GetSectionID(link.Dest.ToDesc());
         if (!dstIdOpt) continue;  // 目标模块不存在（残留连线），跳过该端点
         dstActualId = *dstIdOpt;
+        const bool dstCulled = m_culledSections.contains(static_cast<qulonglong>(dstActualId));
         auto dstRsec = IBR_Inst_Project.GetSectionFromID(dstActualId);
         auto dstData = dstRsec.GetSectionData();
         auto dstBsec = dstRsec.GetBack_Unsafe();
@@ -2654,6 +2853,30 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 折叠态（sv.Collapsed=true）仍走优先级 2（标题栏 RadioButton）。
         bool dstLineVisible = (link.DestKey == EmptyPoolStr) || !dstBsec
                               || dstBsec->IsOnShow(link.DestKey);
+        // ===== 世界坐标缓存（pb 首选来源，全部节点；理由同 pa 侧）=====
+        if (!pbValid && dstLineVisible && link.DestKey != EmptyPoolStr)
+        {
+            auto itDstModel = m_lineModels.find(static_cast<qulonglong>(dstActualId));
+            if (itDstModel != m_lineModels.end() && *itDstModel)
+            {
+                QPointF dstAcEq = (*itDstModel)->acceptCenterEqByKey(
+                    QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
+                if (!dstAcEq.isNull())
+                {
+                    QPointF sp = eqToScreen(dstAcEq + topAncestorEqPos(dstActualId));
+                    pbX = sp.x(); pbY = sp.y(); pbValid = true;
+                }
+            }
+        }
+        if (!pbValid && dstLineVisible)
+        {
+            QPointF apEq = sectionAcceptPointEq(static_cast<qulonglong>(dstActualId));
+            if (!apEq.isNull())
+            {
+                QPointF sp = eqToScreen(apEq + topAncestorEqPos(dstActualId));
+                pbX = sp.x(); pbY = sp.y(); pbValid = true;
+            }
+        }
         // 目标模块自身折叠（编组收起 / UICollapsed）：目标端是「块端」，连线应收敛到
         // 目标模块标题栏 RadioButton（左端，ReWindowUL+ReOffset），对应 ImGui
         // RSD->ReWindowUL + RSD->ReOffset（非折叠 pb 默认锚点，IBR_SectionData.cpp:749-753）。
@@ -2695,7 +2918,9 @@ void WorkspaceController::rebuildLinkEndpoints()
         // 判定：link.DestKey 指定 且 目标键是 accept 目标（InputType 带 AcceptorSetting）。
         // 对应 ImGui RenderUI_Acceptor -> AcceptCenter（IBR_Misc.cpp:101-141，方形 = Cursor.x - LH*0.7）。
         // 仅 accept 目标键才连到方形；普通 DLK 目标（如 UseFlagPack，无 AcceptType）仍走标题栏。
-        if (!pbValid && link.DestKey != EmptyPoolStr && dstBsec && !sv.Collapsed)
+        // 优先级 1：行级接受点（非折叠态目标，对应 ImGui AcceptCenter[LineMult]）
+        // dstCulled：目标节点被 cull 后行级 acceptCenter 过期，跳过 → 走世界坐标缓存再投影。
+        if (!pbValid && link.DestKey != EmptyPoolStr && dstBsec && !sv.Collapsed && !dstCulled)
         {
             auto *dstAcceptLine = dstBsec->GetLineFromSubSecs(link.DestKey);
             if (dstAcceptLine && dstAcceptLine->Default
@@ -2772,18 +2997,44 @@ void WorkspaceController::rebuildLinkEndpoints()
                 pbValid = true;
             }
         }
-        // 兜底：用目标 section 的 EqPos 直接计算标题栏 RadioButton 中心
-        // 对应 ImGui ReWindowUL + ReOffset
+        // 兜底（行级估算优先，理由同 pa 侧）：按 DestKey 定位行序号估算行中心；
+        // 无行模型/无该行时退回标题栏 RadioButton 中心。
         if (!pbValid && dstData)
         {
             ImVec2 rePos = IBR_WorkSpace::EqPosToRePos(dstData->EqPos);
             bool isImport = dstBsec && dstBsec->Dynamic.ImportCount > 0;
-            float reOffsetX = isImport
-                ? (dstData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
-                : (fontHeightScaled * 0.7f);
-            pbX = static_cast<qreal>(rePos.x + reOffsetX);
-            pbY = static_cast<qreal>(rePos.y + halfLine);
-            pbValid = true;
+            bool pbDone = false;
+            auto itDstModel = m_lineModels.find(static_cast<qulonglong>(dstActualId));
+            if (itDstModel != m_lineModels.end() && *itDstModel && dstLineVisible
+                && link.DestKey != EmptyPoolStr)
+            {
+                int rowIdx = (*itDstModel)->rowIndexOf(
+                    QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
+                int rows = (*itDstModel)->rowCount();
+                if (rowIdx >= 0 && rows > 0)
+                {
+                    bool hasTitle = dstBsec ? SectionBlockShowTitle(dstBsec) : true;
+                    float contentTop = (hasTitle ? 28.0f : 4.0f);
+                    float contentH = dstData->EqSize.y - contentTop - 4.0f;
+                    float rowH = contentH / rows;
+                    float anchorX = isImport
+                        ? (dstData->EqSize.x * ratio * 0.5f)
+                        : (dstData->EqSize.x * ratio - fontHeightScaled * 0.7f);
+                    pbX = static_cast<qreal>(rePos.x + anchorX);
+                    pbY = static_cast<qreal>(rePos.y + contentTop + (rowIdx + 0.5f) * rowH);
+                    pbValid = true;
+                    pbDone = true;
+                }
+            }
+            if (!pbDone)
+            {
+                float reOffsetX = isImport
+                    ? (dstData->EqSize.x * ratio * 0.5f - fontHeightScaled * 0.5f)
+                    : (fontHeightScaled * 0.7f);
+                pbX = static_cast<qreal>(rePos.x + reOffsetX);
+                pbY = static_cast<qreal>(rePos.y + halfLine);
+                pbValid = true;
+            }
         }
 
         ep["pbX"] = pbX;
@@ -2791,6 +3042,67 @@ void WorkspaceController::rebuildLinkEndpoints()
         ep["pbValid"] = pbValid;
         // destId 用实际 ID（GetSection 返回的 ID），字符串传递
         ep["destId"] = QString::number(static_cast<qulonglong>(dstActualId));
+#ifdef INIWEAVER_DIAG
+        // 端点诊断：一次列出 pa/pb 结果与全部候选来源，按值比对即可确定命中的优先级
+        // 与该来源数据是否过期（连线偏差排查用）
+        {
+            auto srcSv = IBR_NodeSession::GetSessionValue(link.SourceID);
+            auto itSrcAcc = m_sectionAcceptPoint.find(static_cast<qulonglong>(link.SrcModuleID));
+            auto itDstAcc = m_sectionAcceptPoint.find(static_cast<qulonglong>(dstActualId));
+            auto srcDataD = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData();
+            auto dstDataD = IBR_Inst_Project.GetSectionFromID(dstActualId).GetSectionData();
+            QString srcAccStr = QStringLiteral("none"), dstAccStr = QStringLiteral("none");
+            if (itSrcAcc != m_sectionAcceptPoint.end() && !itSrcAcc->isNull())
+                srcAccStr = QStringLiteral("(%1,%2)").arg(itSrcAcc->x()).arg(itSrcAcc->y());
+            if (itDstAcc != m_sectionAcceptPoint.end() && !itDstAcc->isNull())
+                dstAccStr = QStringLiteral("(%1,%2)").arg(itDstAcc->x()).arg(itDstAcc->y());
+            QPointF dstAcEqV = QPointF();
+            auto itDstModelD = m_lineModels.find(static_cast<qulonglong>(dstActualId));
+            if (itDstModelD != m_lineModels.end() && *itDstModelD && link.DestKey != EmptyPoolStr)
+                dstAcEqV = (*itDstModelD)->acceptCenterEqByKey(
+                    QString::fromUtf8(PoolStr(link.DestKey)), static_cast<int>(link.LineMult));
+            QPointF srcSessEqV = sessionCenterEq(link.SourceID);
+            QPointF srcProjV = srcSessEqV.isNull() ? QPointF()
+                : eqToScreen(srcSessEqV + topAncestorEqPos(link.SrcModuleID));
+            QPointF srcRenderV = shellRenderPos(link.SrcModuleID);
+            QPointF dstRenderV = shellRenderPos(dstActualId);
+            qDebug().noquote() << QStringLiteral(
+                "[EP-DIAG] src=%1 dst=%2 key='%3' pa=(%4,%5) pb=(%6,%7)"
+                " | LastCenter=(%8,%9) LC_Collapsed=%10 srcAccPt=%11 dstAccPt=%12"
+                " | srcEqPos=(%13,%14) srcEqSize=(%15,%16) dstEqPos=(%17,%18) ratio=%19"
+                " | srcCulled=%20 dstCulled=%21")
+                .arg(static_cast<qulonglong>(link.SrcModuleID))
+                .arg(static_cast<qulonglong>(dstActualId))
+                .arg(QString::fromUtf8(PoolStr(link.FromKey)))
+                .arg(paX, 0, 'f', 2).arg(paY, 0, 'f', 2)
+                .arg(pbX, 0, 'f', 2).arg(pbY, 0, 'f', 2)
+                .arg(srcSv.LastCenter.x, 0, 'f', 2).arg(srcSv.LastCenter.y, 0, 'f', 2)
+                .arg(srcSv.Collapsed)
+                .arg(srcAccStr, dstAccStr)
+                .arg(srcDataD ? static_cast<double>(srcDataD->EqPos.x) : -1.0, 0, 'f', 2)
+                .arg(srcDataD ? static_cast<double>(srcDataD->EqPos.y) : -1.0, 0, 'f', 2)
+                .arg(srcDataD ? static_cast<double>(srcDataD->EqSize.x) : -1.0, 0, 'f', 2)
+                .arg(srcDataD ? static_cast<double>(srcDataD->EqSize.y) : -1.0, 0, 'f', 2)
+                .arg(dstDataD ? static_cast<double>(dstDataD->EqPos.x) : -1.0, 0, 'f', 2)
+                .arg(dstDataD ? static_cast<double>(dstDataD->EqPos.y) : -1.0, 0, 'f', 2)
+                .arg(static_cast<double>(ratio), 0, 'f', 4)
+                .arg(srcCulled ? 1 : 0)
+                .arg(dstCulled ? 1 : 0)
+                << "| srcAnchor=" << topAncestorEqPos(link.SrcModuleID)
+                << "dstAnchor=" << topAncestorEqPos(dstActualId)
+                << "srcSessEq=" << sessionCenterEq(link.SourceID)
+                << "srcProj=" << (srcSessEqV.isNull() ? QStringLiteral("miss")
+                    : QStringLiteral("(%1,%2)").arg(srcProjV.x(), 0, 'f', 1).arg(srcProjV.y(), 0, 'f', 1))
+                << "dstAcEq=" << dstAcEqV
+                << "dstProj=" << (dstAcEqV.isNull() ? QStringLiteral("miss")
+                    : QStringLiteral("(%1,%2)").arg(
+                        eqToScreen(dstAcEqV + topAncestorEqPos(dstActualId)).x(), 0, 'f', 1).arg(
+                        eqToScreen(dstAcEqV + topAncestorEqPos(dstActualId)).y(), 0, 'f', 1))
+                << "| srcRender=" << srcRenderV
+                << "dstRender=" << dstRenderV
+                ;
+        }
+#endif
         endpoints.append(ep);
 
         // D21：构建 map（key = "sessionId:destId"）
@@ -2816,6 +3128,7 @@ void WorkspaceController::rebuildLinkEndpoints()
         emit viewportOffsetChanged();
     }
     emit linkEndpointsChanged();
+    perfEnd();
 }
 
 void WorkspaceController::updateInputState(int newState)
@@ -3035,24 +3348,19 @@ void WorkspaceController::endMassDrag()
     restoreStateAfterDrag();
     // 连线端点表需要重建（多节点位置变了）
     m_linkEndpointsDirty = true;
-    // suppress 已在 emit massDraggingChanged 前置位（见上方），此处不再重复设置
-    auto finalIds = draggedIds;
-    QMetaObject::invokeMethod(this, [this, finalIds]() {
-        for (auto id : finalIds) {
-            emit sectionPositionChanged(static_cast<qulonglong>(id));
-        }
-        QMetaObject::invokeMethod(this, [this]() {
-            m_suppressLinkRebuild = false;       // 恢复 tick 重建
-            if (m_dragSectionId == INVALID_MODULE_ID && m_inputState != 3) {
-                m_dragOffset = QPointF();
-                emit dragOffsetChanged();
-                rebuildLinkEndpoints();
-                // 过渡期结束：清 lastDraggedId（同 endMoveSection，防旧模块连线被下次拖拽拖走）
-                m_lastDraggedId = INVALID_MODULE_ID;
-                m_lastMassDragIds.clear();  // 多选过渡期集合一并清空
-            }
-        }, Qt::QueuedConnection);
-    }, Qt::QueuedConnection);
+    // ===== 收尾同步化（同 endMoveSection，一次做完）=====
+    // 成员回写（massDragging→false 的同步级联）已完成、节点已通过
+    // sectionPositionChanged 同步到终点，收尾（清偏移 + 重建）同步执行，
+    // 无两层 Queued 的中间态帧。
+    m_suppressLinkRebuild = false;
+    m_dragOffset = QPointF();
+    emit dragOffsetChanged();
+    rebuildLinkEndpoints();
+    m_lastDraggedId = INVALID_MODULE_ID;
+    m_lastMassDragIds.clear();  // 多选过渡期集合一并清空
+#ifdef INIWEAVER_DIAG
+    qDebug() << "[DRAG-DIAG] endMassDrag cleanup SYNC done";
+#endif
 }
 
 void WorkspaceController::showMassContextMenu(qreal x, qreal y)
@@ -3072,7 +3380,179 @@ QVariantList WorkspaceController::massTargetIds() const
     return list;
 }
 
+QVariantList WorkspaceController::massTargetSnapshot() const
+{
+    // 语义与 isSectionSelected 一致：框选中（inputState==2）返回实时预览集，
+    // 否则返回正式 MassTarget。QML 一次调用建 JS Set 后 O(1) 查询，
+    // 替代每帧数千次逐项 isSectionSelected 跨语言调用。
+    QVariantList list;
+    if (m_inputState == 2 && !m_massSelectPreview.empty()) {
+        list.reserve(static_cast<int>(m_massSelectPreview.size()));
+        for (auto id : m_massSelectPreview)
+            list.append(static_cast<qulonglong>(id));
+        return list;
+    }
+    list.reserve(static_cast<int>(IBR_WorkSpace::MassTarget.size()));
+    for (auto id : IBR_WorkSpace::MassTarget) {
+        list.append(static_cast<qulonglong>(id));
+    }
+    return list;
+}
+
+QVariantList WorkspaceController::composedMembersList(qulonglong groupId) const
+{
+    // isInComposedOf(groupId, x) == true 的 x 全集（含 groupId 自身），BFS 所有层级子块。
+    // QML 拖编组时调用一次建 Set，逐连线 O(1) 判断是否随拖拽移动。
+    QVariantList list;
+    ModuleID_t root = static_cast<ModuleID_t>(groupId);
+    std::vector<ModuleID_t> queue{ root };
+    std::unordered_set<ModuleID_t> visited{ root };
+    while (!queue.empty()) {
+        ModuleID_t cur = queue.back();
+        queue.pop_back();
+        // 字符串传递：与 links 的 sourceId/destId 同为 QString::number（防 QML 大整数
+        // 精度丢失）；QML 侧 Set 统一 String() 归一后查询
+        list.append(QString::number(static_cast<qulonglong>(cur)));
+        auto it = IBR_Inst_Project.IBR_SectionMap.find(cur);
+        if (it == IBR_Inst_Project.IBR_SectionMap.end()) continue;
+        for (auto sub : it->second.IncludingModules) {
+            if (visited.insert(sub).second) queue.push_back(sub);
+        }
+    }
+    return list;
+}
+
+// 节点当前 EqPos（QPointF）；找不到返回 (0,0)（调用方先用缓存命中与否过滤）
+static QPointF nodeEqPos(const std::map<ModuleID_t, IBR_SectionData> &map, qulonglong id)
+{
+    auto it = map.find(static_cast<ModuleID_t>(id));
+    return it != map.end() ? QPointF(it->second.EqPos.x, it->second.EqPos.y) : QPointF();
+}
+
+QPointF WorkspaceController::sectionEqPos(qulonglong sectionId) const
+{
+    auto it = IBR_Inst_Project.IBR_SectionMap.find(static_cast<ModuleID_t>(sectionId));
+    return it != IBR_Inst_Project.IBR_SectionMap.end()
+        ? QPointF(it->second.EqPos.x, it->second.EqPos.y) : QPointF();
+}
+
+QPointF WorkspaceController::topAncestorEqPos(qulonglong sectionId) const
+{
+    // 沿 IncludedByModule 上溯到顶层祖先（顶层节点返回自身 EqPos）。
+    // 成员 EqPos 在组移动时不更新，端点世界缓存的相对偏移必须锚定顶层。
+    ModuleID_t cur = static_cast<ModuleID_t>(sectionId);
+    for (int guard = 0; guard < 32; ++guard) {
+        auto it = IBR_Inst_Project.IBR_SectionMap.find(cur);
+        if (it == IBR_Inst_Project.IBR_SectionMap.end()) break;
+        ModuleID_t parent = it->second.IncludedByModule;
+        if (parent == INVALID_MODULE_ID) break;
+        cur = parent;
+    }
+    auto fin = IBR_Inst_Project.IBR_SectionMap.find(cur);
+    return fin != IBR_Inst_Project.IBR_SectionMap.end()
+        ? QPointF(fin->second.EqPos.x, fin->second.EqPos.y) : QPointF();
+}
+
+void WorkspaceController::noteShellRenderPos(qulonglong sectionId, qreal x, qreal y)
+{
+    m_shellRenderPos[sectionId] = QPointF(x, y);
+    m_shellRenderEq[sectionId] = screenToEq(QPointF(x, y));
+}
+
+QPointF WorkspaceController::shellRenderPos(qulonglong sectionId) const
+{
+    auto it = m_shellRenderPos.constFind(sectionId);
+    return it != m_shellRenderPos.constEnd() ? it.value() : QPointF();
+}
+
+QPointF WorkspaceController::shellRenderEq(qulonglong sectionId) const
+{
+    auto it = m_shellRenderEq.constFind(sectionId);
+    return it != m_shellRenderEq.constEnd() ? it.value() : QPointF();
+}
+
+void WorkspaceController::noteSessionCenterEq(qulonglong sectionId, qulonglong sessionId, qreal sx, qreal sy)
+{
+    // 行圆点回写（SectionLineModel::setLinkNodeCenter*）的世界镜像。
+    // 存【相对节点 EqPos 的偏移】：节点被 cull 后 EqPos 仍会变（批量拖拽/撤销），
+    // 绝对世界坐标会永久滞后一个拖拽量；相对偏移 + 当前 EqPos 投影自动跟随。
+    // 只在非叠加态被调用（叠加期回写被门控），basis 即当前视口
+    m_sessionCenterEq.insert(sessionId,
+        screenToEq(QPointF(sx, sy)) - topAncestorEqPos(sectionId));
+}
+
+QPointF WorkspaceController::sessionCenterEq(qulonglong sessionId) const
+{
+    auto it = m_sessionCenterEq.constFind(sessionId);
+    return it != m_sessionCenterEq.constEnd() ? it.value() : QPointF();
+}
+
+QPointF WorkspaceController::sectionAcceptPointEq(qulonglong sectionId) const
+{
+    auto it = m_sectionAcceptPointEq.constFind(sectionId);
+    return it != m_sectionAcceptPointEq.constEnd() ? it.value() : QPointF();
+}
+
+void WorkspaceController::flushLinkEndpointsRebuild()
+{
+    // 世界缓存变更后的强制重建（语义见头文件注释）：
+    // 清缩放补间/防抖（zoom 状态会让守卫回退旧表）→ 同步重建 → 清脏标记。
+    if (m_zoomAnimating) {
+        applyZoomRatio(m_zoomTargetRatio);
+        emit zoomTweenAbortRequested();
+        m_zoomAnimating = false;
+    }
+    if (m_zoomPending) {
+        m_zoomPending = false;
+        emit zoomBaseChanged();
+    }
+    rebuildLinkEndpoints();
+    m_linkEndpointsDirty = false;
+}
+
+void WorkspaceController::setSectionCulled(qulonglong sectionId, bool culled)
+{    // 懒加载 culling 状态同步（语义见头文件注释）：
+    // - culled=true：该节点 delegate 已销毁，其屏幕坐标回写（m_sectionAcceptPoint /
+    //   Session LastCenter / 行级 acceptCenter）从此过期。清掉头部接受点（rebuild 的
+    //   优先级 2/3 自然 miss），把 sid 记入 m_culledSections（rebuild 门控 LastCenter
+    //   与行级接受点），端点表下次重建时这些节点落到 EqPosToRePos 兜底。
+    // - culled=false：delegate 即将/已经创建，回写恢复，从集合移除。
+    // 两个方向都标脏端点表（脏检查路径在 refreshFromTimer 的无变化早退分支里重建）。
+    if (culled) {
+        if (!m_culledSections.contains(sectionId)) {
+            m_culledSections.insert(sectionId);
+            m_sectionAcceptPoint.remove(sectionId);
+            m_linkEndpointsDirty = true;
+        }
+    } else {
+        if (m_culledSections.remove(sectionId) > 0) {
+            m_linkEndpointsDirty = true;
+        }
+    }
+}
+
 bool WorkspaceController::isSectionSelected(qulonglong sectionId) const
+{
+#ifdef INIWEAVER_DIAG
+    // 画布热点探针：每帧被调数千次（每连线 2 次 + 每节点 1 次）。修复前为 O(M) 线性扫
+    // MassTarget，1471 模块全选后每帧 O(N×M)（拖拽/重绘卡顿热点）；镜像集修复后 count
+    // 仍高但 avg 应为纳秒级。用此探针验证收益。
+    QMutexLocker locker(&m_perfMutex);
+    PerfStat &st = m_perfStats[QStringLiteral("C++.isSectionSelected")];
+    ++st.count;
+    const qint64 startNs = m_perfClock.nsecsElapsed();
+    const bool result = isSectionSelectedImpl(sectionId);
+    const qint64 elapsedNs = m_perfClock.nsecsElapsed() - startNs;
+    st.totalNs += elapsedNs;
+    if (elapsedNs > st.maxNs) st.maxNs = elapsedNs;
+    locker.unlock();
+    return result;
+#else
+    return isSectionSelectedImpl(sectionId);
+#endif
+}
+
+bool WorkspaceController::isSectionSelectedImpl(qulonglong sectionId) const
 {
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
     // MassSelecting 状态下查询实时预览集合（对应 ImGui IsWindowMassSelected 检查 MassSelectWindows）
@@ -3080,8 +3560,8 @@ bool WorkspaceController::isSectionSelected(qulonglong sectionId) const
     if (m_inputState == 2 && !m_massSelectPreview.empty()) {
         return m_massSelectPreview.count(id) != 0;
     }
-    return std::find(IBR_WorkSpace::MassTarget.begin(),
-                     IBR_WorkSpace::MassTarget.end(), id) != IBR_WorkSpace::MassTarget.end();
+    // O(1) 镜像集查询（此前 std::find 线性扫 MassTarget，见 IBR_Misc.h MassTargetSet 注释）
+    return IBR_WorkSpace::MassTargetSet.count(id) != 0;
 }
 
 bool WorkspaceController::isLastMassDragged(qulonglong sectionId) const
@@ -3128,13 +3608,14 @@ bool WorkspaceController::selectedAllHidden() const
 
 void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW, qreal screenH)
 {
+    perfBegin(QStringLiteral("C++.reportSectionSize"));
     // QML SectionNode 渲染后回报实际屏幕尺寸，反算 EqSize 并同步到 IBR_SectionMap
     // 对应 ImGui IBR_WorkSpace.cpp:1801-1802 sd.EqSize = NP（实时更新）
     // Qt 版本 SectionNode 尺寸由内容驱动，必须同步否则框选命中检测不准
     ModuleID_t id = static_cast<ModuleID_t>(sectionId);
     auto it = IBR_Inst_Project.IBR_SectionMap.find(id);
-    if (it == IBR_Inst_Project.IBR_SectionMap.end()) return;
-    if (IBR_FullView::Ratio == 0.0f) return;
+    if (it == IBR_Inst_Project.IBR_SectionMap.end()) { perfEnd(); return; }
+    if (IBR_FullView::Ratio == 0.0f) { perfEnd(); return; }
     ImVec2 newEqSize(static_cast<float>(screenW / IBR_FullView::Ratio),
                      static_cast<float>(screenH / IBR_FullView::Ratio));
     // 仅在尺寸变化时更新（避免每帧刷新）
@@ -3150,24 +3631,33 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
         // 新模块添加后 refreshSections 构建 item 时 EqSize 可能还是 0（AddModule 异步
         // 初始化延迟），QML SectionNode 渲染后 reportSectionSize 回写真实尺寸，
         // 若不更新快照，MiniMap 一直显示宽度 0 的模块（不可见）。
-        bool foundInSnapshot = false;
-        for (auto &item : m_sections) {
-            if (item.toMap().value(QStringLiteral("sectionId")).toULongLong() == sectionId) {
-                QVariantMap m = item.toMap();
-                m[QStringLiteral("eqW")] = static_cast<double>(newEqSize.x);
-                m[QStringLiteral("eqH")] = static_cast<double>(newEqSize.y);
-                item = m;
-                foundInSnapshot = true;
-                break;
-            }
+        // O(1) 索引定位 + 合并 emit（导入卡顿根因修复）：delegate 创建期高度分多步
+        // 增长（0→4→32→…，部署日志 ONSHOW-DIAG 实测），此前每步都 O(n) 全表扫描 +
+        // 无条件全量 emit sectionsChanged——MiniMap 的 sections 绑定是 1471 项全量列表，
+        // 每 emit 都重转 JS + 全量重绘，导入时 8460 次回调共 577s。改为：O(1) 找行、
+        // 原地更新快照，emit 合并到本事件循环末尾统一发一次（flushPendingSectionSizes）。
+        const auto rowIt = m_sectionRowIndex.constFind(sectionId);
+        const bool foundInSnapshot = (rowIt != m_sectionRowIndex.constEnd());
+        if (foundInSnapshot) {
+            QVariantMap m = m_sections.at(*rowIt).toMap();
+            m[QStringLiteral("eqW")] = static_cast<double>(newEqSize.x);
+            m[QStringLiteral("eqH")] = static_cast<double>(newEqSize.y);
+            m_sections[*rowIt] = m;
+            m_pendingSizeRows.insert(sectionId, *rowIt);
         }
 #ifdef INIWEAVER_DIAG
-        qDebug() << "[REFRESH-DIAG] reportSectionSize emit sectionsChanged sid=" << sectionId
+        qDebug() << "[REFRESH-DIAG] reportSectionSize sid=" << sectionId
                  << "m_sections.size=" << m_sections.size()
                  << "foundInSnapshot=" << foundInSnapshot
                  << "newEqSize=" << newEqSize.x << newEqSize.y;
 #endif
-        emit sectionsChanged();  // 更新 MiniMap 的 sections 属性并重绘
+        // 快照不在顶层列表（子模块/隐藏节点）时数据未变，无需通知 MiniMap
+        //（旧实现此时也无差别 emit，纯属浪费）
+        if (foundInSnapshot && !m_pendingSizeFlushScheduled) {
+            m_pendingSizeFlushScheduled = true;
+            QMetaObject::invokeMethod(this, &WorkspaceController::flushPendingSectionSizes,
+                                      Qt::QueuedConnection);
+        }
         // 节点尺寸变化（OnShow 切换导致高度变/隐藏宽行导致宽度变）后端点表需重建。
         // 关键时序：onHeightChanged 在 QML 父节点高度变化时同步触发，此时子项 LineRow 的
         // onYChanged（行往上移）尚未回写新 acceptCenter——QML Column/ColumnLayout 的子项重布局
@@ -3185,6 +3675,7 @@ void WorkspaceController::reportSectionSize(qulonglong sectionId, qreal screenW,
 #endif
         m_linkEndpointsDirty = true;
     }
+    perfEnd();
 }
 
 void WorkspaceController::massAfterDelete()
@@ -4111,3 +4602,107 @@ QVariantList WorkspaceController::getSectionLinks(qulonglong sectionId) const
     }
     return list;
 }
+
+// ==========================================================================
+// 渲染性能探针（[PERF-DIAG]，仅 INIWEAVER_DIAG 诊断构建编译进实现；普通构建零开销）
+// 用法：QML 渲染函数用 workspaceController.perfBegin("tag") / perfEnd() 包裹计时，
+//       perfFrame 由 QML window.afterRendering 每帧调用；每 kPerfWindowFrames 帧
+//       输出一次按总耗时排序的统计窗口（含平均/最差帧时间），随后重置。
+// 嵌套探针用栈支持：onPaint 内再包 buildSectionMap 等子探针，各自独立统计。
+// ==========================================================================
+#ifdef INIWEAVER_DIAG
+namespace {
+constexpr quint64 kPerfWindowFrames = 120;  // 每 120 个渲染帧输出一个统计窗口
+}
+#endif
+
+void WorkspaceController::perfBegin(const QString &tag)
+{
+#ifdef INIWEAVER_DIAG
+    QMutexLocker locker(&m_perfMutex);
+    m_perfTagStack.append(tag);
+    m_perfStartStack.append(m_perfClock.nsecsElapsed());
+#else
+    Q_UNUSED(tag)
+#endif
+}
+
+void WorkspaceController::perfEnd()
+{
+#ifdef INIWEAVER_DIAG
+    QMutexLocker locker(&m_perfMutex);
+    if (m_perfStartStack.isEmpty()) return;  // begin/end 不配对（防御），忽略
+    const qint64 elapsedNs = m_perfClock.nsecsElapsed() - m_perfStartStack.takeLast();
+    const QString tag = m_perfTagStack.takeLast();
+    PerfStat &st = m_perfStats[tag];
+    ++st.count;
+    st.totalNs += elapsedNs;
+    if (elapsedNs > st.maxNs) st.maxNs = elapsedNs;
+#else
+#endif
+}
+
+void WorkspaceController::perfFrame()
+{
+#ifdef INIWEAVER_DIAG
+    QMutexLocker locker(&m_perfMutex);
+    const qint64 now = m_perfClock.nsecsElapsed();
+    if (m_lastFrameNs >= 0) {
+        const qint64 dt = now - m_lastFrameNs;
+        m_frameTotalNs += dt;
+        if (dt > m_frameMaxNs) m_frameMaxNs = dt;
+    }
+    m_lastFrameNs = now;
+    ++m_perfFrames;
+    if (m_perfFrames >= kPerfWindowFrames) dumpPerfStats();  // 持锁调用，dump 内不再加锁
+#else
+#endif
+}
+
+// 定义整体进 ifdef：头文件里 dumpPerfStats 声明位于 INIWEAVER_DIAG 块内，
+// 普通构建无此成员，非保护定义会编译失败（C2039）
+#ifdef INIWEAVER_DIAG
+void WorkspaceController::dumpPerfStats()
+{
+    // 帧率统计：各探针总耗时相加 ≠ 帧时间，差值即 SceneGraph 布局/文本光栅化/GPU 等未探针成本
+    if (m_perfFrames > 0) {
+        const double avgFrameMs = double(m_frameTotalNs) / m_perfFrames / 1e6;
+        const double maxFrameMs = double(m_frameMaxNs) / 1e6;
+        qDebug().noquote() << QStringLiteral(
+            "[PERF-DIAG] === 统计窗口 %1 帧：平均帧 %2 ms (~%3 FPS)，最差帧 %4 ms（未覆盖差值 = 布局/光栅化/GPU）===")
+            .arg(m_perfFrames)
+            .arg(avgFrameMs, 0, 'f', 3)
+            .arg(avgFrameMs > 0.0 ? 1000.0 / avgFrameMs : 0.0, 0, 'f', 1)
+            .arg(maxFrameMs, 0, 'f', 3);
+    }
+    // 各探针按总耗时降序输出（count=调用次数，total/avg/max 均为毫秒）
+    struct Entry { QString tag; qint64 totalNs; qint64 maxNs; quint64 count; };
+    QList<Entry> entries;
+    entries.reserve(m_perfStats.size());
+    for (auto it = m_perfStats.constBegin(); it != m_perfStats.constEnd(); ++it) {
+        const PerfStat &s = it.value();
+        entries.append({ it.key(), s.totalNs, s.maxNs, s.count });
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry &a, const Entry &b) { return a.totalNs > b.totalNs; });
+    for (const Entry &e : entries) {
+        const double totalMs = double(e.totalNs) / 1e6;
+        const double avgMs = double(e.totalNs) / double(e.count ? e.count : 1) / 1e6;
+        const double maxMs = double(e.maxNs) / 1e6;
+        qDebug().noquote() << QStringLiteral("[PERF-DIAG]   %1  count=%2  total=%3 ms  avg=%4 ms  max=%5 ms")
+            .arg(e.tag, -40)
+            .arg(e.count)
+            .arg(totalMs, 0, 'f', 3)
+            .arg(avgMs, 0, 'f', 4)
+            .arg(maxMs, 0, 'f', 4);
+    }
+    // 重置窗口
+    m_perfStats.clear();
+    m_perfFrames = 0;
+    m_frameTotalNs = 0;
+    m_frameMaxNs = 0;
+    m_lastFrameNs = -1;
+    m_perfTagStack.clear();
+    m_perfStartStack.clear();
+}
+#endif

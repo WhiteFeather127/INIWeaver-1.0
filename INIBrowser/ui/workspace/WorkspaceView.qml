@@ -47,6 +47,8 @@ Item {
     Connections {
         target: window
         function onAfterRendering() {
+            // 性能探针：每渲染帧记一次帧间隔（窗口统计见 [PERF-DIAG] 日志）
+            if (workspaceController.diagLogEnabled()) workspaceController.perfFrame()
             if (zoomTweenAnim.running) window.requestUpdate()
         }
     }
@@ -93,6 +95,19 @@ Item {
         return (node && node.sectionId !== undefined) ? String(node.sectionId) : ""
     }
 
+    // 行为A：命中 acceptor 键行 → 返回 { sectionId, keyName, color, x, y }（接收点中心坐标，
+    // workspaceView 坐标系），未命中返回 null。顶层 Repeater 反序遍历，递归命中编组内子模块。
+    function findHitAcceptorPoint(wsX, wsY) {
+        for (var i = sectionRepeater.count - 1; i >= 0; --i) {
+            var item = sectionRepeater.itemAt(i)
+            if (item && item.hitTestAcceptor) {
+                var hit = item.hitTestAcceptor(wsX, wsY)
+                if (hit) return hit
+            }
+        }
+        return null
+    }
+
     // 临时拖拽连线（对应 IBR_WorkSpace.cpp:1436-1459 拖动中的 Bezier）
     // D22：双层 Bezier 光晕效果 + ImGui 控制点公式
     Canvas {
@@ -112,6 +127,8 @@ Item {
         onRatioChanged: requestPaint()
 
         onPaint: {
+            var _perf = workspaceController.diagLogEnabled()
+            if (_perf) workspaceController.perfBegin("QML.DragLinkPreview.onPaint")
             var ctx = getContext("2d")
             ctx.reset()
             // D22：ImGui 控制点公式（对应 IBR_WorkSpace.cpp:1448-1449）
@@ -138,6 +155,7 @@ Item {
             ctx.moveTo(fromX, fromY)
             ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX, toY)
             ctx.stroke()
+            if (_perf) workspaceController.perfEnd()
         }
     }
 
@@ -193,6 +211,8 @@ Item {
             onEcYChanged: requestPaint()
 
             onPaint: {
+                var _perf = workspaceController.diagLogEnabled()
+                if (_perf) workspaceController.perfBegin("QML.Grid.onPaint")
                 var ctx = getContext("2d");
                 ctx.reset();
                 ctx.strokeStyle = "#252525";
@@ -230,6 +250,7 @@ Item {
                     ctx.lineTo(width, sy);
                 }
                 ctx.stroke();
+                if (_perf) workspaceController.perfEnd()
             }
         }
     }
@@ -304,63 +325,235 @@ Item {
         // 避免整表替换重建全部 SectionNode（卡顿根因）
         model: workspaceController.sectionsModel
 
-        SectionNode {
+        // ===== 每帧一次的共享视口状态（壳的位置/剔除判定用） =====
+        // 平移/缩放时下面各属性整体重算一次；壳只读它们，不再各自解引用
+        // eqCenter/ratio/width（1471 壳 × 3 绑定 × ~25 次属性读/帧 → 每壳 ~8 次）。
+        readonly property real viewRatio: workspaceController.ratio
+        // 位置基准：x = localEqX * viewRatio + viewBaseX（EqPosToRePos 展开式）
+        readonly property real viewBaseX: workspaceView.width / 2 - workspaceController.eqCenter.x * workspaceController.ratio
+        readonly property real viewBaseY: workspaceView.height / 2 - workspaceController.eqCenter.y * workspaceController.ratio
+        // 外扩 1 屏的活跃视口矩形（Eq 坐标；cull 判定用）
+        readonly property real viewMinX: workspaceController.eqCenter.x - workspaceView.width / workspaceController.ratio
+        readonly property real viewMaxX: workspaceController.eqCenter.x + workspaceView.width / workspaceController.ratio
+        readonly property real viewMinY: workspaceController.eqCenter.y - workspaceView.height / workspaceController.ratio
+        readonly property real viewMaxY: workspaceController.eqCenter.y + workspaceView.height / workspaceController.ratio
+
+        // ===== 懒加载壳（culling shell） =====
+        // 每项常驻的轻量 Item，只承担几何职责（位置缓存/x/y 绑定/拖拽偏移/选中态）与
+        // 视口相交判定；SectionNode 实体由 Loader 按视口按需创建/销毁。
+        // 导入 1471 节点时 refreshSections 从全量实例化 ~10s 降为只创建视口内节点；
+        // 常驻内存/GC 压力同步大幅下降。
+        // 不依赖 delegate 的功能不受影响：LinkRenderer（C++ 快照绘制）、MiniMap、
+        // C++ 框选/单点命中（遍历 IBR_SectionMap）、拖拽状态机、编组子模块（父节点渲染）。
+        // 视口外连线端点退化为 EqPos 兜底（标题栏锚点），节点入视口创建后回写恢复精确。
+        Item {
             id: sectionDelegate
             // QAbstractItemModel 的 delegate 中 modelData 不生成（Qt6 实测 undefined），
             // 改用 role 访问：roleNames 定义了 "sectionData" role
-            sectionData: model.sectionData
+            property var sectionData: model.sectionData
+            // 命中测试/查找用（findHitSectionIdStr 读取 .sectionId）
+            readonly property var sectionId: sectionData.sectionId
             // z 高于背景 MouseArea（z=0），确保节点 MouseArea 优先接收事件
             z: 1
-            // 性能优化：本地缓存的 EqPos，拖拽结束时通过 sectionPositionChanged 信号更新
-            // 避免全量 refresh() 重建 Repeater 导致连续拖拽卡顿
-            property real localEqX: sectionData.eqX
-            property real localEqY: sectionData.eqY
-            // 根据 EqPos 和当前 EqCenter 实时计算屏幕坐标
-            // 拖拽中实时应用 dragOffset，节点跟随鼠标移动
-            // 注意：用 isSelected（动态绑定）而非 sectionData.selected（快照值）
-            //   选中状态变化后 sections 列表未重建，sectionData.selected 仍是旧值，
-            //   会导致多节点拖拽时不应用 dragOffset（节点不跟随鼠标）
-            x: (localEqX - workspaceController.eqCenter.x) * workspaceController.ratio + workspaceView.width / 2
-              + ((sectionData.sectionId === workspaceController.draggingSectionId
-                  || (workspaceController.massDragging && isSelected))
-                 ? workspaceController.dragOffset.x : 0)
-            y: (localEqY - workspaceController.eqCenter.y) * workspaceController.ratio + workspaceView.height / 2
-              + ((sectionData.sectionId === workspaceController.draggingSectionId
-                  || (workspaceController.massDragging && isSelected))
-                 ? workspaceController.dragOffset.y : 0)
-            // 尺寸完全由 Qt 内容驱动（不依赖 ImGui 的 EqW/EqH）
-            // 宽度：max(WidthFix, widthBase) * ratio（widthBase 已用真实 FontHeight 计算）
-            // 高度：header + 行数 * 行高 + margin，随 ratio 等比缩放，内容显示全
-            width: implicitWidth
-            height: implicitHeight
-            // 渲染后回报实际屏幕尺寸到 C++，同步 sd.EqSize（对应 ImGui 实时更新 EqSize）
-            // 框选命中检测依赖准确的 EqSize，否则框选位置和命中模块不一致
-            // 缩放方案：width/height 为逻辑尺寸（内部已 scale=_r），回报需乘 _r 得视觉尺寸，
-            // 否则 EqSize = 逻辑/ratio 会随缩放漂移。仅在逻辑尺寸变化时触发（缩放不变）→ 天然节流
-            onWidthChanged: {
-                if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onWidthChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
-                workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+            // 性能优化：本地缓存的 EqPos。⚠不能用绑定（localEqX: sectionData.eqX）：
+            // 拖拽结束的 sectionPositionChanged 处理器会赋值 localEqX，赋值即断绑定，
+            // 之后 compose/undo/refresh 更新的 eqX 永远传不进壳 → 组渲染在旧位置，
+            // 而连线端点（世界缓存按实时 EqPos 投影）在新位置 → 编组连线偏移。
+            // 改为双路径显式同步：dataChanged（全量）+ sectionPositionChanged（增量）。
+            property real localEqX: 0
+            property real localEqY: 0
+            function syncLocalEq() {
+                localEqX = sectionData.eqX
+                localEqY = sectionData.eqY
+                updatePosition()
+                // 重定位后必须补一次全量回写：编组成员的头部接受点回写只能靠
+                // 组的 updateAllCenters 级联，缺了它成员头缓存停在旧位置 →
+                // 端点表（世界缓存优先）投影出偏移的 pb（编组连线偏移根因）。
+                // callLater 合帧：多个壳在同一帧的 dataChanged 风暴只触发一次执行。
+                // 回写后必须同步重建端点表：世界缓存变了（不是视口变化），
+                // canvasOff/zoomTransform 无法补偿，走平移门控的延迟重建会让
+                // 误差滞留到下一次拖模块结束才纠正（一帧/持续偏移根因）。
+                if (nodeLoader.item)
+                    Qt.callLater(function() {
+                        if (nodeLoader.item && nodeLoader.item.updateAllCenters) {
+                            nodeLoader.item.updateAllCenters()
+                            workspaceController.flushLinkEndpointsRebuild()
+                        }
+                    })
             }
-            onHeightChanged: {
-                if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onHeightChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
-                workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
-            }
-            Component.onCompleted: workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
-            isSelected: {
+            // dataChanged → model.sectionData 被替换 → 此处理器触发（全量同步路径）
+            onSectionDataChanged: syncLocalEq()
+            // 快照尺寸缓存（只在 dataChanged 时重算；inViewport 判定读自有属性而非 map）
+            property real eqW: sectionData.eqW || 0
+            property real eqH: sectionData.eqH || 0
+            // 选中态（动态绑定，拖拽偏移与 Loader 内容共用）
+            property bool isSelected: {
                 // 性能优化：通过 selectedRevision 触发重新评估，不依赖全量 refresh
                 workspaceController.selectedRevision
                 return workspaceController.isSectionSelected(sectionData.sectionId)
             }
+
+            // ===== 命令式位置（绑定瘦身） =====
+            // 旧实现 x/y 为声明式绑定：平移/缩放时 1471 个壳 × 3 绑定全部重算（每壳
+            // ~25 次跨上下文属性读，约 3-4ms/帧）。改为 updatePosition() 显式更新，
+            // 且只对视口内壳调用——视口外壳的位置无人消费，激活时（onInViewportChanged）
+            // 再算。公式与触发源和旧绑定完全一致：
+            //   x = (localEqX - eqCenter.x)*ratio + width/2 + dragOffset(拖拽中)
+            //     = localEqX * viewRatio + viewBaseX + dragOffset
+            // 触发：eqCenter/ratio/dragOffset 变化（仅视口内壳）、sectionPositionChanged、
+            //       inViewport 翻转、localEq 变化、创建时。
+            function updatePosition() {
+                var dragTermX = 0, dragTermY = 0
+                if (sectionData.sectionId === workspaceController.draggingSectionId
+                    || (workspaceController.massDragging && isSelected)) {
+                    dragTermX = workspaceController.dragOffset.x
+                    dragTermY = workspaceController.dragOffset.y
+                }
+                x = localEqX * sectionRepeater.viewRatio + sectionRepeater.viewBaseX + dragTermX
+                y = localEqY * sectionRepeater.viewRatio + sectionRepeater.viewBaseY + dragTermY
+                // 渲染位置上报（含 dragTerm 的最终屏幕位置）：EP-DIAG 对账的"节点实际渲染位置"
+                workspaceController.noteShellRenderPos(sectionData.sectionId, x, y)
+            }
+            Component.onCompleted: syncLocalEq()
+            onInViewportChanged: {
+                if (workspaceController.diagLogEnabled())
+                    console.log("[SHELL-DIAG] sid=" + sectionData.sectionId + " inViewport=" + inViewport
+                                + " localEq=(" + localEqX + "," + localEqY + ")")
+                updatePosition()
+                // 激活时走合帧回写+flush 路径：与 syncVisibleNode 相同的级联入口，
+                // 确保整组（含成员级联）的回写与端点表重建在同一 callLater 批次完成，
+                // 消除激活风暴中各成员不同布局阶段的混值。
+                if (inViewport) {
+                    var it = nodeLoader.item
+                    if (it && it.updateAllCenters)
+                        Qt.callLater(function() {
+                            if (nodeLoader.item && nodeLoader.item.updateAllCenters) {
+                                nodeLoader.item.updateAllCenters()
+                                workspaceController.flushLinkEndpointsRebuild()
+                            }
+                        })
+                }
+            }
+            onLocalEqXChanged: updatePosition()
+            onLocalEqYChanged: updatePosition()
+            // eq/ratio/尺寸变化时除重定位外，还须触发可见节点的坐标回写级联
+            //（updateAllCenters）：旧实现 SectionNode.onXChanged（x 绑定含 eqCenter）
+            // 每次视口变化都会触发回写 → 端点表跟随；改命令式后该链路丢失，
+            // 迷你地图平移/centerViewTo 跳转（非叠加态，inputState!=1）时连线会冻结
+            // 在旧位置。updateAllCenters 内部在叠加态（inputState==1/zoomPending）
+            // 自动早退，画布平移的门控不受影响。
+            function syncVisibleNode() {
+                if (inViewport) {
+                    updatePosition()
+                    var it = nodeLoader.item
+                    if (it && it.updateAllCenters) it.updateAllCenters()
+                    else if (workspaceController.diagLogEnabled())
+                        console.log("[SHELL-DIAG] sid=" + sectionData.sectionId + " syncVisibleNode item=null（Loader 未激活，级联跳过）")
+                }
+            }
+            Connections {
+                target: workspaceController
+                function onEqCenterChanged() { syncVisibleNode() }
+                function onRatioChanged() { syncVisibleNode() }
+                // 拖拽偏移：仅被拖/多选中的可见壳需要跟随（updateAllCenters 由
+                // SectionNode 自身的 onDragOffsetChanged → isDragging 级联处理）
+                function onDragOffsetChanged() {
+                    if (inViewport
+                        && (sectionData.sectionId === workspaceController.draggingSectionId
+                            || (workspaceController.massDragging && isSelected)))
+                        updatePosition()
+                }
+            }
+            // 视口尺寸变化（侧边栏拖宽/窗口 resize）：可见壳重定位 + 回写
+            Connections {
+                target: workspaceView
+                function onWidthChanged() { syncVisibleNode() }
+                function onHeightChanged() { syncVisibleNode() }
+            }
+
+            // 视口相交判定（Eq 坐标系）：节点矩形 (localEqX/Y, eqW/eqH) 与外扩 1 屏的
+            // 活跃视口矩形相交才激活 Loader。eqCenter/ratio 的依赖收敛到 sectionRepeater
+            // 的共享属性（每帧整体重算一次）；eqW/eqH/localEq 为自有属性（快照更新时才变）。
+            // localEqX/Y 参与判定：拖拽结束后位置更新即时生效。
+            readonly property bool inViewport: {
+                return !(localEqX > sectionRepeater.viewMaxX || localEqX + eqW < sectionRepeater.viewMinX
+                         || localEqY > sectionRepeater.viewMaxY || localEqY + eqH < sectionRepeater.viewMinY)
+            }
+
+            Loader {
+                id: nodeLoader
+                active: sectionDelegate.inViewport
+                sourceComponent: sectionNodeComponent
+                // culling 状态同步到 C++：停用时该节点的屏幕坐标回写（LastCenter/
+                // acceptPoint）已过期，端点表重建须跳过这些来源、落 EqPos 兜底，
+                // 否则平移后视口外节点的连线停在旧屏幕位置（大偏差根因）。
+                // 激活时解除门控，delegate 创建 → 回写恢复精确端点。
+                onActiveChanged: workspaceController.setSectionCulled(
+                                     sectionDelegate.sectionData.sectionId, !active)
+                // 激活计数探针：[PERF-DIAG] 窗口内 count = 该 120 帧创建的节点数
+                onLoaded: if (workspaceController.diagLogEnabled()) {
+                              workspaceController.perfBegin("QML.Shell.activate")
+                              workspaceController.perfEnd()
+                          }
+            }
+            Component {
+                id: sectionNodeComponent
+                SectionNode {
+                    sectionData: sectionDelegate.sectionData
+                    // 尺寸完全由 Qt 内容驱动（不依赖 ImGui 的 EqW/EqH）
+                    width: implicitWidth
+                    height: implicitHeight
+                    isSelected: sectionDelegate.isSelected
+                    // 渲染后回报实际屏幕尺寸到 C++，同步 sd.EqSize（对应 ImGui 实时更新 EqSize）
+                    // 框选命中检测依赖准确的 EqSize，否则框选位置和命中模块不一致
+                    // 缩放方案：width/height 为逻辑尺寸（内部已 scale=_r），回报需乘 _r 得视觉尺寸，
+                    // 否则 EqSize = 逻辑/ratio 会随缩放漂移。仅在逻辑尺寸变化时触发（缩放不变）→ 天然节流
+                    onWidthChanged: {
+                        if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onWidthChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
+                        workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+                    }
+                    onHeightChanged: {
+                        if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] SectionNode onHeightChanged sid=" + sectionData.sectionId + " w=" + width + " h=" + height)
+                        workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+                    }
+                    Component.onCompleted: {
+                        workspaceController.reportSectionSize(sectionData.sectionId, width * workspaceController.ratio, height * workspaceController.ratio)
+                        // 创建/懒加载激活后，布局完成时做一次全量坐标回写（头部 + 行圆点）。
+                        // 壳位置命令式化后，激活路径没有其他 updateAllCenters 触发源：
+                        // 行回写有自身 onCompleted，但头部接受点（m_sectionAcceptPoint）
+                        // 没有——迷你地图跳转激活编组后成员连线 pb 停留在上一次激活位置
+                        //（偏 300+px）的根因。callLater 排在布局完成后，坐标已是最终值。
+                        Qt.callLater(function() {
+                            updateAllCenters()
+                            workspaceController.flushLinkEndpointsRebuild()
+                        })
+                    }
+                }
+            }
+
+            // 命中测试转发：WorkspaceView.findSectionAt/findHitAcceptorPoint 遍历
+            // itemAt 取 delegate 调用这两个方法；未激活（视口外）的壳返回 null 不参与命中
+            //（鼠标只能点到可见内容，可见节点必然已创建，语义不变）
+            function hitTestChild(screenX, screenY) {
+                var it = nodeLoader.item
+                return (it && it.hitTestChild) ? it.hitTestChild(screenX, screenY) : null
+            }
+            function hitTestAcceptor(wsX, wsY) {
+                var it = nodeLoader.item
+                return (it && it.hitTestAcceptor) ? it.hitTestAcceptor(wsX, wsY) : null
+            }
+
             // 性能优化：拖拽结束时只更新被拖拽节点的位置，不重建整个 Repeater
             // 注意：不调用 getSectionData（会触发 buildSectionItem → SectionLineModel::refresh，
             //        重建行模型导致卡顿）。直接读 IBR_SectionMap 的 EqPos 通过专用轻量接口。
             Connections {
                 target: workspaceController
-                function onSectionPositionChanged(sid) {
-                    if (sid === sectionData.sectionId) {
-                        var pos = workspaceController.getSectionEqPos(sectionData.sectionId)
+                    function onSectionPositionChanged(sid) {
+                    if (sid === sectionDelegate.sectionData.sectionId) {
+                        var pos = workspaceController.getSectionEqPos(sectionDelegate.sectionData.sectionId)
                         sectionDelegate.localEqX = pos.x
                         sectionDelegate.localEqY = pos.y
+                        sectionDelegate.updatePosition()
                     }
                 }
             }
@@ -435,6 +628,9 @@ Item {
         case "selectAll":      workspaceController.selectAll(); break
         case "paste":          workspaceController.paste(); break
         case "refreshRegName": projectController.refreshAllRegName(); break
+        // 特殊块创建：在空白右键菜单弹出位置（placePos，RePos）创建
+        case "createComment":   if (contextMenuHost.placePos) workspaceController.createCommentBlock(contextMenuHost.placePos.x, contextMenuHost.placePos.y); break
+        case "createSingleVal": if (contextMenuHost.placePos) workspaceController.createSingleValBlock(contextMenuHost.placePos.x, contextMenuHost.placePos.y); break
         }
     }
 

@@ -594,6 +594,39 @@ Item {
                                     }
                                 }
 
+                                // 多值键值 0 行号（!nlad：位于键名与值框之间，对齐 ImGui
+                                // :294-299 透明占位 + :338-348 可见行号；nlad 时行号随值行走）
+                                Text {
+                                    visible: (modelData.isMultiple || false)
+                                             && !(modelData.newLineAfterDesc || false)
+                                             && (modelData.showLineID || false)
+                                             && !(modelData.missing || false)
+                                    text: "" + (modelData.lineIDFrom || 0)
+                                    color: "#6e6e6e"
+                                    font.pixelSize: 13
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                // 多值键 "+"（nlad：紧跟键名右侧，对齐 ImGui :321-324 SameLine；
+                                // !nlad 时 + 在键名正下方，由下方 valueRows 顶部的按钮承担）
+                                Button {
+                                    visible: (modelData.isMultiple || false)
+                                             && (modelData.newLineAfterDesc || false)
+                                             && !(modelData.missing || false)
+                                    text: "＋"
+                                    width: 20
+                                    height: 20
+                                    onClicked: editPanelController.addLineValue(modelData.keyName)
+                                    background: Rectangle {
+                                        color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
+                                        border.color: "#3c3c3c"; border.width: 1; radius: 3
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text; color: "#cccccc"; font.pixelSize: 13
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                }
+
                                 // 缺失行数据红色提示（对应 TextColored IllegalLineColor，IBR_Misc.cpp:903）
                                 Text {
                                     Layout.fillWidth: true
@@ -603,19 +636,23 @@ Item {
                                     font.pixelSize: 13
                                 }
 
-                                // 值编辑控件（缺失行、多值键不显示；同名多值键由下方 valueRows 逐值渲染）
-                                // 互斥规则：主值框 与 多值 Column(valueRows) 严格二选一，绝不并存
-                                //  - 非 Multiple 键：主值框显示（valueRows 恒 0）
-                                //  - Multiple 键：无主值框概念，每个同名键都由 valueRows 自己的框渲染
-                                // NewLineAfterDesc=true 时主值框换到下一行（见下方 mainValueFieldNL）
+                                // 值编辑控件（对应 ImGui :334 SameLine：!nlad 时值与键名同行）
+                                //  - 单值键：显示 value
+                                //  - 多值键 !nlad：显示值 0（写回索引 0），值 1..n-1 由下方 valueRows 渲染
+                                //  - 多值键 nlad：隐藏（键名独行，全部值由 valueRows 渲染）
+                                //  - IIF 键（keyType==2）：由下方分量区逐分量渲染
+                                //  - 缺失行：不显示
                                 TextField {
                                     id: mainValueField
                                     Layout.fillWidth: true
                                     visible: !(modelData.missing || false)
                                              && ((modelData.keyType || 0) !== 2)   // IIF 键改由下方分量区逐分量渲染
-                                             && !(modelData.isMultiple || false)
                                              && !(modelData.newLineAfterDesc || false)
-                                    text: modelData.value || ""
+                                             && (!(modelData.isMultiple || false)
+                                                 || (modelData.values ? modelData.values.length > 0 : false))
+                                    text: (modelData.isMultiple || false)
+                                          ? ((modelData.values && modelData.values.length > 0) ? modelData.values[0] : "")
+                                          : (modelData.value || "")
                                     color: "#e0e0e0"
                                     placeholderTextColor: "#909090"
                                     font.pixelSize: 13
@@ -625,7 +662,9 @@ Item {
                                         border.width: 1
                                         radius: 2
                                     }
-                                    onEditingFinished: editPanelController.setLineValue(modelData.keyName, text)
+                                    onEditingFinished: (modelData.isMultiple || false)
+                                                       ? editPanelController.setLineValueAt(modelData.keyName, 0, text)
+                                                       : editPanelController.setLineValue(modelData.keyName, text)
                                     onActiveFocusChanged: if (activeFocus) console.log("[SIDEBAR-DIAG] focus=mainValue key='" + modelData.keyName + "' isMultiple=" + (modelData.isMultiple||false) + " value=['" + text + "']")
                                     // 悬停提示（统一用全局 appToolTip，暗色方角立即显示）
                                     onHoveredChanged: {
@@ -682,26 +721,41 @@ Item {
                                 visible: (entry.isMultiple || false)
                                          && ((entry.keyType || 0) !== 2)   // IIF 键改由下方逐分量渲染
                                          && !(entry.missing || false)
-                                // "+" 按钮：同一组键只有一个，放在键名下面那行（值列表开头）
-                                // 对齐 imgui WorkSpaceLine::RenderUI 的 "+" 按钮（IBR_Misc.cpp:321-333）
-                                Button {
-                                    text: "＋"
-                                    width: 20
+                                // "+" 按钮：同一组键只有一个。!nlad 时放在键名正下方
+                                //（x=18 = 复选框 14 + spacing 4，即键名 Text 的 x，对齐 ImGui
+                                // :359-368 内容区左缘/BaseCursorY）；nlad 时 + 在主行键名右侧
+                                //（见上方主行按钮），此处隐藏。
+                                // Column 是 positioner 会覆盖子项 x，用 Item 包裹定位。
+                                Item {
+                                    width: 38
                                     height: 20
-                                    onClicked: editPanelController.addLineValue(valueRows.entry.keyName)
-                                    background: Rectangle {
-                                        color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
-                                        border.color: "#3c3c3c"; border.width: 1; radius: 3
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text; color: "#cccccc"; font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    visible: !(valueRows.entry.newLineAfterDesc || false)
+                                    Button {
+                                        x: 18
+                                        text: "＋"
+                                        width: 20
+                                        height: 20
+                                        onClicked: editPanelController.addLineValue(valueRows.entry.keyName)
+                                        background: Rectangle {
+                                            color: parent.hovered ? "#3c3c3c" : "#2d2d2d"
+                                            border.color: "#3c3c3c"; border.width: 1; radius: 3
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text; color: "#cccccc"; font.pixelSize: 13
+                                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                        }
                                     }
                                 }
                                 Repeater {
-                                    model: entry.values ? entry.values.length : 0
+                                    // 限定 valueRows.entry：裸 entry 是父对象的属性，子级
+                                    // 绑定作用域解析不到 → ReferenceError → model 恒 0，
+                                    // 多值键的值输入行不渲染（委托内均用限定形式，仅此处漏了）
+                                    model: valueRows.entry.values ? valueRows.entry.values.length : 0
                                     delegate: Row {
                                         spacing: 4
+                                        // !nlad 时值 0 已内联到主行（mainValueField），隐藏第 0 行
+                                        //（Column 自动跳过 invisible 子项）；nlad 时全部值行显示
+                                        visible: !(valueRows.entry.newLineAfterDesc || false) ? index > 0 : true
                                         // 行号（ShowLineID 时显示：lineIDFrom + index，对齐 imgui Count+LineIDFrom 语义）
                                         Text {
                                             visible: (valueRows.entry.showLineID || false)

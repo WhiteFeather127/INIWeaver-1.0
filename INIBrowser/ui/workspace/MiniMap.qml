@@ -37,11 +37,16 @@ Canvas {
         if (workspaceController.diagLogEnabled()) {
             var desc = "none"
             if (sections.length > 0) {
+                // 只拼前 20 项：全量拼接在 1471 节点时每行 ~50KB，且 reportSectionSize
+                // 合并前的每次 emit 都打一行（实测累计 ~350MB，占部署日志主体）
+                var cap = Math.min(sections.length, 20)
                 var parts = []
-                for (var i = 0; i < sections.length; i++) {
+                for (var i = 0; i < cap; i++) {
                     var s = sections[i]
                     parts.push("[" + s.sectionId + ":" + s.eqX + "," + s.eqY + "," + s.eqW + "," + s.eqH + "]")
                 }
+                if (sections.length > cap)
+                    parts.push("…(" + (sections.length - cap) + " more)")
                 desc = parts.join(" ")
             }
             console.log("[REFRESH-DIAG] MiniMap onSectionsChanged count=" + sections.length + " " + desc)
@@ -53,13 +58,15 @@ Canvas {
     onIsBgDraggingChanged: requestPaint()
 
     onPaint: {
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.MiniMap.onPaint")
         var ctx = getContext("2d");
         ctx.reset();
 
-        if (workspaceController.diagLogEnabled())
+        if (_perf)
             console.log("[REFRESH-DIAG] MiniMap onPaint sections=" + sections.length + " w=" + width + " h=" + height)
 
-        if (sections.length === 0) return;
+        if (sections.length === 0) { if (_perf) workspaceController.perfEnd(); return; }
 
         // 计算所有 Section 的边界
         // world bounds 默认仅由模块范围决定；侧边栏（includeViewportInWorld=true）时
@@ -83,14 +90,14 @@ Canvas {
 
         var worldW = maxX - minX;
         var worldH = maxY - minY;
-        if (worldW < 1 || worldH < 1) return;
+        if (worldW < 1 || worldH < 1) { if (_perf) workspaceController.perfEnd(); return; }
 
         // 缩放到迷你地图尺寸（fit 自适应），画布与组件边缘留固定像素边距 canvasPadding
         // 贴边方向距离 = canvasPadding（固定），非贴边方向因等比居中 ≥ canvasPadding
         var pad = root.canvasPadding;
         var availW = width - 2 * pad;
         var availH = height - 2 * pad;
-        if (availW < 1 || availH < 1) return;
+        if (availW < 1 || availH < 1) { if (_perf) workspaceController.perfEnd(); return; }
         var scale = Math.min(availW / worldW, availH / worldH);
         var offsetX = pad + (availW - worldW * scale) / 2;
         var offsetY = pad + (availH - worldH * scale) / 2;
@@ -156,6 +163,7 @@ Canvas {
         ctx.moveTo(center.x, center.y - 4);
         ctx.lineTo(center.x, center.y + 4);
         ctx.stroke();
+        if (_perf) workspaceController.perfEnd()
     }
 
     // 阶段 13.4：鼠标按下时持续定位（对应 IBR_FullView.cpp:185-189）

@@ -11,7 +11,11 @@
 #include <QColor>
 #include <QElapsedTimer>
 #include <QHash>
+#include <QSet>
 #include <QPointer>
+#include <QMutex>
+#include <QStringList>
+#include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include "IBR_Project.h"  // ModuleID_t, ImVec2
 #include "WorkspaceSectionModel.h"  // sectionsModel 完整类型（getter 返回 QObject* 需已知继承关系）
@@ -35,8 +39,13 @@ class WorkspaceController : public QObject
     // 只增删对应 delegate，避免整表替换重建全部 SectionNode（卡顿根因）。
     // 保留 sections（全量列表）供 LinkRenderer/MiniMap/length 判断等使用。
     Q_PROPERTY(QObject *sectionsModel READ sectionsModel CONSTANT)
-    // D20：数据版本号，每次 sectionsChanged 时递增，供 QML 子模块绑定以实时刷新 getSectionData
-    Q_PROPERTY(int sectionDataRevision READ sectionDataRevision NOTIFY sectionsChanged)
+    // D20：数据版本号，仅在 section 数据结构变化时递增（refreshSections/项目关闭），
+    // 供 QML 子模块绑定以实时刷新 getSectionData。
+    // 注意：NOTIFY 用独立的 sectionDataRevisionChanged，而非 sectionsChanged。
+    // 否则 reportSectionSize 为刷新 MiniMap 快照 emit sectionsChanged 时，会连带触发
+    // 子模块 getSectionData 重查 → buildSectionItem 重建 → SectionNode 高度变化 →
+    // reportSectionSize → 再 emit → 无限重入循环（导入大项目死循环根因）。
+    Q_PROPERTY(int sectionDataRevision READ sectionDataRevision NOTIFY sectionDataRevisionChanged)
     Q_PROPERTY(QVariantList links READ links NOTIFY linksChanged)
     // 连线端点表：[{sessionId, x, y, isCollapsed}, ...]，供 LinkRenderer 查表
     // 对应 ImGui Session.LastCenter（每行 RadioButton 屏幕坐标）
@@ -193,6 +202,43 @@ public:
     // 轻量级选中查询：QML 通过 selectedRevision 触发重新评估
     // MassSelecting 状态下查询 m_massSelectPreview（实时预览），否则查询 MassTarget
     Q_INVOKABLE bool isSectionSelected(qulonglong sectionId) const;
+    // isSectionSelected 的实现体（diag 构建下 isSectionSelected 外包计时探针，
+    // 逻辑收在此处避免探针递归计时）
+    bool isSectionSelectedImpl(qulonglong sectionId) const;
+    // 选中集快照（批量查询支撑）：一次 C++ 往返取回整个选中集合（框选中返回预览集，
+    // 语义与 isSectionSelected 完全一致），QML 侧建 JS Set 后 O(1) 查询。
+    // 替代画布每帧对每条连线/每节点的逐项 isSectionSelected 跨语言调用
+    //（1471 模块全选后每帧 4000+ 次 C++ 往返是拖拽/重绘卡顿热点）。
+    Q_INVOKABLE QVariantList massTargetSnapshot() const;
+    // 编组块成员全集（含 groupId 自身，BFS 所有层级子块）：拖编组时 QML 取一次建
+    // JS Set，逐连线判断"是否随拖拽移动"不再逐条调 isInComposedOf 跨语言 BFS
+    Q_INVOKABLE QVariantList composedMembersList(qulonglong groupId) const;
+    // 行圆点回写的世界坐标镜像入口（公开：SectionLineModel::setLinkNodeCenter* 调用）。
+    // 屏幕↔Eq 换算复用既有的 Q_INVOKABLE screenToEq/eqToScreen（QPointF 版，EqPosToRePos 同式）
+    Q_INVOKABLE void noteSessionCenterEq(qulonglong sectionId, qulonglong sessionId, qreal sx, qreal sy); // SectionLineModel 行圆点回写入口（公开）
+    // 节点当前 EqPos（世界坐标；SectionLineModel 写相对偏移用）
+    Q_INVOKABLE QPointF sectionEqPos(qulonglong sectionId) const;
+    // 壳渲染位置上报（updatePosition 每次调用）：连线端点对账的"节点实际渲染位置"。
+    // 屏幕坐标与世界坐标（Eq）都存，EP-DIAG 同屏对比 painted pb / 世界投影 / 实际渲染。
+    Q_INVOKABLE void noteShellRenderPos(qulonglong sectionId, qreal x, qreal y);
+    QPointF shellRenderPos(qulonglong sectionId) const;   // 屏幕坐标（未上报过返回 QPointF()）
+    QPointF shellRenderEq(qulonglong sectionId) const;    // 世界坐标
+    // QML 回写级联完成后的强制端点表重建：世界缓存变更（非视口变化）无法用
+    // canvasOff/zoomTransform 补偿，必须立即重建；绕过叠加期门控与防抖守卫
+    //（调用时机已保证几何最终）。缩放补间中仍走 finishZoomTweenNow 推到最终值。
+    Q_INVOKABLE void flushLinkEndpointsRebuild();
+    // 顶层祖先的 EqPos：编组成员的 EqPos 是组内相对/过期基准，其世界锚定是
+    // 顶层祖先（组被拖拽时顶层 EqPos 才会更新）。端点世界缓存的相对偏移以它为锚，
+    // 否则"rel + 成员EqPos"仍然冻结（编组成员连线不跟随的根因）。
+    // 顶层节点返回自身 EqPos；沿 IncludedByModule 上溯（带深度防护）。
+    Q_INVOKABLE QPointF topAncestorEqPos(qulonglong sectionId) const;
+    // 懒加载 culling 状态同步：shell（WorkspaceView delegate）的 Loader 激活/停用时调用。
+    // 被 culled 的节点没有 delegate 回写，其屏幕坐标来源（m_sectionAcceptPoint /
+    // Session LastCenter / 行级 acceptCenter）全部过期，端点表重建时必须跳过这些来源、
+    // 落到 EqPosToRePos 兜底（按当前视口实时计算，永远新鲜），否则平移后视口外节点
+    // 的连线端点停留在旧屏幕位置（大偏差根因）。
+    // 激活（culled=false）后 delegate 创建 → 回写恢复精确端点。
+    Q_INVOKABLE void setSectionCulled(qulonglong sectionId, bool culled);
     // 多选拖拽松手后过渡期查询：松手到收尾 rebuild 完成前，所有被拖节点需继续叠加
     // dragOffset 防连线弹回（单节点用 m_lastDraggedId，多选用此集合）。详见 buildSectionMap。
     Q_INVOKABLE bool isLastMassDragged(qulonglong sectionId) const;
@@ -437,6 +483,14 @@ public:
 #endif
     }
 
+    // ===== 渲染性能探针（[PERF-DIAG]，仅 INIWEAVER_DIAG 诊断构建编译进实现；普通构建零开销）=====
+    // QML 渲染函数（Canvas onPaint / 坐标回写等）用 perfBegin/perfEnd 包裹计时，
+    // perfFrame 由 QML window.afterRendering 每渲染帧调用；每 120 帧输出一次聚合统计到日志，
+    // 按总耗时排序，配合帧间隔统计定位"什么最影响帧率"。
+    Q_INVOKABLE void perfBegin(const QString &tag);
+    Q_INVOKABLE void perfEnd();
+    Q_INVOKABLE void perfFrame();
+
 signals:
     void ratioChanged();
     void eqCenterChanged();
@@ -445,6 +499,9 @@ signals:
     void projectOpenChanged();
     void inputStateChanged();
     void sectionsChanged();
+    // D20：section 数据结构版本变化（refreshSections/项目关闭），独立于 sectionsChanged，
+    // 避免 reportSectionSize 的几何刷新连带触发子模块数据重查导致重入死循环
+    void sectionDataRevisionChanged();
     void linksChanged();
     void linkEndpointsChanged();
     void selectionRectChanged();
@@ -673,6 +730,17 @@ private:
     // refreshFromTimer 检测到此标志才调 rebuildLinkEndpoints，避免静止时无谓重建
     bool m_linkEndpointsDirty{true};
     bool m_pendingSizeRebuild{false};  // reportSectionSize 延迟重建已排队标志，防 onWidth/onHeight 都触发时重复排队
+    // sectionId → m_sections 行索引：reportSectionSize / syncSectionSnapshotPos 用它 O(1) 定位
+    // 快照项，替代此前每次回调 O(n) 全表扫描（导入 1471 模块时 8460 次回调 × O(n) 扫描 +
+    // 每次 emit 触发 MiniMap 全量刷新 = 577s，部署日志 [PERF-DIAG] 实测的导入卡顿根因）。
+    // refreshSections 重建 m_sections 后同步重建；项目关闭路径清空。
+    QHash<qulonglong, int> m_sectionRowIndex;
+    // reportSectionSize 待合并通知集合（sectionId → 行索引）：同一事件循环内的多次尺寸回报
+    // 只在循环末尾 emit 一次 sectionsChanged（MiniMap 的 sections 绑定是全量列表，每 emit
+    // 都重转 JS + 全量重绘；delegate 创建期高度分多步增长，合并后 emit 次数从 ~7000 → 每
+    // 事件循环 1 次）。flushPendingSectionSizes 统一发出。
+    QHash<qulonglong, int> m_pendingSizeRows;
+    bool m_pendingSizeFlushScheduled{false};  // 防同一事件循环内重复排队 flush
     // 松手过渡期抑制 tick 的端点表重建：
     // 松手后 dragOffset 尚未清零时，若 tick 提前重建端点表，LinkRenderer 会叠加残留
     // dragOffset 显示连线（偏移一帧）。此标志抑制 tick 重建，仅允许松手收尾的最终重建。
@@ -688,6 +756,10 @@ private:
     // 重建连线端点表（从 IBR_NodeSession 全局表同步 LastCenter）
     void rebuildLinkEndpoints();
 
+    // 发出被合并的 reportSectionSize 尺寸通知：本事件循环内所有尺寸回写完成后
+    // 只 emit 一次 sectionsChanged（QtMain QTimer tick 或 QML 事件处理结束后排队触发）
+    void flushPendingSectionSizes();
+
     // 增量刷新单条链接端点：改变连线状态（拖拽建链等）后只更新该链接 pa/pb，
     // 避免全量 rebuild 读到行模型 resetModel 重建期间的污染坐标（连线全跑模块第一节点）
     void refreshLinkEndpoint(qulonglong srcId, const QString &fromKey, int mult, qulonglong dstId);
@@ -699,4 +771,40 @@ private:
     // 阶段 3：每个 section 的标题栏 RadioButton 屏幕坐标（非折叠态接受点）
     // 由 QML SectionNode header headLineRN 回写，供 rebuildLinkEndpoints 构建 pb
     QHash<qulonglong, QPointF> m_sectionAcceptPoint;
+    // 懒加载 culling 集合（见 setSectionCulled 注释）：这些节点的 QML 回写坐标已过期，
+    // rebuildLinkEndpoints 对其跳过 LastCenter/行级接受点来源，落 EqPosToRePos 兜底
+    QSet<qulonglong> m_culledSections;
+    // ===== 懒加载端点世界坐标镜像 =====
+    // 被 cull 的节点没有 delegate 回写，屏幕坐标回写（上两族缓存 + Session LastCenter）
+    // 会随平移/缩放过期。三处回写在写入屏幕坐标的同时换算存储**世界坐标（Eq 空间）**，
+    // rebuildLinkEndpoints 对 cull 节点按当前视口再投影 → cull 期间平移/缩放后端点仍然
+    // 精确（此前兜底锚到标题栏，行离标题栏越远偏差越大；编组成员 EqPos 为组内相对坐标
+    // 时偏差更大）。只清于项目关闭（session id 全局递增，跨项目无碰撞）。
+    // 两个缓存存的是【相对节点 EqPos 的偏移】（写入时 = 世界坐标 − 当时 EqPos）：
+    // 节点被 cull 后 EqPos 仍会变（批量拖拽/撤销等），绝对世界坐标会永久滞后；
+    // 相对偏移 + 当前 EqPos 再投影，节点怎么动缓存都自动跟随
+    QHash<qulonglong, QPointF> m_sessionCenterEq;       // sessionId → 行圆点相对偏移
+    QHash<qulonglong, QPointF> m_sectionAcceptPointEq;  // sectionId → 头部接受点相对偏移
+    // 壳渲染位置上报（noteShellRenderPos）：EP-DIAG 对账用
+    QHash<qulonglong, QPointF> m_shellRenderPos;        // sectionId → 实际渲染屏幕坐标
+    QHash<qulonglong, QPointF> m_shellRenderEq;         // sectionId → 实际渲染世界坐标
+    QPointF sessionCenterEq(qulonglong sessionId) const;
+    QPointF sectionAcceptPointEq(qulonglong sectionId) const;
+
+#ifdef INIWEAVER_DIAG
+    // ===== 渲染性能探针状态（[PERF-DIAG]，仅诊断构建编译）=====
+    // mutable：isSectionSelected 等只读热点也挂探针（const 方法内收集统计），
+    // 统计写入不改变对象的逻辑状态
+    struct PerfStat { quint64 count = 0; qint64 totalNs = 0; qint64 maxNs = 0; };
+    QElapsedTimer m_perfClock;            // 全局纳秒时钟（构造即启动，探针取差值）
+    mutable QMutex m_perfMutex;           // 保护探针状态：Canvas onPaint 在渲染线程、坐标回写在 GUI 线程并发访问
+    mutable QHash<QString, PerfStat> m_perfStats; // tag → 聚合统计
+    QStringList m_perfTagStack;           // 嵌套探针标签栈（perfBegin 压入，perfEnd 弹出）
+    QVector<qint64> m_perfStartStack;     // 嵌套探针开始时间戳栈（nsecs）
+    quint64 m_perfFrames{0};              // 当前窗口已渲染帧数
+    qint64 m_lastFrameNs{-1};             // 上一帧 afterRendering 时刻（-1=首帧，无间隔）
+    qint64 m_frameTotalNs{0};             // 窗口内帧间隔累计（ns）
+    qint64 m_frameMaxNs{0};               // 窗口内最差帧间隔（ns）
+    void dumpPerfStats();                 // 输出 [PERF-DIAG] 汇总（按总耗时排序）并重置窗口
+#endif
 };
