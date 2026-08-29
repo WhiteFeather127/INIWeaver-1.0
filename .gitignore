@@ -34,6 +34,10 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# 诊断构建树与输出（INIWEAVER_ENABLE_DIAG=ON 的构建目录与产物）
+build-diag/
+bin-diag/
+
 # Visual Studio 2015/2017 cache/options directory
 .vs/
 # Uncomment if you have tasks that create the project's static files in wwwroot
