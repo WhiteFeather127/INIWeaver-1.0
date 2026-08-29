@@ -7,6 +7,7 @@
 #include "IBR_Project.h"
 #include "FromEngine/ImGuiDeps.h"
 #include <any>
+#include <unordered_set>
 #include "IBG_UndoTree.h"
 
 
@@ -124,6 +125,13 @@ namespace IBR_WorkSpace
     extern bool NeedChangeRatio, InitHolding, ShowRegName;
     extern bool IsBgDragging, HoldingModules, IsMassSelecting;
     extern std::vector<ModuleID_t> MassTarget;
+    // O(1) 选中查询镜像集：isSectionSelected 每帧被 QML 调数千次（每条连线查 2 次 +
+    // buildSectionMap 每节点 1 次），线性扫 MassTarget 在 1471 模块全选后 = O(N×M)/帧，
+    // 是拖拽/重绘卡顿热点。仅经 SetMassTarget()/ClearMassTarget() 同步变更两者；
+    // 直接改 MassTarget 会使镜像集过期（禁止绕过这两个入口直改）。
+    extern std::unordered_set<ModuleID_t> MassTargetSet;
+    void SetMassTarget(std::vector<ModuleID_t> Target);
+    void ClearMassTarget();
     //包含了被缩合的块
     extern std::vector<ModuleID_t> MassTargetExtended;
     extern ImVec4 TempWbg;

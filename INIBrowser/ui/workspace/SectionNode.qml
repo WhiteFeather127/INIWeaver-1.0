@@ -41,6 +41,9 @@ Item {
     readonly property color registerColor: sectionData.registerColor || "#808080"
     // Import 块标识（ImportCount > 0），对应 ImGui NotAsImported=false
     // ImGui 中导入块的 RadioButton 居中显示（IBR_SectionData.cpp:745-754）
+    // 行为B：块是否有标题栏（单值块/集线器块隐藏标题栏与头节点，对应 ImGui
+    // if(!Bsec->SingleVal && !Bsec->SkipTitle) RenderUI_TitleBar；value 由 buildSectionItem 下发）
+    readonly property bool hasTitle: sectionData.hasTitle !== false
     readonly property bool isImport: sectionData.isImport || false
 
     // 阶段 D3：子模块标识（递归渲染时由父传入，禁用顶层拖拽行为）
@@ -59,6 +62,17 @@ Item {
     scale: isSubModule ? 1.0 : _r
     transformOrigin: Item.TopLeft
     // ===== 缩放方案结束 =====
+
+    // 创建/激活后布局完成时全量回写 + 强制端点表重建。编组成员（父虚拟块的
+    // subNodeLoader 里的本组件实例）同样覆盖：成员的回写入队晚于顶层的激活 flush，
+    // 没有这一步成员端点会停留在旧世界缓存（表现为成员连线端点"懒加载"）。
+    // 多个实例的 callLater 链式排队，最后一次 flush 即完整状态（幂等）。
+    Component.onCompleted: {
+        Qt.callLater(function() {
+            updateAllCenters()
+            workspaceController.flushLinkEndpointsRebuild()
+        })
+    }
     readonly property int fontTitle: Math.round(12 * settingController.fontScale)
     readonly property int fontBody: Math.round(11 * settingController.fontScale)
     readonly property int fontSmall: Math.round(10 * settingController.fontScale)
@@ -103,8 +117,12 @@ Item {
     onIsDraggingChanged: updateAllCenters()
     Connections {
         target: workspaceController
-        function onEqCenterChanged() { updateAllCenters() }
-        function onRatioChanged() { updateAllCenters() }
+        // onEqCenterChanged/onRatioChanged 的回写级联已移至壳（WorkspaceView）的
+        // syncVisibleNode：它先 updatePosition（视口内壳重定位到新基准）再调
+        // updateAllCenters，回写坐标与换算基准必然一致。此处的自触发没有这层
+        // 保证——壳被 inViewport 门控跳过重定位时（正离开视口），这里会用
+        // "旧壳位置 + 新 eqCenter" 混合基准回写并污染世界坐标缓存
+        //（跳转后连线永久偏移的根因）。叠加态早退逻辑在 updateAllCenters 内部。
         function onDragOffsetChanged() { if (root.isDragging) updateAllCenters() }
         // 缩放叠加结束：回写缩放后的行圆点坐标（先于 C++ QueuedConnection 的端点表重建入队，
         // 与画布平移收尾的 onInputStateChanged 同模式：先回写、后重建，pb 读到新基准坐标）。
@@ -120,7 +138,13 @@ Item {
         // QueuedConnection 端点表重建入队 → 先回写、后重建，端点表固化为平移后的正确基准。
         function onInputStateChanged() {
             if (workspaceController.inputState !== 1) {
-                Qt.callLater(() => updateAllCenters())
+                // 回写 + 端点表强制重建合并为同一次 callLater：回写导致的行位置
+                // 微调（布局稳定）立即反映到端点表，消除拖模块结束的一帧偏移。
+                // （flushLinkEndpointsRebuild 绕过叠加期门控与防抖守卫，此时几何已最终。）
+                Qt.callLater(() => {
+                    updateAllCenters()
+                    workspaceController.flushLinkEndpointsRebuild()
+                })
             }
         }
     }
@@ -136,14 +160,18 @@ Item {
     }
 
     function updateAllCenters(force) {
+        var _perf = workspaceController.diagLogEnabled()
+        if (_perf) workspaceController.perfBegin("QML.SectionNode.updateAllCenters")
         // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomPending 叠加渲染），
         // 跳过全部回写避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
         // force=true 用于缩放收尾（onZoomFinalizeRequested）：缩放结束后必须把缩放后的
         // 行圆点坐标回写（即使随后立即进入画布平移 inputState==1），否则重建端点表会
         // 读到缩放前旧坐标 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) return
+        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
         // 头部坐标：拖拽中不回写（松手时 isDragging→false 触发回写新位置）
-        if (!root.isDragging) {
+        // 虚拟块（编组块）自身没有连线端点：连线只连到成员的键行/头部，
+        // 组的标题栏不产生端点（用户确认的行为），跳过头部回写。
+        if (!root.isDragging && !root.isVirtualBlock) {
             headLineRN.updateRNCenter()
         }
         // 键行坐标：始终回写（LineRow 内部根据 isDragging 决定是否减去 dragOffset）
@@ -170,6 +198,7 @@ Item {
                 }
             }
         }
+        if (_perf) workspaceController.perfEnd()
     }
 
     // 递归命中测试（workspaceView 坐标系 (wsX,wsY)）。优先返回包含该点的最深子模块；
@@ -196,6 +225,46 @@ Item {
             return root.sectionData
         }
         return null
+    }
+
+    // 行为A：拖线悬停 acceptor 键行 → 返回 { sectionId, keyName, color, x, y }（x/y 为接收点
+    // 中心在 workspaceView 坐标），未命中任何 acceptor 行返回 null。对应 ImGui IBR_Misc.cpp:100-178
+    // Acceptor Logic 的整行 DropTarget（AcceptFullArea → FromY=0/ToY=全高，整行可接收）。
+    function hitTestAcceptorRow(wsX, wsY) {
+        var local = root.mapFromItem(workspaceView, wsX, wsY)
+        if (local.x < 0 || local.y < 0 || local.x > root.width || local.y > root.height) return null
+        for (var i = 0; i < lineColumnRepeater.count; ++i) {
+            var item = lineColumnRepeater.itemAt(i)
+            if (!item || !item.isAcceptor || !item.acceptorCenterWs) continue
+            if (local.y >= item.y && local.y <= item.y + item.height) {
+                // acceptor 方形接收点中心（workspaceView 坐标），对应 ImGui AcceptCenter
+                var c = item.acceptorCenterWs()
+                if (!c) continue
+                return {
+                    sectionId: String(root.sectionData.sectionId),
+                    keyName: item.keyName || "",
+                    color: item.acceptorColor,
+                    x: c.x, y: c.y
+                }
+            }
+        }
+        return null
+    }
+
+    // 行为A：递归命中 acceptor 键行（先子模块后自身；最深层优先），供 WorkspaceView 顶层调用
+    function hitTestAcceptor(wsX, wsY) {
+        if (sectionData.isVirtualBlock && subModuleRepeater) {
+            for (var k = 0; k < subModuleRepeater.count; ++k) {
+                var del2 = subModuleRepeater.itemAt(k)
+                if (!del2) continue
+                var sub2 = del2.subModuleNode
+                if (sub2 && sub2.hitTestAcceptor) {
+                    var hit2 = sub2.hitTestAcceptor(wsX, wsY)
+                    if (hit2) return hit2
+                }
+            }
+        }
+        return root.hitTestAcceptorRow(wsX, wsY)
     }
 
     // 拖拽目标命中 + 预览（供标题栏圆点拖拽复用）
@@ -268,7 +337,9 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             // 标题栏高度（逻辑尺寸，视觉高度 = 逻辑 × scale）
-            height: 28
+            // 行为B：无标题块（单值块/集线器块）高度置 0，内容区从块顶部开始
+            height: root.hasTitle ? 28 : 0
+            visible: root.hasTitle
             // 注册表颜色填充标题栏（对应 ImGui UCol），Ignore 时用暗色
             color: isIgnored ? "#1e1e1e" : registerColor
             radius: 3
@@ -292,7 +363,9 @@ Item {
                 // 低一位图层：透明灰色圆，鼠标放上后提高亮度
                 // 内层颜色圆用 anchors.centerIn 与之同心（颜色圆圆心 = 灰圆圆心）
                 color: headRNMouseArea.containsMouse ? "#c0c8c8c8" : "#77a0a0a0"
-                visible: !isComment
+                // 行为B：无标题块不渲染头节点（连线锚点由 updateRNCenter 依 visible 跳过）
+                // 虚拟块（编组块）标题栏同样不渲染头节点 radio：编组块上不应有连线端点
+                visible: root.hasTitle && !isComment && !root.isVirtualBlock
 
                 // 上层：不透明颜色层（对齐 imgui）：非 Ignore 用默认 CheckMark
                 //（深色主题 0.26/0.59/0.98 ≈ #4296fa，imgui_draw.cpp:213）；Ignore 用 TempWbg 白色
@@ -311,14 +384,17 @@ Item {
                 // 折叠态：回写 setHeadLineRN（连线源端点汇聚到头部，对应 RenderUI_Collapsed）
                 // 非折叠态：回写 setSectionAcceptPoint（目标接受点，对应 ReWindowUL+ReOffset）
                 function updateRNCenter() {
-                    if (root.sectionData === undefined || root.sectionData.sectionId === undefined) return;
-                    if (!visible) return;
+                    var _perf = workspaceController.diagLogEnabled()
+                    if (_perf) workspaceController.perfBegin("QML.SectionNode.updateRNCenter")
+                    if (root.sectionData === undefined || root.sectionData.sectionId === undefined) { if (_perf) workspaceController.perfEnd(); return; }
+                    if (!visible) { if (_perf) workspaceController.perfEnd(); return; }
                     var globalPos = headLineRN.mapToItem(workspaceView, headLineRN.width/2, headLineRN.height/2)
                     if (root.isCollapsed || root.collapsedInComposed) {
                         workspaceController.setHeadLineRN(root.sectionData.sectionId, globalPos.x, globalPos.y)
                     } else {
                         workspaceController.setSectionAcceptPoint(root.sectionData.sectionId, globalPos.x, globalPos.y)
                     }
+                    if (_perf) workspaceController.perfEnd()
                 }
                 Component.onCompleted: updateRNCenter()
             }
@@ -476,6 +552,8 @@ Item {
                         isEmpty: model.isEmpty
                         isInherit: model.isInherit
                         isImport: model.isImport
+                        isAcceptor: model.isAcceptor
+                        acceptorColor: model.acceptorColor
                         linkType: model.linkType
                         sessionId: model.sessionId
                         links: model.links

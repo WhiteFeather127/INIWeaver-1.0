@@ -558,6 +558,8 @@ void SectionLineModel::setLinkNodeCenter(int row, qreal x, qreal y)
     // 回写到 IBR_NodeSession::SessionValue.LastCenter
     // 对应 ImGui PushLinkForDraw → SetSessionStatus
     IBR_NodeSession::SetSessionStatus(e.sessionId, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
+    // 世界坐标镜像（懒加载 cull 节点端点再投影用）
+    if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, e.sessionId, x, y);
     // 通知 WorkspaceController 端点表需要重建
     // Qt 版本无每帧渲染，LastCenter 更新后需主动触发 rebuildLinkEndpoints
     emit linkNodeCenterChanged();
@@ -572,6 +574,7 @@ void SectionLineModel::setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal 
     qulonglong sid = sessionIdFor(row, compIdx);
     if (sid == 0) return;
     IBR_NodeSession::SetSessionStatus(sid, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
+    if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, sid, x, y);
     emit linkNodeCenterChanged();
 }
 
@@ -593,6 +596,7 @@ void SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMu
                 bsec->GetThisID(), sub.Default->Name, i,
                 static_cast<size_t>(lineMult), static_cast<size_t>(compIdx));
             IBR_NodeSession::SetSessionStatus(sess, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
+            if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, sess, x, y);
             emit linkNodeCenterChanged();
             return;
         }
@@ -633,6 +637,10 @@ void SectionLineModel::setAcceptCenter(int row, qreal x, qreal y)
     const auto &e = m_entries[row];
     m_acceptCentersByKey.insert(
         QStringLiteral("%1@%2").arg(e.keyName).arg(e.lineMult), QPointF(x, y));
+    if (m_workspace)
+        m_acceptCentersEqByKey.insert(
+            QStringLiteral("%1@%2").arg(e.keyName).arg(e.lineMult),
+            m_workspace->screenToEq(QPointF(x, y)) - m_workspace->topAncestorEqPos(m_sectionId));
 }
 
 void SectionLineModel::setAcceptCenterByKey(const QString &keyName, int lineMult, qreal x, qreal y)
@@ -643,6 +651,10 @@ void SectionLineModel::setAcceptCenterByKey(const QString &keyName, int lineMult
     // 导致链接起点/终点画到相邻行圆点上。keyName/mult 由 LineRow delegate 直接绑定，天然正确。
     m_acceptCentersByKey.insert(
         QStringLiteral("%1@%2").arg(keyName).arg(lineMult), QPointF(x, y));
+    if (m_workspace)
+        m_acceptCentersEqByKey.insert(
+            QStringLiteral("%1@%2").arg(keyName).arg(lineMult),
+            m_workspace->screenToEq(QPointF(x, y)) - m_workspace->topAncestorEqPos(m_sectionId));
 }
 
 QPointF SectionLineModel::acceptCenterByKey(const QString &keyName, int lineMult) const
@@ -654,6 +666,24 @@ QPointF SectionLineModel::acceptCenterByKey(const QString &keyName, int lineMult
         QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
     if (it != m_acceptCentersByKey.constEnd()) return it.value();
     return QPointF();  // 未找到（QML 尚未回写该行接受点）
+}
+
+int SectionLineModel::rowIndexOf(const QString &keyName, int lineMult) const
+{
+    for (int i = 0; i < static_cast<int>(m_entries.size()); ++i) {
+        if (m_entries[i].keyName == keyName && m_entries[i].lineMult == lineMult)
+            return i;
+    }
+    return -1;
+}
+
+QPointF SectionLineModel::acceptCenterEqByKey(const QString &keyName, int lineMult) const
+{
+    // 行接受点世界坐标镜像（懒加载 cull 节点端点再投影用，见头文件注释）
+    auto it = m_acceptCentersEqByKey.constFind(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
+    if (it != m_acceptCentersEqByKey.constEnd()) return it.value();
+    return QPointF();
 }
 
 void SectionLineModel::setAcceptorCenter(const QString &keyName, int lineMult, qreal x, qreal y)

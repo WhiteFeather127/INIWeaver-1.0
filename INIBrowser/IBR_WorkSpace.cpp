@@ -204,6 +204,23 @@ namespace IBR_WorkSpace
     bool OnCombo{ false };
     bool OnPopupMenu{ false };
     std::vector<ModuleID_t> MassTarget;
+    //选中集 O(1) 查询镜像（声明见 IBR_Misc.h，仅经 SetMassTarget/ClearMassTarget 变更）
+    std::unordered_set<ModuleID_t> MassTargetSet;
+
+    void SetMassTarget(std::vector<ModuleID_t> Target)
+    {
+        MassTarget = std::move(Target);
+        MassTargetSet.clear();
+        MassTargetSet.reserve(MassTarget.size());
+        MassTargetSet.insert(MassTarget.begin(), MassTarget.end());
+    }
+
+    void ClearMassTarget()
+    {
+        MassTarget.clear();
+        MassTargetSet.clear();
+    }
+
     //包含了被编组的块
     std::vector<ModuleID_t> MassTargetExtended;
     bool LastOperateOnText{ false };
@@ -600,7 +617,7 @@ namespace IBR_WorkSpace
         IsMassAfter = true;
         DragStartEqMouse = IBR_FullView::GetEqMin();
         DragCurEqMouse = IBR_FullView::GetEqMax();
-        MassTarget = Target;
+        SetMassTarget(Target);
         ExtendMassSelect();
         IBR_PopupManager::ClearRightClickMenu();
     }
@@ -611,9 +628,11 @@ namespace IBR_WorkSpace
         IsMassAfter = true;
         DragStartEqMouse = IBR_FullView::GetEqMin();
         DragCurEqMouse = IBR_FullView::GetEqMax();
-        MassTarget.clear();
+        std::vector<ModuleID_t> All;
+        All.reserve(IBR_Inst_Project.IBR_Rev_SectionMap.size());
         for (auto& [D, I] : IBR_Inst_Project.IBR_Rev_SectionMap)
-            MassTarget.push_back(I);
+            All.push_back(I);
+        SetMassTarget(std::move(All));
         ExtendMassSelect();
         IBR_PopupManager::ClearRightClickMenu();
     }
@@ -875,7 +894,7 @@ namespace IBR_WorkSpace
                 {
                     IsMassAfter = false;
                     IsBgDragging = false;
-                    MassTarget.clear();
+                    ClearMassTarget();
                     MassTargetExtended.clear();
                 }
             }
@@ -1128,7 +1147,7 @@ namespace IBR_WorkSpace
                     IsMassSelecting = false;
                     if (abs((DragCurMouse - DragStartMouse).max()) > 2.0f)
                     {
-                        MassTarget = IBR_SelectMode::GetMassSelected();
+                        SetMassTarget(IBR_SelectMode::GetMassSelected());
                         ExtendMassSelect();
                         if (MassTarget.empty())
                         {
