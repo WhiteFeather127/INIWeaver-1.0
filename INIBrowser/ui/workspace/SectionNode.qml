@@ -102,11 +102,15 @@ Item {
     // 可见性
     visible: !isHidden
 
-    // 统一的画布变化更新入口
-    // 对应 ImGui 立即模式每帧重算 HeadLineRN + 所有行 LinkNode 坐标
-    // 触发场景：节点移动(x/y)、画布平移(EqCenter)、缩放(Ratio)、折叠状态、拖拽(dragOffset)
+    // 统一的世界坐标回写入口
+    // 对应 ImGui 立即模式每帧重算 HeadLineRN + 所有行 LinkNode 坐标。
+    // 【语义变化】回写的目标是"世界坐标缓存"（Eq 空间相对偏移），因此只在
+    // **世界几何变化** 时触发：节点移动(x/y)、折叠状态、行布局、拖拽结束(isDragging)。
+    // 画布平移(EqCenter)与缩放(Ratio)不再触发——世界缓存不随视口变化，
+    // 端点表也无需重建，连线由 LinkRenderer 每帧投影跟随（此前这里是平移/缩放的
+    // 性能热点：每次视口变化都要对全部可见节点的所有行做 mapToItem 回写）。
     // 拖拽中：跳过头部回写（避免 dragOffset 污染 m_sectionAcceptPoint），
-    //         LineRow 自身处理 dragOffset（减去后回写 LastCenter）
+    //         LineRow 自身处理 dragOffset（减去后回写）
     // 非拖拽：头部 + 所有 LineRow 全部回写
     onXChanged: {
         updateAllCenters()
@@ -117,36 +121,12 @@ Item {
     onIsDraggingChanged: updateAllCenters()
     Connections {
         target: workspaceController
-        // onEqCenterChanged/onRatioChanged 的回写级联已移至壳（WorkspaceView）的
-        // syncVisibleNode：它先 updatePosition（视口内壳重定位到新基准）再调
-        // updateAllCenters，回写坐标与换算基准必然一致。此处的自触发没有这层
-        // 保证——壳被 inViewport 门控跳过重定位时（正离开视口），这里会用
-        // "旧壳位置 + 新 eqCenter" 混合基准回写并污染世界坐标缓存
-        //（跳转后连线永久偏移的根因）。叠加态早退逻辑在 updateAllCenters 内部。
         function onDragOffsetChanged() { if (root.isDragging) updateAllCenters() }
-        // 缩放叠加结束：回写缩放后的行圆点坐标（先于 C++ QueuedConnection 的端点表重建入队，
-        // 与画布平移收尾的 onInputStateChanged 同模式：先回写、后重建，pb 读到新基准坐标）。
-        // force=true：缩放收尾必须绕过 inputState==1/zoomPending 跳过检查——若缩放后立即
-        // 拖画布（onMousePress 已把 inputState 置 1），callLater 执行时默认检查会 return，
-        // 行圆点停在缩放前旧坐标 → 重建端点表缓存"缩放前连线"→ 拖画布时连线错位/放缩。
-        function onZoomFinalizeRequested() {
-            Qt.callLater(() => updateAllCenters(true))
-        }
-        // 状态切换（含画布平移结束 state 1 → 其他）：延迟到事件循环末尾触发全量坐标回写。
-        // 必须延迟：updateInputState 的 emit 发生时 dragOffset 等拖拽状态可能还没清零，
-        // 同步回写会读到含旧 dragOffset 的位置污染基准。Qt.callLater 先于 C++ 的
-        // QueuedConnection 端点表重建入队 → 先回写、后重建，端点表固化为平移后的正确基准。
-        function onInputStateChanged() {
-            if (workspaceController.inputState !== 1) {
-                // 回写 + 端点表强制重建合并为同一次 callLater：回写导致的行位置
-                // 微调（布局稳定）立即反映到端点表，消除拖模块结束的一帧偏移。
-                // （flushLinkEndpointsRebuild 绕过叠加期门控与防抖守卫，此时几何已最终。）
-                Qt.callLater(() => {
-                    updateAllCenters()
-                    workspaceController.flushLinkEndpointsRebuild()
-                })
-            }
-        }
+        // 【已删除】onZoomFinalizeRequested 与 onInputStateChanged 两个回写级联处理器。
+        // 它们是"缩放叠加 / 画布平移"补偿层的回写侧：缩放/平移结束后必须赶在端点表
+        // 重建之前把新屏幕坐标回写进去（含 force 绕过门控、callLater 排队的复杂时序）。
+        // 端点表改存世界坐标后，缩放/平移不改变任何世界缓存，这两个处理器连同
+        // 它们要绕过的门控一起消失——回写只由"世界几何变化"触发（见下方 updateAllCenters）。
     }
 
     // 遍历行列表取最大的 IIF 自然宽度（供 implicitWidth 自适应模块宽度容纳 IIF 多分量）
@@ -159,15 +139,12 @@ Item {
         return m
     }
 
-    function updateAllCenters(force) {
+    function updateAllCenters() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.SectionNode.updateAllCenters")
-        // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomPending 叠加渲染），
-        // 跳过全部回写避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
-        // force=true 用于缩放收尾（onZoomFinalizeRequested）：缩放结束后必须把缩放后的
-        // 行圆点坐标回写（即使随后立即进入画布平移 inputState==1），否则重建端点表会
-        // 读到缩放前旧坐标 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
+        // 【已删除】画布平移（inputState===1）/ 缩放叠加（zoomPending）跳过门控与 force 参数。
+        // 那套门控是"屏幕快照 + 补偿层"的产物：叠加期回写会污染快照基准，必须跳过，
+        // 又必须在收尾时用 force 补回来。世界坐标缓存不随视口变化，回写任何时候都安全。
         // 头部坐标：拖拽中不回写（松手时 isDragging→false 触发回写新位置）
         // 虚拟块（编组块）自身没有连线端点：连线只连到成员的键行/头部，
         // 组的标题栏不产生端点（用户确认的行为），跳过头部回写。
@@ -178,12 +155,12 @@ Item {
         for (var i = 0; i < lineColumnRepeater.count; ++i) {
             var item = lineColumnRepeater.itemAt(i)
             if (item && item.updateLinkNodeCenter) {
-                item.updateLinkNodeCenter(force)
+                item.updateLinkNodeCenter()
             }
-            // IIF 分量节点同样强制回写：模块移动/拖拽/缩放后分量圆点坐标必须刷新，
-            // 否则 LastCenter 停留在旧位置 → 分量连线跑到画布外
+            // IIF 分量节点同样强制回写：模块移动/拖拽后分量圆点坐标必须刷新，
+            // 否则世界缓存停留在旧位置 → 分量连线跑到画布外
             if (item && item.updateIifCompCenters) {
-                item.updateIifCompCenters(force)
+                item.updateIifCompCenters()
             }
         }
         // 折叠子模块：嵌套在父虚拟块 Column 内，父块移动/变化时其自身 onXChanged 不触发，
@@ -194,7 +171,7 @@ Item {
                 if (slot && slot.subNodeLoader && slot.subNodeLoader.item) {
                     var sub = slot.subNodeLoader.item
                     // 递归级联：子模块自身也可能是虚拟块（嵌套编组），其内部子模块一并更新
-                    if (sub.updateAllCenters) sub.updateAllCenters(force)
+                    if (sub.updateAllCenters) sub.updateAllCenters()
                 }
             }
         }
@@ -606,7 +583,7 @@ Item {
                         // 否则其他被推动的折叠子模块连线端点停原地、与拖拽/伸缩不同步。
                         onYChanged: {
                             if (subNodeLoader.item && subNodeLoader.item.updateAllCenters) {
-                                subNodeLoader.item.updateAllCenters(true)
+                                subNodeLoader.item.updateAllCenters()
                             }
                         }
 

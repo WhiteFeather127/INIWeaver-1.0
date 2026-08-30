@@ -99,7 +99,11 @@ public:
     // accept 目标键（Collector/Armor）左侧方形接收点回写（对应 ImGui AcceptCenter = Cursor.x - LH*0.7）
     Q_INVOKABLE void setAcceptorCenter(const QString &keyName, int lineMult, qreal x, qreal y);
     // accept 目标键方形接收点查询（连线终点连到方形）
+    // 屏幕值：仅 INIWEAVER_DIAG 诊断对照/回退用；正式路径读 acceptorCenterEqByKey（世界坐标）
     Q_INVOKABLE QPointF acceptorCenterByKey(const QString &keyName, int lineMult) const;
+    // accept 目标键方形接收点的世界坐标（Eq 空间）镜像查询，与 acceptorCenterByKey 同键同时写入。
+    // 返回 QPointF() 表示无记录。端点表改存世界坐标后，rebuildLinkEndpoints 只读这一个。
+    QPointF acceptorCenterEqByKey(const QString &keyName, int lineMult) const;
     // 诊断：返回已回写接受点的全部 keyName@mult 复合键（排查 FromKey 查询不匹配）
     QStringList acceptCenterKeys() const;
 
@@ -266,8 +270,13 @@ private:
     // 懒加载 cull 节点无 delegate 回写，屏幕坐标会随平移/缩放过期；
     // rebuildLinkEndpoints 对 cull 节点用世界坐标按当前视口再投影，端点保持精确
     QHash<QString, QPointF> m_acceptCentersEqByKey;
-    // accept 目标键左侧方形接收点（keyName@mult -> 画布坐标）
+    // accept 目标键左侧方形接收点（keyName@mult -> 画布/屏幕坐标）
+    // 端点表世界化后仅作 INIWEAVER_DIAG 诊断对照与回退手段，rebuild 不再读它
     QHash<QString, QPointF> m_acceptorCentersByKey;
+    // accept 目标键方形接收点的世界坐标镜像（Eq 空间，与 m_acceptorCentersByKey 同键同时写入）：
+    // 与 m_acceptCentersEqByKey 同语义——存【相对顶层祖先 EqPos 的偏移】，
+    // rebuildLinkEndpoints 按当前视口再投影，视口怎么变端点都精确
+    QHash<QString, QPointF> m_acceptorCentersEqByKey;
 
     // SpecialAccept 临时态缓存（按 keyId 索引，跨 rebuild 保留）
     // 对应 ImGui WorkSpaceLine::SpecialAccept（画布会话级，不持久化到 INI）

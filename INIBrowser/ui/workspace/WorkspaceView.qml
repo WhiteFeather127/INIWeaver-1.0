@@ -31,6 +31,17 @@ Item {
     // restart/abort 的瞬停抑制：stop() 同步触发 onRunningChanged(false)，此时不应收尾
     property bool zoomSuppressFinish: false
 
+    // ===== 共享视口态（模块壳与 LinkRenderer 读同一份）=====
+    // 连线端点表改存世界坐标（Eq 空间绝对点）后，连线的屏幕位置由这里投影得到：
+    //   screen = worldEq × viewRatio + viewBase
+    // 等价于 (worldEq − eqCenter) × ratio + viewCenter（与 C++ EqPosToRePos 同式）。
+    // 模块壳 sectionDelegate.updatePosition() 用的是这三个量，LinkRenderer 也读这三个量——
+    // 二者不是"两份代码写对同一个表达式"，而是同一份数据，物理上不可能分叉。
+    // 提升到这里之前它们挂在 sectionRepeater 上，连线无法读取。
+    readonly property real viewRatio: workspaceController.ratio
+    readonly property real viewBaseX: workspaceView.width / 2 - workspaceController.eqCenter.x * workspaceController.ratio
+    readonly property real viewBaseY: workspaceView.height / 2 - workspaceController.eqCenter.y * workspaceController.ratio
+
     NumberAnimation {
         id: zoomTweenAnim
         target: workspaceView
@@ -182,7 +193,7 @@ Item {
             zoomTweenAnim.start()
             workspaceView.zoomSuppressFinish = false
         }
-        // 缩放补间强制中止（C++ 收尾路径清 zoomPending 前调用）：
+        // 缩放补间强制中止（C++ 收尾路径调用，如拖拽结束/视口跳转前）：
         // Ratio 已由 C++ 直接推到目标，这里只停动画，不再逐帧改值
         function onZoomTweenAbortRequested() {
             workspaceView.zoomSuppressFinish = true
@@ -266,9 +277,9 @@ Item {
         focusedSectionId: workspaceController.focusedSectionId
         ratio: workspaceController.ratio
         // 阶段 2：传入 dragOffset，拖拽中实时更新连线端点
+        // 这是唯一的"补偿层"：拖拽期间节点 EqPos 未落盘，模块靠 dragTerm、连线靠 dragOffset，
+        // 同一个临时量。平移/缩放/视口变化已无补偿层——端点表是世界坐标，每帧投影即可。
         dragOffset: workspaceController.dragOffset
-        // 画布平移偏移：拖动画布时端点表保持快照，渲染叠加此偏移与节点移动保持一致
-        canvasOffset: workspaceController.canvasDragOffset
     }
 
     // 鼠标交互区（空白处）
@@ -325,13 +336,12 @@ Item {
         // 避免整表替换重建全部 SectionNode（卡顿根因）
         model: workspaceController.sectionsModel
 
-        // ===== 每帧一次的共享视口状态（壳的位置/剔除判定用） =====
+        // ===== 共享视口状态（已提升到 workspaceView 根级）=====
         // 平移/缩放时下面各属性整体重算一次；壳只读它们，不再各自解引用
         // eqCenter/ratio/width（1471 壳 × 3 绑定 × ~25 次属性读/帧 → 每壳 ~8 次）。
-        readonly property real viewRatio: workspaceController.ratio
-        // 位置基准：x = localEqX * viewRatio + viewBaseX（EqPosToRePos 展开式）
-        readonly property real viewBaseX: workspaceView.width / 2 - workspaceController.eqCenter.x * workspaceController.ratio
-        readonly property real viewBaseY: workspaceView.height / 2 - workspaceController.eqCenter.y * workspaceController.ratio
+        // 位置基准：x = localEqX * workspaceView.viewRatio + workspaceView.viewBaseX
+        //（EqPosToRePos 展开式）。与 LinkRenderer 的 world→screen 投影共用同一组量，
+        // 已提升到 workspaceView 根级（见根级属性注释），壳直接引用不再各自缓存。
         // 外扩 1 屏的活跃视口矩形（Eq 坐标；cull 判定用）
         readonly property real viewMinX: workspaceController.eqCenter.x - workspaceView.width / workspaceController.ratio
         readonly property real viewMaxX: workspaceController.eqCenter.x + workspaceView.width / workspaceController.ratio
@@ -370,9 +380,8 @@ Item {
                 // 组的 updateAllCenters 级联，缺了它成员头缓存停在旧位置 →
                 // 端点表（世界缓存优先）投影出偏移的 pb（编组连线偏移根因）。
                 // callLater 合帧：多个壳在同一帧的 dataChanged 风暴只触发一次执行。
-                // 回写后必须同步重建端点表：世界缓存变了（不是视口变化），
-                // canvasOff/zoomTransform 无法补偿，走平移门控的延迟重建会让
-                // 误差滞留到下一次拖模块结束才纠正（一帧/持续偏移根因）。
+                // 回写后同步重建端点表：这是世界缓存变更（不是视口变化），
+                // 端点表必须重新解析才能反映新值。
                 if (nodeLoader.item)
                     Qt.callLater(function() {
                         if (nodeLoader.item && nodeLoader.item.updateAllCenters) {
@@ -409,8 +418,8 @@ Item {
                     dragTermX = workspaceController.dragOffset.x
                     dragTermY = workspaceController.dragOffset.y
                 }
-                x = localEqX * sectionRepeater.viewRatio + sectionRepeater.viewBaseX + dragTermX
-                y = localEqY * sectionRepeater.viewRatio + sectionRepeater.viewBaseY + dragTermY
+                x = localEqX * workspaceView.viewRatio + workspaceView.viewBaseX + dragTermX
+                y = localEqY * workspaceView.viewRatio + workspaceView.viewBaseY + dragTermY
             }
             Component.onCompleted: syncLocalEq()
             onInViewportChanged: {
@@ -431,18 +440,12 @@ Item {
             }
             onLocalEqXChanged: updatePosition()
             onLocalEqYChanged: updatePosition()
-            // eq/ratio/尺寸变化时除重定位外，还须触发可见节点的坐标回写级联
-            //（updateAllCenters）：旧实现 SectionNode.onXChanged（x 绑定含 eqCenter）
-            // 每次视口变化都会触发回写 → 端点表跟随；改命令式后该链路丢失，
-            // 迷你地图平移/centerViewTo 跳转（非叠加态，inputState!=1）时连线会冻结
-            // 在旧位置。updateAllCenters 内部在叠加态（inputState==1/zoomPending）
-            // 自动早退，画布平移的门控不受影响。
+            // 视口变化（eqCenter/ratio/尺寸）只需重定位壳，不再触发坐标回写级联。
+            // 【语义变化】回写写的是世界坐标缓存，不随视口变化；连线端点同样是世界坐标，
+            // 由 LinkRenderer 每帧投影跟随。此前这里要对每个可见节点的所有行做
+            // mapToItem + C++ 回写，是平移/缩放的主要性能开销，现在彻底消失。
             function syncVisibleNode() {
-                if (inViewport) {
-                    updatePosition()
-                    var it = nodeLoader.item
-                    if (it && it.updateAllCenters) it.updateAllCenters()
-                }
+                if (inViewport) updatePosition()
             }
             Connections {
                 target: workspaceController
@@ -457,7 +460,7 @@ Item {
                         updatePosition()
                 }
             }
-            // 视口尺寸变化（侧边栏拖宽/窗口 resize）：可见壳重定位 + 回写
+            // 视口尺寸变化（侧边栏拖宽/窗口 resize）：可见壳重定位（无需回写）
             Connections {
                 target: workspaceView
                 function onWidthChanged() { syncVisibleNode() }

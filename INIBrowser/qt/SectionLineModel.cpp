@@ -693,6 +693,12 @@ void SectionLineModel::setAcceptorCenter(const QString &keyName, int lineMult, q
     // 与行右圆点（m_acceptCentersByKey）分开存储：accept 目标的连线终点应连到该方形。
     m_acceptorCentersByKey.insert(
         QStringLiteral("%1@%2").arg(keyName).arg(lineMult), QPointF(x, y));
+    // 世界坐标镜像（同 m_acceptCentersEqByKey）：端点表世界化后 rebuild 只读这一份，
+    // 屏幕值退化为诊断对照。语义同样是【相对顶层祖先 EqPos 的偏移】。
+    if (m_workspace)
+        m_acceptorCentersEqByKey.insert(
+            QStringLiteral("%1@%2").arg(keyName).arg(lineMult),
+            m_workspace->screenToEq(QPointF(x, y)) - m_workspace->topAncestorEqPos(m_sectionId));
 }
 
 QPointF SectionLineModel::acceptorCenterByKey(const QString &keyName, int lineMult) const
@@ -700,6 +706,15 @@ QPointF SectionLineModel::acceptorCenterByKey(const QString &keyName, int lineMu
     auto it = m_acceptorCentersByKey.constFind(
         QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
     if (it != m_acceptorCentersByKey.constEnd()) return it.value();
+    return QPointF();
+}
+
+QPointF SectionLineModel::acceptorCenterEqByKey(const QString &keyName, int lineMult) const
+{
+    // 行方形接收点的世界坐标镜像（相对顶层祖先 EqPos 的偏移）
+    auto it = m_acceptorCentersEqByKey.constFind(
+        QStringLiteral("%1@%2").arg(keyName).arg(lineMult));
+    if (it != m_acceptorCentersEqByKey.constEnd()) return it.value();
     return QPointF();
 }
 

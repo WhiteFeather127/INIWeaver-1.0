@@ -1,7 +1,7 @@
 // LinkRenderer.qml
 // 连线渲染组件，对应 IBR_WorkSpace::RenderUI_Links() (IBR_WorkSpace.cpp:1433-1610)
 // 起点 pa = IBR_NodeSession.LastCenter（由 LinkNodePoint 回写，经 linkEndpoints 下发）
-// 终点 pb = 目标节点标题栏 RadioButton 位置（由 sections 的 screenX/Y/W/H 近似计算）
+// 终点 pb = 目标接受点（acceptor 方形 / 行级 AcceptCenter / 标题栏 RadioButton）
 // 曲线形状 4 种分支：
 //   1. IsSelfLinked && Collapsed → 不画
 //   2. Straight（pb.x - pa.x >= FontHeight*5）→ 单段 Bezier
@@ -18,28 +18,36 @@ Canvas {
     property var links: []
     // Section 数据（用于查找目标端坐标）
     property var sections: []
-    // 连线端点表：[{sessionId, x, y, isCollapsed}, ...]（由 WorkspaceController.linkEndpoints 提供）
+    // 连线端点表：[{sessionId, wx, wy, pbWx, pbWy, pbWValid, isCollapsed}, ...]
+    // （由 WorkspaceController.linkEndpoints 提供）
+    // 【坐标契约】表内存的是世界坐标（Eq 空间绝对点），视口无关。本组件每帧用
+    // project() 把它投影到屏幕——与模块壳 sectionDelegate.updatePosition() 用的是
+    // 同一组共享视口态（workspaceView.viewRatio / viewBaseX / viewBaseY），
+    // 因此缩放、平移、视口变化都不需要任何补偿层，连线天然与模块同步。
     property var linkEndpoints: []
     // D21：端点 map（key = "sessionId:destId"），供 pb 按 key 查找，避免索引依赖
     property var linkEndpointsMap: ({})
     // 当前选中 Section ID（高亮连线）
     property var focusedSectionId: 0
-    // 当前缩放比例（用于计算 FontHeight）
+    // 当前缩放比例（用于计算 FontHeight —— 曲线控制点/线宽是屏幕量，投影已含 ratio）
     property real ratio: 1.0
     // 阶段 2：拖拽偏移量（拖拽中实时更新 pa/pb）
+    // 这是唯一的"补偿层"，且不是时序陷阱：拖拽期间节点 EqPos 尚未落盘（避免污染 Undo 栈），
+    // 模块壳靠 dragTerm 位移、连线靠 dragOffset 位移，二者是同一个临时量的两种体现。
     property point dragOffset: Qt.point(0, 0)
-    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照，渲染时对所有端点叠加此偏移
-    //（来自 workspaceController.canvasDragOffset，端点表重建时清零）
-    property point canvasOffset: Qt.point(0, 0)
-    // 视口偏移（屏幕像素）：拖拽侧边栏调宽/窗口 resize 时视口中心变化，所有模块整体
-    // 平移而端点表是上次 rebuild 的快照 → 渲染时叠加此偏移使连线端点与模块即时对齐
-    //（来自 workspaceController.viewportOffsetX/Y，端点表重建时归零）
-    property real viewportOffsetX: workspaceController.viewportOffsetX
-    property real viewportOffsetY: workspaceController.viewportOffsetY
 
     // FontHeight 对应 ImGui 的 FontHeight（基准 13px × ratio）
     readonly property real fontHeight: 13.0 * ratio
     readonly property real lineWidth: fontHeight / 5.0
+
+    // ===== 世界坐标 → 屏幕坐标投影 =====
+    // 与模块壳完全同式：screen = worldEq × viewRatio + viewBase
+    //                        = (worldEq − eqCenter) × ratio + viewCenter
+    // 共享视口态由 workspaceView 根级提供（模块壳读同一份，见 WorkspaceView.qml 注释）。
+    function project(wx, wy) {
+        return { x: wx * workspaceView.viewRatio + workspaceView.viewBaseX,
+                 y: wy * workspaceView.viewRatio + workspaceView.viewBaseY }
+    }
 
     onLinksChanged: requestPaint()
     onSectionsChanged: { cachedSectionMap = null; selectionSetDirty = true; requestPaint() }
@@ -52,9 +60,17 @@ Canvas {
     // 由 onPaint 内 _sectionMapKey 门控重建——此前每拖一帧都全量重建 1471 项 map 且逐节点
     // 调 1-2 次 C++ 查询（1471×2 次跨语言往返/帧），是拖拽卡顿热点之一
     onDragOffsetChanged: requestPaint()
-    onCanvasOffsetChanged: requestPaint()
-    onViewportOffsetXChanged: requestPaint()
-    onViewportOffsetYChanged: requestPaint()
+    // 视口变化（平移 eqCenter / 缩放 ratio / 视口尺寸）：端点表是视口无关的世界坐标，
+    // 不需要重建也不需要补偿，只需按新的共享视口态重新投影 → 重绘即可。
+    Connections {
+        target: workspaceController
+        function onEqCenterChanged() { requestPaint() }
+    }
+    Connections {
+        target: workspaceView
+        function onWidthChanged() { requestPaint() }
+        function onHeightChanged() { requestPaint() }
+    }
     // 性能优化：缓存端点/节点查找表。缩放补间动画每帧只变 ratio/eqCenter，
     // links/sections/linkEndpoints 均不变，每帧重建 map 是纯浪费；
     // 数据变化时清缓存，拖拽中由 _sectionMapKey 检测状态切换后重建
@@ -90,12 +106,8 @@ Canvas {
              + ":" + (dragOffset.x !== 0 || dragOffset.y !== 0)
              + ":" + workspaceController.selectedRevision
     }
-    // 缩放叠加（仿 canvasOffset）：缩放中端点表保持快照，按 zoomBaseRatio/zoomBaseCenter
-    // 基准把端点坐标换算到当前 ratio/eqCenter 下，与节点即时缩放保持一致（缩放停止后端点
-    // 表重建，zoomPending 变 false，换算自动失效）
     Connections {
         target: workspaceController
-        function onZoomBaseChanged() { requestPaint() }
         // 修复：多选拖动开始/结束时 massDragging 翻转，sectionMap 的 dragging 标志需重算
         //（buildSectionMap 改用 isSectionSelected 实时查询，缓存失效后才会重新查询）
         function onMassDraggingChanged() { cachedSectionMap = null; requestPaint() }
@@ -104,38 +116,20 @@ Canvas {
         function onSelectedRevisionChanged() { requestPaint() }
     }
 
-    // 缩放换算：把端点表快照坐标（基准 ratio/eqCenter 下的屏幕坐标）换算到当前视图。
-    // 公式：E = (S_b - V)/r_b + C_b → S_c = (E - C_c)*r_c + V
-    //      = (S_b - V)*(r_c/r_b) + (C_b - C_c)*r_c + V
-    function zoomTransform(px, py) {
-        if (!workspaceController.zoomPending) return { x: px, y: py }
-        var rBase = workspaceController.zoomBaseRatio
-        if (rBase <= 0) return { x: px, y: py }
-        var rCur = ratio
-        var vx = width / 2.0, vy = height / 2.0
-        var k = rCur / rBase
-        var cBase = workspaceController.zoomBaseCenter
-        var cCur = workspaceController.eqCenter
-        return {
-            x: (px - vx) * k + (cBase.x - cCur.x) * rCur + vx,
-            y: (py - vy) * k + (cBase.y - cCur.y) * rCur + vy
-        }
-    }
-
-    // 构建 sessionId → {x, y, isCollapsed} 查找表
+    // 构建 sessionId → {wx, wy, isCollapsed} 查找表（世界坐标，视口无关）
     function buildEndpointMap() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.LinkRenderer.buildEndpointMap")
         var map = {};
         for (var i = 0; i < linkEndpoints.length; i++) {
             var ep = linkEndpoints[i];
-            map[ep.sessionId] = { x: ep.x, y: ep.y, isCollapsed: ep.isCollapsed };
+            map[ep.sessionId] = { wx: ep.wx, wy: ep.wy, isCollapsed: ep.isCollapsed };
         }
         if (_perf) workspaceController.perfEnd()
         return map;
     }
 
-    // 构建 sectionId → {screenX, screenY, screenW, screenH, dragging} 查找表
+    // 构建 sectionId → {eqX, eqY, eqW, eqH, dragging} 查找表（节点几何为世界坐标）
     function buildSectionMap() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.LinkRenderer.buildSectionMap")
@@ -180,11 +174,15 @@ Canvas {
                             + ", lastDragId=" + lastDragId
                             + ", dragOffset=" + JSON.stringify(workspaceController.dragOffset) + ")")
             }
+            // 节点几何改存世界坐标（Eq）：屏幕值由每帧投影得到，
+            // 不再依赖 m_sections 快照里 refresh 时刻的 screenX/screenY（平移/缩放后即过期）。
+            // sectionMap 现在只服务于两件事：dragging 判定（dragOffset 叠加）
+            // 与极少数 pbWValid=false 时的兜底落点。
             map[s.sectionId] = {
-                screenX: s.screenX || 0,
-                screenY: s.screenY || 0,
-                screenW: s.screenW || 180,
-                screenH: s.screenH || 120,
+                eqX: s.eqX || 0,
+                eqY: s.eqY || 0,
+                eqW: s.eqW || 180,
+                eqH: s.eqH || 120,
                 collapsed: s.collapsed || false,
                 dragging: isDragging
             };
@@ -213,25 +211,26 @@ Canvas {
         return s
     }
 
-    // 计算目标端坐标 pb（对应 ImGui RSD->ReWindowUL + RSD->ReOffset）
-    // ReOffset = Import ? {W/2 - FontHeight/2, HalfLine} : {FontHeight*0.7, HalfLine}
-    // 阶段 2：拖拽中的目标节点加入 dragOffset
+    // 计算目标端坐标 pb（兜底；正常路径由 C++ 下发的 pbWx/pbWy 提供精确值）
+    // 对应 ImGui RSD->ReWindowUL + RSD->ReOffset：
+    //   ReOffset = Import ? {W/2 - FontHeight/2, HalfLine} : {FontHeight*0.7, HalfLine}
+    // 节点几何在这里由世界坐标（Eq）投影得到屏幕位置，再叠加 dragOffset（拖拽中的节点）。
     function computeDestPoint(dstSec, fromImport) {
         var halfLine = fontHeight * 0.5;
-        var pbX, pbY;
-        var baseX = dstSec.screenX;
-        var baseY = dstSec.screenY;
+        var base = project(dstSec.eqX, dstSec.eqY);
+        var baseX = base.x, baseY = base.y;
         if (dstSec.dragging) {
             baseX += dragOffset.x;
             baseY += dragOffset.y;
         }
+        var pbX;
         if (fromImport) {
-            pbX = baseX + dstSec.screenW * 0.5 - fontHeight * 0.5;
+            // Eq 逻辑宽度 → 屏幕宽度需乘 ratio
+            pbX = baseX + dstSec.eqW * workspaceView.viewRatio * 0.5 - fontHeight * 0.5;
         } else {
             pbX = baseX + fontHeight * 0.7;
         }
-        pbY = baseY + halfLine;
-        return { x: pbX, y: pbY };
+        return { x: pbX, y: baseY + halfLine };
     }
 
     onPaint: {
@@ -242,14 +241,22 @@ Canvas {
 
         if (links.length === 0) { if (_perf) workspaceController.perfEnd(); return; }
 
-        // 连线偏差诊断：每帧一次，输出渲染叠加偏移与视口状态（与 [EP-DIAG] 端点表日志
-        // 联用——端点表坐标 + 本帧叠加偏移 = onPaint 实际画出的 pa/pb）
+        // 连线偏差诊断：每帧一次，输出渲染叠加偏移与视口状态（与 [EPW-DIAG] 端点表日志
+        // 联用——端点表世界坐标 + 本帧投影 = onPaint 实际画出的 pa/pb）
         if (_perf) console.log("[LINK-DIAG] paintBegin links=" + links.length
-            + " canvasOff=(" + canvasOffset.x + "," + canvasOffset.y + ")"
-            + " vpOff=(" + viewportOffsetX + "," + viewportOffsetY + ")"
             + " dragOff=(" + workspaceController.dragOffset.x + "," + workspaceController.dragOffset.y + ")"
             + " eqCenter=(" + workspaceController.eqCenter.x + "," + workspaceController.eqCenter.y + ")"
-            + " ratio=" + ratio)
+            + " ratio=" + ratio
+            + " viewBase=(" + workspaceView.viewBaseX + "," + workspaceView.viewBaseY + ")"
+            + " viewRatio=" + workspaceView.viewRatio)
+
+        // ===== 共享视口态本地快照 =====
+        // 与模块壳 updatePosition 读的是同一组量（workspaceView 根级属性），
+        // 在此取一次快照后内联进循环：2000+ 条连线每帧若走 project() 函数调用，
+        // 会产生 4000 次 JS 调用 + 2000 次对象分配（此前 zoomTransform 亦如此）。
+        var vr = workspaceView.viewRatio
+        var vbx = workspaceView.viewBaseX
+        var vby = workspaceView.viewBaseY
 
         // 用缓存查找表（数据变化时由 onXxxChanged 清空，动画/平移期间直接复用）
         var endpointMap = root.cachedEndpointMap;
@@ -297,7 +304,7 @@ Canvas {
         for (var i = 0; i < links.length; i++) {
             var link = links[i];
 
-            // 起点 pa = Session.LastCenter（对应 ImGui IBR_NodeSession::GetSessionValue(Link.SourceID).LastCenter）
+            // 起点 pa = 端点表里的世界坐标（对应 ImGui 的 Session 圆点位置）
             var srcEp = endpointMap[link.sourceSessionId];
             if (!srcEp) continue;
 
@@ -308,15 +315,16 @@ Canvas {
             // 源 section（用于判断源节点是否拖拽）
             var srcSec = sectionMap[link.sourceId];
 
-            // pa 叠加 canvasOffset（画布平移）+ dragOffset（当源节点拖拽时）
-            // 端点表中的 pa 是拖拽前的坐标（拖拽中不回写，见 SectionNode.qml onXChanged），
-            // 需要叠加偏移让连线跟随节点移动；缩放中先按基准换算（zoomTransform）
-            var srcT = zoomTransform(srcEp.x, srcEp.y);
-            var paX = srcT.x + viewportOffsetX + canvasOffset.x;
-            var paY = srcT.y + viewportOffsetY + canvasOffset.y;
+            // ===== pa：世界坐标 → 屏幕投影 =====
+            // 端点表存的是视口无关的世界坐标，每帧用与模块同一个公式投影：
+            //   screen = worldEq × viewRatio + viewBase
+            // 平移（eqCenter 变）/ 缩放（ratio 变）/ 视口尺寸变化都自动正确，
+            // 不需要任何补偿层——这是本次改造的核心。
+            var paX = srcEp.wx * vr + vbx;
+            var paY = srcEp.wy * vr + vby;
             // 拖拽跟随：源节点本身被拖（srcSec.dragging）或源模块位于当前拖动的编组块内
             // （子模块不在 sections 快照、srcSec 可能 undefined，dragMembers 判断）。
-            // 端点世界缓存存的是拖拽前基准（回写时减去 dragOffset / cull 前回写），
+            // 端点世界缓存存的是拖拽前基准（回写时减去 dragOffset），
             // 叠加 dragOffset 对所有节点一致正确。
             if ((srcSec && srcSec.dragging)
                 || (dragMembers && dragMembers.has(String(link.sourceId)) && hasOffsetNow)) {
@@ -331,12 +339,11 @@ Canvas {
             var pbPrecise = false;
             var mapKey = link.sourceSessionId + ":" + link.destId;
             var ep = linkEndpointsMap[mapKey];
-            if (ep && ep.pbValid) {
-                // 精确 pb 叠加 canvasOffset（画布平移）+ dragOffset（当目标节点拖拽时）
-                // 缩放中先按基准换算（zoomTransform）
-                var pbT = zoomTransform(ep.pbX, ep.pbY);
-                var pbX = pbT.x + viewportOffsetX + canvasOffset.x;
-                var pbY = pbT.y + viewportOffsetY + canvasOffset.y;
+            if (ep && ep.pbWValid) {
+                // 精确 pb：同样是世界坐标 → 投影（与 pa 同一组视口态），
+                // 再叠加 dragOffset（当目标节点拖拽时）
+                var pbX = ep.pbWx * vr + vbx;
+                var pbY = ep.pbWy * vr + vby;
                 // 拖拽跟随：目标节点本身被拖（dstSec.dragging）或目标模块位于当前拖动的编组块内
                 // （子模块 dstSec 为 undefined，dragMembers 判断，否则编组拖动时其连线停原地）。
                 if ((dstSec && dstSec.dragging)
@@ -352,10 +359,8 @@ Canvas {
                 if (!pbPrecise) continue;  // 既无 dstSec 又无精确 pb，跳过
                 // 有精确 pb，继续画（dragOffset 已在上面叠加）
             } else if (!pbPrecise) {
-                // 回退：边界近似（对应无回写时的兜底，computeDestPoint 内部叠加 dragOffset）
+                // 回退：边界近似（对应无回写时的兜底，computeDestPoint 内部已投影并叠加 dragOffset）
                 pb = computeDestPoint(dstSec, link.fromImport);
-                pb.x += viewportOffsetX + canvasOffset.x;
-                pb.y += viewportOffsetY + canvasOffset.y;
             }
 
             // 分支 1：IsSelfLinked && Collapsed → 不画（对应 ImGui line 1511）
@@ -376,7 +381,7 @@ Canvas {
                 || Math.min(pa.y, pb.y) - bbPadY > height)
                 continue;
 
-            if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] onPaint link[" + i + "] srcMod=" + link.sourceId + " srcSess=" + link.sourceSessionId + " destId=" + link.destId + " destKey=" + link.destKey + " pbPrecise=" + pbPrecise + " pa=" + pa.x + "," + pa.y + " pb=" + (pb ? (pb.x + "," + pb.y) : "null") + " dstDragging=" + (dstSec ? dstSec.dragging : "noSec") + " pbEp=" + (ep ? (ep.pbX + "," + ep.pbY + ",valid=" + ep.pbValid) : "noEp"))
+            if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] onPaint link[" + i + "] srcMod=" + link.sourceId + " srcSess=" + link.sourceSessionId + " destId=" + link.destId + " destKey=" + link.destKey + " pbPrecise=" + pbPrecise + " pa=" + pa.x + "," + pa.y + " pb=" + (pb ? (pb.x + "," + pb.y) : "null") + " dstDragging=" + (dstSec ? dstSec.dragging : "noSec") + " paW=" + srcEp.wx + "," + srcEp.wy + " pbW=" + (ep ? (ep.pbWx + "," + ep.pbWy + ",valid=" + ep.pbWValid) : "noEp"))
 
             // 颜色（对应 ImGui IBR_WorkSpace.cpp:1497-1504）
             // ImGui: CurSection.ID == Rsec.ID(目标) || CurSection.ID == SrcModuleID(源) → FocusLineColor

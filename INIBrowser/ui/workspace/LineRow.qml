@@ -1631,35 +1631,34 @@ Item {
     // 回写 LinkNode 屏幕坐标到 lineModel（供 WorkspaceController::rebuildLinkEndpoints 同步）
     // 布局完成后立即回写（保证拖动模块/画布时连线跟手）；
     // 行重建期间的中间坐标由 layoutDone 门控拦截（见 onXChanged/onYChanged）。
-    function updateLinkNodeCenter(force) {
-        doUpdateLinkNodeCenter(force)
+    function updateLinkNodeCenter() {
+        doUpdateLinkNodeCenter()
     }
 
     // IIF 分量节点坐标强制回写（模块移动/拖拽/缩放/平移结束后由 SectionNode.updateAllCenters
     // 级联调用）。分量节点的 onX/onY 是相对 IIF Flow 的（父移动不触发），若只靠它回写，
     // 模块移动到位后 LastCenter 停留在布局初期旧坐标 → 连线跑到画布外。
-    function pushCompNodesRecursive(obj, force) {
+    function pushCompNodesRecursive(obj) {
         if (!obj || !obj.children) return
         for (var i = 0; i < obj.children.length; ++i) {
             var child = obj.children[i]
             if (!child) continue
             if (child.iifNode && child.pushCompCenter) {
-                child.pushCompCenter(force)
+                child.pushCompCenter()
             } else {
-                pushCompNodesRecursive(child, force)
+                pushCompNodesRecursive(child)
             }
         }
     }
 
-    function updateIifCompCenters(force) {
+    function updateIifCompCenters() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.LineRow.updateIifCompCenters")
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
         if (!iifRowsRepeater) { if (_perf) workspaceController.perfEnd(); return }
         var rep = iifRowsRepeater
         for (var r = 0; r < rep.count; ++r) {
             // LinkNodePoint 在 RowLayout 内（iifRow 深层），递归查找
-            pushCompNodesRecursive(rep.itemAt(r), force)
+            pushCompNodesRecursive(rep.itemAt(r))
         }
         if (_perf) workspaceController.perfEnd()
     }
@@ -1673,15 +1672,13 @@ Item {
         return null
     }
 
-    function doUpdateLinkNodeCenter(force) {
+    function doUpdateLinkNodeCenter() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.LineRow.doUpdateLinkNodeCenter")
         if (!root.lineModel || root.rowIndex < 0) { if (_perf) workspaceController.perfEnd(); return }
-        // 画布平移中 / 缩放叠加中：端点表保持快照不重建（canvasDragOffset/zoomTransform 叠加渲染），
-        // 跳过回写，避免每帧全量端点表重建（拖动画布/缩放帧率被拖垮）。
-        // force=true 用于缩放收尾（SectionNode.updateAllCenters 传入）：缩放后必须回写缩放后
-        // 坐标，否则重建端点表读到缩放前旧值 → 缓存"缩放前连线"→ 拖画布时连线错位/放缩
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
+        // 【已删除】画布平移（inputState===1）/ 缩放叠加（zoomPending）跳过门控与 force 参数。
+        // 回写目标是世界坐标缓存（screenToEq 换算后存 Eq 偏移），不随视口变化，
+        // 任何时候回写都安全；视口变化也不再触发本函数（见 SectionNode.updateAllCenters）。
         // 对应 ImGui IBR_LinkNode::UpdateLink：对所有 Data_String 行无条件设置 LastCenter
         // ImGui: Center = IsImport ? ImportCenter() : DefaultCenter()
         //   DefaultCenter = GetLineEndPos() - {FontHeight*1.5, HalfLine}（行末位置）

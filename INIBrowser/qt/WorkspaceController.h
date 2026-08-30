@@ -47,8 +47,13 @@ class WorkspaceController : public QObject
     // reportSectionSize → 再 emit → 无限重入循环（导入大项目死循环根因）。
     Q_PROPERTY(int sectionDataRevision READ sectionDataRevision NOTIFY sectionDataRevisionChanged)
     Q_PROPERTY(QVariantList links READ links NOTIFY linksChanged)
-    // 连线端点表：[{sessionId, x, y, isCollapsed}, ...]，供 LinkRenderer 查表
-    // 对应 ImGui Session.LastCenter（每行 RadioButton 屏幕坐标）
+    // 连线端点表，供 LinkRenderer 查表。对应 ImGui Session.LastCenter（每行 RadioButton 位置）。
+    // 每条字段（Stage1 双写两套并存，Stage2 起只保留世界坐标）：
+    //   sessionId / destId / isCollapsed                 —— 键与状态（字符串，防大整数精度丢失）
+    //   wx, wy, paWValid, pbWx, pbWy, pbWValid           —— 【世界坐标（Eq 空间绝对点）】视口无关，
+    //        LinkRenderer 每帧用与模块相同的公式投影：screen = (w − eqCenter) × ratio + viewCenter
+    //   x, y, pbX, pbY, pbValid                          —— 屏幕坐标（世界值的重建时刻投影），
+    //        Stage2 后仅 INIWEAVER_DIAG 下作投影比对/回退对照用，正式路径不再消费
     Q_PROPERTY(QVariantList linkEndpoints READ linkEndpoints NOTIFY linkEndpointsChanged)
     // D21：端点 map（key = "sessionId:destId"），供 LinkRenderer 按 key 查找 pb，避免索引依赖
     Q_PROPERTY(QVariantMap linkEndpointsMap READ linkEndpointsMap NOTIFY linkEndpointsChanged)
@@ -59,23 +64,11 @@ class WorkspaceController : public QObject
     // 显示模式：true=寄存器名，false=显示名（对应 IBR_WorkSpace::ShowRegName）
     Q_PROPERTY(bool showRegName READ showRegName NOTIFY showRegNameChanged)
     // 节点拖拽偏移量（屏幕坐标）：拖拽中实时更新，QML 端用它计算拖拽节点的临时位置
-    // 拖拽结束后清零并写回 EqPos
+    // 拖拽结束后清零并写回 EqPos。
+    // 这是端点渲染唯一的"补偿层"：拖拽期间 EqPos 未落盘（避免污染 Undo 栈），
+    // 模块壳靠 dragTerm 位移、连线靠 dragOffset 位移，二者是同一个临时量，无时序陷阱。
+    // （画布平移/缩放/视口变化原本各有一层补偿，端点表改存世界坐标后已全部删除。）
     Q_PROPERTY(QPointF dragOffset READ dragOffset NOTIFY dragOffsetChanged)
-    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照不重建，
-    // QML LinkRenderer 渲染时对所有端点叠加此偏移，与节点移动保持一致
-    Q_PROPERTY(QPointF canvasDragOffset READ canvasDragOffset NOTIFY canvasDragOffsetChanged)
-    // 视口偏移（仿 canvasDragOffset）：拖拽侧边栏调宽/窗口 resize 时视口中心
-    // (width/2, height/2) 变化，所有模块随之整体平移，而端点表是"上次 rebuild 时"
-    // 的快照坐标 → 连线端点落后模块。QML LinkRenderer 渲染时对所有端点叠加此偏移，
-    // 与模块即时移动保持一致；下次端点表重建时归零（见 rebuildLinkEndpoints）
-    Q_PROPERTY(qreal viewportOffsetX READ viewportOffsetX NOTIFY viewportOffsetChanged)
-    Q_PROPERTY(qreal viewportOffsetY READ viewportOffsetY NOTIFY viewportOffsetChanged)
-    // 缩放叠加（仿 canvasDragOffset）：缩放中端点表保持快照不重建，
-    // QML LinkRenderer 按 zoomBaseRatio/zoomBaseCenter 基准换算端点坐标（等比+中心偏移），
-    // 与节点即时缩放保持一致；缩放停止防抖后重建端点表结束叠加（降低延迟）
-    Q_PROPERTY(bool zoomPending READ zoomPending NOTIFY zoomBaseChanged)
-    Q_PROPERTY(float zoomBaseRatio READ zoomBaseRatio NOTIFY zoomBaseChanged)
-    Q_PROPERTY(QPointF zoomBaseCenter READ zoomBaseCenter NOTIFY zoomBaseChanged)
     // 缩放补间目标（QML 端动画读取）：滚轮只设定目标 Ratio，QML NumberAnimation
     // 驱动每帧 applyZoomRatio 应用，动画在渲染线程与帧同步推进
     Q_PROPERTY(float zoomTargetRatio READ zoomTargetRatio NOTIFY zoomTargetRatioChanged)
@@ -124,9 +117,6 @@ public:
     QRectF workspaceRect() const;
     QRectF viewportEqRect() const;
     bool isProjectOpen() const;
-    bool zoomPending() const { return m_zoomPending; }
-    float zoomBaseRatio() const { return m_zoomBaseRatio; }
-    QPointF zoomBaseCenter() const { return m_zoomBaseCenter; }
     float zoomTargetRatio() const { return m_zoomTargetRatio; }
     int inputState() const { return m_inputState; }
     QVariantList sections() const { return m_sections; }
@@ -140,9 +130,6 @@ public:
     qulonglong focusedSectionId() const;
     bool showRegName() const;
     QPointF dragOffset() const { return m_dragOffset; }
-    QPointF canvasDragOffset() const { return m_canvasDragOffset; }
-    qreal viewportOffsetX() const { return m_viewportOffsetX; }
-    qreal viewportOffsetY() const { return m_viewportOffsetY; }
     // 拖拽中的节点 ID（0=无拖拽），QML 据此判断是否对节点应用 dragOffset
     qulonglong draggingSectionId() const { return m_draggingSectionId; }
     // 多节点拖拽标志，QML 据此判断是否对所有选中节点应用 dragOffset
@@ -218,9 +205,11 @@ public:
     Q_INVOKABLE void noteSessionCenterEq(qulonglong sectionId, qulonglong sessionId, qreal sx, qreal sy); // SectionLineModel 行圆点回写入口（公开）
     // 节点当前 EqPos（世界坐标；SectionLineModel 写相对偏移用）
     Q_INVOKABLE QPointF sectionEqPos(qulonglong sectionId) const;
-    // QML 回写级联完成后的强制端点表重建：世界缓存变更（非视口变化）无法用
-    // canvasOff/zoomTransform 补偿，必须立即重建；绕过叠加期门控与防抖守卫
-    //（调用时机已保证几何最终）。缩放补间中仍走 finishZoomTweenNow 推到最终值。
+    // QML 回写级联完成后的强制端点表重建：世界缓存变更（不是视口变化）不会自动反映
+    // 到端点表，必须立即重建（调用时机已保证几何最终）。
+    // 【已简化】三层补偿删除后不再需要"绕过叠加期门控与防抖守卫"，
+    // 也不再需要在缩放补间中先 finishZoomTweenNow 推到最终值——
+    // 端点表是世界坐标，任何视口状态下重建都等价。
     Q_INVOKABLE void flushLinkEndpointsRebuild();
     // 顶层祖先的 EqPos：编组成员的 EqPos 是组内相对/过期基准，其世界锚定是
     // 顶层祖先（组被拖拽时顶层 EqPos 才会更新）。端点世界缓存的相对偏移以它为锚，
@@ -507,21 +496,13 @@ signals:
     void showRegNameChanged();
     void edgeFlagsChanged();
     void dragOffsetChanged();
-    // 画布平移偏移变化通知（拖动画布时驱动 LinkRenderer 叠加渲染，端点表不重建）
-    void canvasDragOffsetChanged();
-    // 视口偏移变化通知（调宽/resize 时驱动 LinkRenderer 叠加渲染，端点表不重建）
-    void viewportOffsetChanged();
-    // 缩放叠加基准/状态变化通知（缩放时驱动 LinkRenderer 换算端点坐标，端点表不重建）
-    void zoomBaseChanged();
-    // 缩放叠加结束通知（QML SectionNode 据此用 Qt.callLater 回写缩放后的行圆点坐标）
-    void zoomFinalizeRequested();
     // 缩放补间启动/续接请求（QML NumberAnimation 据此从当前 Ratio 平滑过渡到 zoomTargetRatio；
     // 动画在 QML 渲染线程驱动，与帧同步，避免 C++ 定时器动画与渲染循环不同步跳帧）
     void zoomTweenRequested();
     // 缩放补间目标变化通知（QML 动画在 zoomTweenRequested 时读取新目标）
     void zoomTargetRatioChanged();
-    // 缩放补间强制中止请求（收尾路径清 zoomPending 前调用：QML 立即停止动画，
-    // Ratio 已由 C++ 直接推到目标，动画不再逐帧改值）
+    // 缩放补间强制中止请求（收尾路径调用：如拖拽结束/视口跳转前，
+    // Ratio 已由 C++ 直接推到目标，QML 立即停止动画，动画不再逐帧改值）
     void zoomTweenAbortRequested();
     // 阶段 12.7：双击空白触发模块搜索
     void moduleSearchRequested(qreal x, qreal y);
@@ -579,25 +560,12 @@ private:
     // onMouseMove/updateDrag 只记录最新位置并置位，帧定时器 tick（refreshFromTimer）统一应用
     QPointF m_pendingDragPos;
     bool m_hasPendingDrag{false};
-    // 画布平移偏移（屏幕像素）：拖动画布时端点表保持快照，LinkRenderer 叠加此偏移渲染
-    // 避免每帧全量端点表重建 + 行圆点回写（拖动画布帧率被拖垮），下次端点表重建时清零
-    QPointF m_canvasDragOffset;
-    // 视口偏移（屏幕像素）：调宽/resize 时端点表快照落后模块，LinkRenderer 叠加此偏移
-    // 实时对齐；端点表重建（rebuildLinkEndpoints）时用当前视口更新基准并归零
-    qreal m_viewportOffsetX{0};
-    qreal m_viewportOffsetY{0};
-    // 端点表重建时的视口基准尺寸（计算 viewportOffset = (当前 - 基准)/2）
-    qreal m_endpointBaseW{0};
-    qreal m_endpointBaseH{0};
+    // 【已删除】画布平移偏移 m_canvasDragOffset / 视口偏移 m_viewportOffsetX,Y /
+    // 缩放叠加基准 m_zoomBaseRatio,m_zoomBaseCenter,m_zoomPending。
+    // 端点表改存世界坐标（Eq）后，平移/缩放/视口变化都不改变端点值，渲染层每帧投影即可，
+    // 三层补偿连同它们的防抖、收尾、回写门控一并移除（此前多轮修复的时序陷阱全在这里）。
     // 工作区视口几何（用于侧边栏模块拖放换算：全局坐标 → 视口局部坐标）
     qreal m_viewportGX{0}, m_viewportGY{0}, m_viewportW{0}, m_viewportH{0};
-    // 缩放叠加基准与状态（仿 m_canvasDragOffset）：缩放中端点表保持快照不重建，
-    // LinkRenderer 按 m_zoomBaseRatio/m_zoomBaseCenter 基准换算端点坐标（等比+中心偏移）；
-    // 缩放停止后由 scheduleZoomFinalize 防抖重建端点表结束叠加
-    float m_zoomBaseRatio{0};
-    QPointF m_zoomBaseCenter;
-    bool m_zoomPending{false};
-    int m_zoomFinalizeToken{0};  // 防抖 token：新缩放事件使旧定时回调失效
     // 滚轮缩放补间（QML 端驱动）：滚轮只设定目标 Ratio 与锚点并 emit zoomTweenRequested，
     // QML NumberAnimation 每渲染帧回调 applyZoomRatio 原子应用 ——
     // 缩放与拖拽基准修正/dragOffset 重算/预览线重发在同一回调（同一渲染帧）内完成，
@@ -607,12 +575,10 @@ private:
     bool m_zoomAnimating{false};  // 补间运行中（QML 动画期间为 true，替代 QVariantAnimation 状态查询）
     float m_zoomTargetRatio{0};
     QPointF m_zoomAnchorScreen;  // 补间锚点（滚轮时鼠标位置，连续滚轮取最新）
-    // 收尾路径清 zoomPending 前必须 finishZoomTweenNow 强制完成补间（Ratio 推目标 + 通知 QML 停动画）
+    // 收尾路径必须 finishZoomTweenNow 强制完成补间（Ratio 推目标 + 通知 QML 停动画）。
+    // 端点表改存世界坐标后，缩放结束不再需要"回写坐标 + 重建端点表"收尾——
+    // 世界坐标与缩放无关，缩放期间连线随投影自动跟随，无需任何补偿或重建。
     void finishZoomTweenNow();
-    // 调度缩放结束后的端点表重建（防抖：最后一次缩放事件后 delayMs 再重建）
-    void scheduleZoomFinalize();
-    // 缩放叠加收尾：清 pending → 通知 QML 回写缩放后坐标 → Queued 重建端点表（先回写后重建）
-    void finalizeZoom();
     // v3 批次 1.4：拖拽 LinkLimit=0 节点时 DropArea 接收状态
     bool m_dragInvalidLink{false};
     // 拖拽目标命中状态（命中测试驱动，拖拽源 onPositionChanged 更新，clearDraggingLink 清零）
@@ -748,8 +714,24 @@ private:
     // 标记 mutable：buildSectionItem 是 const 方法（getSectionData 复用），但需要懒创建缓存
     mutable QHash<ModuleID_t, QPointer<SectionLineModel>> m_lineModels;
 
-    // 重建连线端点表（从 IBR_NodeSession 全局表同步 LastCenter）
+    // 重建连线端点表（从世界坐标缓存解析，输出 Eq 空间绝对点 + 诊断用的屏幕对照值）
     void rebuildLinkEndpoints();
+
+    // ===== 连线端点「世界坐标」解析（端点表改存 Eq 的核心）=====
+    // 端点表存【Eq 空间绝对点】（视口无关），LinkRenderer 每帧用与模块相同的公式投影：
+    //   screen = (worldEq - eqCenter) * ratio + viewCenter
+    // 世界缓存（m_sessionCenterEq / m_sectionAcceptPointEq / *_EqByKey）存的是
+    // 【相对顶层祖先 EqPos 的偏移】，helper 内加上顶层祖先 EqPos 还原成绝对 Eq 点。
+    //
+    // 这两个 helper 同时供 rebuildLinkEndpoints 与 refreshLinkEndpoint 使用——
+    // 此前两处各复制一份优先级逻辑（约 200 行），是必然的回归源。
+    //
+    // 返回 QPointF() 表示无有效来源（srcData/dstData 缺失）。
+    // 参数里带 Collapsed/LineVisible 是为了让调用方复用已经查好的后端对象，避免重复查表。
+    QPointF resolveSourceWorld(const IBR_Project::_Plink &link, bool srcCollapsed,
+                               bool srcLineVisible, bool srcSessionCollapsed) const;
+    QPointF resolveDestWorld(const IBR_Project::_Plink &link, ModuleID_t dstActualId,
+                             bool dstLineVisible, bool srcSessionCollapsed) const;
 
     // 发出被合并的 reportSectionSize 尺寸通知：本事件循环内所有尺寸回写完成后
     // 只 emit 一次 sectionsChanged（QtMain QTimer tick 或 QML 事件处理结束后排队触发）
@@ -778,6 +760,8 @@ private:
     // 两个缓存存的是【相对节点 EqPos 的偏移】（写入时 = 世界坐标 − 当时 EqPos）：
     // 节点被 cull 后 EqPos 仍会变（批量拖拽/撤销等），绝对世界坐标会永久滞后；
     // 相对偏移 + 当前 EqPos 再投影，节点怎么动缓存都自动跟随
+    // 【已删除】m_endpointsViewCenter / m_endpointsViewRatio（端点表基准视口）：
+    // 那是 zoomTransform 缩放换算的锚点，随三层补偿一并移除。
     QHash<qulonglong, QPointF> m_sessionCenterEq;       // sessionId → 行圆点相对偏移
     QHash<qulonglong, QPointF> m_sectionAcceptPointEq;  // sectionId → 头部接受点相对偏移
     QPointF sessionCenterEq(qulonglong sessionId) const;

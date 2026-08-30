@@ -359,12 +359,12 @@ Item {
     // 用 setLinkNodeCenterAt 按分量 sessionId（Comp=cidx）写 LastCenter，
     // rebuildLinkEndpoints 的 priority 2 读到该分量圆点坐标 → 连线起点/终点正确。
     // 减 dragOffset 与 LineRow 一致：存储原位置，LinkRenderer 叠加拖拽位移动态修正。
-    function pushCompCenter(force) {
+    function pushCompCenter() {
         var _perf = workspaceController.diagLogEnabled()
         if (_perf) workspaceController.perfBegin("QML.LinkNodePoint.pushCompCenter")
         if (!root.iifNode || !root.iifReady) { if (_perf) workspaceController.perfEnd(); return }
         if (!root.lineModel || root.compIdx < 0) { if (_perf) workspaceController.perfEnd(); return }
-        if (!force && (workspaceController.inputState === 1 || workspaceController.zoomPending)) { if (_perf) workspaceController.perfEnd(); return }
+        // 【已删除】画布平移/缩放叠加跳过门控与 force 参数（同 LineRow.doUpdateLinkNodeCenter）
         var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
         // 对齐 LineRow.doUpdateLinkNodeCenter：仅拖拽中减去 dragOffset（存储原位置，
         // 由 LinkRenderer 叠加 dragOffset 实时跟随）；松手后 dragOffset 不清零但模块已
