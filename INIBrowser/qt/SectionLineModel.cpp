@@ -597,6 +597,21 @@ void SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMu
                 static_cast<size_t>(lineMult), static_cast<size_t>(compIdx));
             IBR_NodeSession::SetSessionStatus(sess, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
             if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, sess, x, y);
+#ifdef INIWEAVER_DIAG
+            // [COMP-W] 分量圆点回写：sessionId 是连线端点查询世界缓存的唯一 key。
+            // 分量连线位置不对时，先比对这里的 sess 与 [LINK-SRC] 里的 sess 是否一致。
+            {
+                static thread_local int budget = 0;
+                if (budget < 80) {
+                    ++budget;
+                    qDebug() << "[COMP-W] sec=" << m_sectionId
+                             << "sess=" << static_cast<qulonglong>(sess)
+                             << "key=" << keyName << "lineIdx=" << i
+                             << "mult=" << lineMult << "comp=" << compIdx
+                             << "screen=(" << x << "," << y << ")";
+                }
+            }
+#endif
             emit linkNodeCenterChanged();
             return;
         }

@@ -2461,11 +2461,20 @@ constexpr float kLinkContentBot   = 4.0f;               // 内容区底部留白
 
 QPointF WorkspaceController::resolveSourceWorld(const IBR_Project::_Plink &link,
                                                bool srcCollapsed, bool srcLineVisible,
-                                               bool srcSessionCollapsed) const
+                                               bool srcSessionCollapsed,
+                                               int *outBranch) const
 {
     // 源端点 pa 的世界坐标解析。优先级链与改造前的屏幕版一一对应，
     // 只是每个来源都换成「世界缓存 + 顶层祖先 EqPos」，故结果与视口无关。
+    // 分支编号写入 outBranch，供 [LINK-SRC] 诊断定位"精确锚点为何没命中"。
     const qulonglong srcId = static_cast<qulonglong>(link.SrcModuleID);
+    // 本地分支记录 + 统一出口：保证所有 return 路径都记下分支号
+    int branch = 0;
+    auto ret = [&](const QPointF &p, int b) -> QPointF {
+        branch = b;
+        if (outBranch) *outBranch = b;
+        return p;
+    };
     auto srcRsec = IBR_Inst_Project.GetSectionFromID(link.SrcModuleID);
     auto srcData = srcRsec.GetSectionData();
     auto srcBsec = srcRsec.GetBack_Unsafe();
@@ -2490,19 +2499,22 @@ QPointF WorkspaceController::resolveSourceWorld(const IBR_Project::_Plink &link,
             const float radioLeftOffset = srcIsImport
                 ? (srcData->EqSize.x * 0.5f)   // import 块 RadioButton 水平居中
                 : kLinkRadioLeft;              // 普通块：左 margin 8 + 圆心距 5
-            return QPointF(w.x() - radioLeftOffset + srcData->EqSize.x, w.y());
+            return ret(QPointF(w.x() - radioLeftOffset + srcData->EqSize.x, w.y()), 1);
         }
         const float reOffsetX = srcIsImport
             ? (srcData->EqSize.x * 0.5f - kLinkHalfLine) : kLinkReOffsetX;
-        return QPointF(srcData->EqPos.x + reOffsetX, srcData->EqPos.y + kLinkHalfLine);
+        return ret(QPointF(srcData->EqPos.x + reOffsetX, srcData->EqPos.y + kLinkHalfLine), 1);
     }
 
     // 2) 行圆点 / IIF 分量圆点。与 sv.LastCenter 由同一次回写产生、是同一个点，
     //    但世界缓存视口无关，故以它为准（LastCenter 屏幕值退化为诊断对照）。
+    //    【分量连线的关键分支】分量圆点由 LinkNodePoint.pushCompCenter →
+    //    setLinkNodeCenterAtKey 写入，key 是 GetSessionIdx(..., lineMult, compIdx)。
+    //    若这里没命中，分量连线会退化到分支 3/4（行末圆点 / 标题栏），位置就不对。
     if (srcLineVisible)
     {
         const QPointF w = world(sessionCenterEq(link.SourceID));
-        if (!w.isNull()) return w;
+        if (!w.isNull()) return ret(w, 2);
     }
     // 3) 行级接受点（按 FromKey + SrcMult 定位：多分量行各分量有独立圆点）
     if (srcLineVisible && link.FromKey != EmptyPoolStr)
@@ -2512,26 +2524,26 @@ QPointF WorkspaceController::resolveSourceWorld(const IBR_Project::_Plink &link,
         {
             const QPointF w = world((*itSrcModel)->acceptCenterEqByKey(
                 QString::fromUtf8(PoolStr(link.FromKey)), static_cast<int>(link.SrcMult)));
-            if (!w.isNull()) return w;
+            if (!w.isNull()) return ret(w, 3);
         }
     }
     // 4) 标题栏接受点（行可见时）
     if (srcLineVisible)
     {
         const QPointF w = world(sectionAcceptPointEq(srcId));
-        if (!w.isNull()) return w;
+        if (!w.isNull()) return ret(w, 4);
     }
     // 5) 源行隐藏（非折叠态）：起点落到标题栏最右端，y 与头部 RadioButton 水平对齐
     if (!srcLineVisible && !srcSessionCollapsed && srcData)
     {
         const QPointF head = world(sectionAcceptPointEq(srcId));
-        return QPointF(srcData->EqPos.x + srcData->EqSize.x,
-                       head.isNull() ? srcData->EqPos.y + kLinkHalfLine : head.y());
+        return ret(QPointF(srcData->EqPos.x + srcData->EqSize.x,
+                           head.isNull() ? srcData->EqPos.y + kLinkHalfLine : head.y()), 5);
     }
     // 6) 标题栏接受点（不受行可见性门控，对应原优先级 3 的 m_sectionAcceptPoint 屏幕分支）
     {
         const QPointF w = world(sectionAcceptPointEq(srcId));
-        if (!w.isNull()) return w;
+        if (!w.isNull()) return ret(w, 6);
     }
     // 7) 兜底：从未渲染过的节点无任何世界回写。按 FromKey 定位行序号、按行数均匀估算
     //    行中心（IIF 行高度不均匀会有残差），x 取 LinkNode 侧；无行模型则退回标题栏。
@@ -2553,15 +2565,15 @@ QPointF WorkspaceController::resolveSourceWorld(const IBR_Project::_Plink &link,
                 const float anchorX = srcIsImport
                     ? (srcData->EqSize.x * 0.5f)
                     : (srcData->EqSize.x - kLinkReOffsetX);
-                return QPointF(srcData->EqPos.x + anchorX,
-                               srcData->EqPos.y + contentTop + (rowIdx + 0.5f) * rowH);
+                return ret(QPointF(srcData->EqPos.x + anchorX,
+                                   srcData->EqPos.y + contentTop + (rowIdx + 0.5f) * rowH), 7);
             }
         }
         const float reOffsetX = srcIsImport
             ? (srcData->EqSize.x * 0.5f - kLinkHalfLine) : kLinkReOffsetX;
-        return QPointF(srcData->EqPos.x + reOffsetX, srcData->EqPos.y + kLinkHalfLine);
+        return ret(QPointF(srcData->EqPos.x + reOffsetX, srcData->EqPos.y + kLinkHalfLine), 7);
     }
-    return QPointF();
+    return ret(QPointF(), 0);
 }
 
 QPointF WorkspaceController::resolveDestWorld(const IBR_Project::_Plink &link,
@@ -2739,12 +2751,43 @@ void WorkspaceController::rebuildLinkEndpoints()
 
         // ===== 世界坐标解析（与 refreshLinkEndpoint 共用 helper）=====
         // 端点表自此只存【Eq 空间绝对点】：视口无关，LinkRenderer 每帧投影。
-        const QPointF paW = resolveSourceWorld(link, srcCollapsed, srcLineVisible, sv.Collapsed);
+        int srcBranch = 0;
+        const QPointF paW = resolveSourceWorld(link, srcCollapsed, srcLineVisible, sv.Collapsed,
+                                               &srcBranch);
         const QPointF pbW = resolveDestWorld(link, dstActualId, dstLineVisible, sv.Collapsed);
         // 屏幕值 = 世界值在重建时刻的投影。仅作诊断对照与回退（见 [EPW-DIAG]），
         // 正式渲染路径 QML 读 wx/wy/pbWx/pbWy 自行投影，不消费这些字段。
         const QPointF paS = paW.isNull() ? QPointF() : eqToScreen(paW);
         const QPointF pbS = pbW.isNull() ? QPointF() : eqToScreen(pbW);
+#ifdef INIWEAVER_DIAG
+        // [LINK-SRC] 端点来源对账：branch 说明这条连线的起点用的是哪个锚点。
+        // 分量（IIF）连线期望 branch=2（分量圆点世界缓存）；若退化到 3/4/7
+        // 说明 sessionCenterEq 没命中 —— 与 [COMP-W] 写入的 sess 对不上。
+        {
+            static thread_local int budget = 0;
+            if (budget < 80) {
+                ++budget;
+                // lastCenter = 旧架构使用的屏幕锚点（sv.LastCenter），与本次
+                // 世界坐标投影 paS 直接对比：两者应当重合；若世界投影偏离而
+                // lastCenter 正确，说明世界缓存陈旧（回写没跟上）或锚点错（topAncestor 变了）。
+                const ImVec2 lc = sv.LastCenter;
+                qDebug() << "[LINK-SRC] sess=" << static_cast<qulonglong>(link.SourceID)
+                         << "sec=" << static_cast<qulonglong>(link.SrcModuleID)
+                         << "key=" << (link.FromKey == EmptyPoolStr ? QStringLiteral("<empty>")
+                                                                    : QString::fromUtf8(PoolStr(link.FromKey)))
+                         << "mult=" << static_cast<int>(link.SrcMult)
+                         << "branch=" << srcBranch
+                         << "world=(" << paW.x() << "," << paW.y() << ")"
+                         << "screen=(" << paS.x() << "," << paS.y() << ")"
+                         << "lastCenter=(" << lc.x << "," << lc.y << ")"
+                         << "d=" << (paW.isNull() ? -1.0
+                                    : std::max(std::abs(paS.x() - static_cast<qreal>(lc.x)),
+                                               std::abs(paS.y() - static_cast<qreal>(lc.y))))
+                         << "sessHit=" << (sessionCenterEq(link.SourceID).isNull() ? 0 : 1)
+                         << "collapsed=" << srcCollapsed << "lineVis=" << srcLineVisible;
+            }
+        }
+#endif
 
         ep["wx"] = paW.x();
         ep["wy"] = paW.y();

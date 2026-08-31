@@ -728,8 +728,11 @@ private:
     //
     // 返回 QPointF() 表示无有效来源（srcData/dstData 缺失）。
     // 参数里带 Collapsed/LineVisible 是为了让调用方复用已经查好的后端对象，避免重复查表。
+    // outBranch：可选输出，记录命中的优先级分支编号（1..7），供诊断日志定位
+    // 「为什么这条连线没用上精确锚点」。不传即 nullptr。
     QPointF resolveSourceWorld(const IBR_Project::_Plink &link, bool srcCollapsed,
-                               bool srcLineVisible, bool srcSessionCollapsed) const;
+                               bool srcLineVisible, bool srcSessionCollapsed,
+                               int *outBranch = nullptr) const;
     QPointF resolveDestWorld(const IBR_Project::_Plink &link, ModuleID_t dstActualId,
                              bool dstLineVisible, bool srcSessionCollapsed) const;
 
