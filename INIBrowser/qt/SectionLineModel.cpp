@@ -551,9 +551,9 @@ QString SectionLineModel::buildInheritStr(const IBB_Section *bsec, const IBR_Sec
     return QString::fromUtf8(formatted.c_str());
 }
 
-void SectionLineModel::setLinkNodeCenter(int row, qreal x, qreal y)
+qulonglong SectionLineModel::setLinkNodeCenter(int row, qreal x, qreal y)
 {
-    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return 0;
     const auto &e = m_entries[row];
     // 回写到 IBR_NodeSession::SessionValue.LastCenter
     // 对应 ImGui PushLinkForDraw → SetSessionStatus
@@ -563,30 +563,32 @@ void SectionLineModel::setLinkNodeCenter(int row, qreal x, qreal y)
     // 通知 WorkspaceController 端点表需要重建
     // Qt 版本无每帧渲染，LastCenter 更新后需主动触发 rebuildLinkEndpoints
     emit linkNodeCenterChanged();
+    return static_cast<qulonglong>(e.sessionId);
 }
 
 // IIF 分量节点坐标回写：compIdx 定位分量，sessionId 按 compIdx 重算（与 UpdateAll 的 Comp=cidx 一致）
 // 写回后 rebuildLinkEndpoints 的 priority 2（sv.LastCenter）读到该分量圆点坐标，连线起点/终点正确。
 // 注意：IIF 分量节点不写 acceptCenterByKey（多分量同名会互相覆盖），故 priority 1 恒 miss → 走 priority 2。
-void SectionLineModel::setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal y)
+qulonglong SectionLineModel::setLinkNodeCenterAt(int row, int compIdx, qreal x, qreal y)
 {
-    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return 0;
     qulonglong sid = sessionIdFor(row, compIdx);
-    if (sid == 0) return;
+    if (sid == 0) return 0;
     IBR_NodeSession::SetSessionStatus(sid, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
     if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, sid, x, y);
     emit linkNodeCenterChanged();
+    return sid;
 }
 
-void SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMult, int compIdx, qreal x, qreal y)
+qulonglong SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMult, int compIdx, qreal x, qreal y)
 {
     // 按 keyName 稳定查 lineIdx（row 索引在 rebuildEntries 重建后可能错位，
     // sessionIdFor(row) 会取到错误 entry 算错 sessionId → 连线端点漂移）
-    if (lineMult < 0 || compIdx < 0) return;
+    if (lineMult < 0 || compIdx < 0) return 0;
     StrPoolID K = NewPoolStr(keyName.toUtf8().toStdString());
     ModuleID_t sid = static_cast<ModuleID_t>(m_sectionId);
     auto bsec = IBR_Inst_Project.GetSectionFromID(sid).GetBack_Unsafe();
-    if (!bsec) return;
+    if (!bsec) return 0;
     for (auto subIdx : bsec->SubSecOrder) {
         auto &sub = bsec->SubSecs[subIdx];
         if (!sub.CanOwnKey(K)) continue;
@@ -598,24 +600,34 @@ void SectionLineModel::setLinkNodeCenterAtKey(const QString &keyName, int lineMu
             IBR_NodeSession::SetSessionStatus(sess, ImVec2(static_cast<float>(x), static_cast<float>(y)), false);
             if (m_workspace) m_workspace->noteSessionCenterEq(m_sectionId, sess, x, y);
 #ifdef INIWEAVER_DIAG
-            // [COMP-W] 分量圆点回写：sessionId 是连线端点查询世界缓存的唯一 key。
-            // 分量连线位置不对时，先比对这里的 sess 与 [LINK-SRC] 里的 sess 是否一致。
+            // [COMP-CHECK] 决定性对账：刚把世界缓存 rel 写入，立刻反查投影 vs 实际 screen。
+            //   - d≈0 → 回写链路健康，偏移是"后续某操作没触发回写"（缓存陈旧）
+            //   - d>1 → 回写即错（screenToEq/topAncestorEqPos 基准 bug）
+            // 只打 d>1 的异常（预算 200），正常回写不刷屏。
             {
                 static thread_local int budget = 0;
-                if (budget < 80) {
-                    ++budget;
-                    qDebug() << "[COMP-W] sec=" << m_sectionId
-                             << "sess=" << static_cast<qulonglong>(sess)
-                             << "key=" << keyName << "lineIdx=" << i
-                             << "mult=" << lineMult << "comp=" << compIdx
-                             << "screen=(" << x << "," << y << ")";
+                if (budget < 200 && m_workspace) {
+                    const QPointF proj = m_workspace->projectSessionCenter(m_sectionId, sess);
+                    if (!qIsNaN(proj.x())) {
+                        const qreal d = qMax(qAbs(proj.x() - x), qAbs(proj.y() - y));
+                        if (d > 1.0) {
+                            ++budget;
+                            qDebug() << "[COMP-CHECK] MISMATCH sec=" << m_sectionId
+                                     << "sess=" << static_cast<qulonglong>(sess)
+                                     << "key=" << keyName << "comp=" << compIdx
+                                     << "written=(" << x << "," << y << ")"
+                                     << "proj=(" << proj.x() << "," << proj.y() << ")"
+                                     << "d=" << d;
+                        }
+                    }
                 }
             }
 #endif
             emit linkNodeCenterChanged();
-            return;
+            return static_cast<qulonglong>(sess);
         }
     }
+    return 0;
 }
 
 qulonglong SectionLineModel::sessionIdFor(int row, int compIdx) const

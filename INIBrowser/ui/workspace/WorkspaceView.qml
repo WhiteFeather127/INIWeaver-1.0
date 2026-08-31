@@ -31,6 +31,11 @@ Item {
     // restart/abort 的瞬停抑制：stop() 同步触发 onRunningChanged(false)，此时不应收尾
     property bool zoomSuppressFinish: false
 
+    // 诊断：[COMP-LIVE] 圆点实际位置 vs 世界缓存投影 对账的全局打印计数（限 300 条）
+    property int compLiveCount: 0
+    // 诊断：已打"从未回写"标记的分量（key = "sec:key:comp"），避免重复刷屏
+    property var compNoWriteSeen: ({})
+
     // ===== 共享视口态（模块壳与 LinkRenderer 读同一份）=====
     // 连线端点表改存世界坐标（Eq 空间绝对点）后，连线的屏幕位置由这里投影得到：
     //   screen = worldEq × viewRatio + viewBase
@@ -545,6 +550,20 @@ Item {
                         sectionDelegate.localEqX = pos.x
                         sectionDelegate.localEqY = pos.y
                         sectionDelegate.updatePosition()
+                        // 【修复】模块 EqPos 变化但 SectionNode.x 是相对壳的：壳移动时
+                        // SectionNode 自身 onXChanged 不触发 → 圆点世界缓存不回写 →
+                        // rel 锚定"回写时的 topAncestor"，读取用当前 topAncestor → 连线
+                        // 投影偏移 ΔtopAnc（拖拽/批量移动后"偏移后不动"根因）。
+                        // 旧架构靠 onInputStateChanged→updateAllCenters 兜底，三层补偿
+                        // 删除时一并移除。这里在 EqPos 变更后补一次回写 + 端点表重建。
+                        var it = nodeLoader.item
+                        if (it && it.updateAllCenters)
+                            Qt.callLater(function() {
+                                if (nodeLoader.item && nodeLoader.item.updateAllCenters) {
+                                    nodeLoader.item.updateAllCenters()
+                                    workspaceController.flushLinkEndpointsRebuild()
+                                }
+                            })
                     }
                 }
             }

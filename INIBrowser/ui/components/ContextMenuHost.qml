@@ -177,7 +177,7 @@ Popup {
     }
 
     function onHoverLeft() {
-        Qt.callLater(root.maybeCollapse)
+        Qt.callLater(function() { root.maybeCollapse() })
     }
 
     // 鼠标离开所有文件夹且不在主菜单/任一子层内 → 收起子层（主菜单保留，对齐 ImGui 悬停消失）

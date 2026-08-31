@@ -203,6 +203,10 @@ public:
     // 行圆点回写的世界坐标镜像入口（公开：SectionLineModel::setLinkNodeCenter* 调用）。
     // 屏幕↔Eq 换算复用既有的 Q_INVOKABLE screenToEq/eqToScreen（QPointF 版，EqPosToRePos 同式）
     Q_INVOKABLE void noteSessionCenterEq(qulonglong sectionId, qulonglong sessionId, qreal sx, qreal sy); // SectionLineModel 行圆点回写入口（公开）
+    // 诊断：把某 session 的行/分量圆点世界缓存投影到当前屏幕，与回写时的实际
+    // mapToItem 位置对比（[COMP-CHECK] 用），判定"回写即错"还是"回写对但后续偏移"。
+    // 返回 QPointF(NaN,NaN) 表示该 session 无世界缓存记录。
+    Q_INVOKABLE QPointF projectSessionCenter(qulonglong sectionId, qulonglong sessionId) const;
     // 节点当前 EqPos（世界坐标；SectionLineModel 写相对偏移用）
     Q_INVOKABLE QPointF sectionEqPos(qulonglong sectionId) const;
     // QML 回写级联完成后的强制端点表重建：世界缓存变更（不是视口变化）不会自动反映

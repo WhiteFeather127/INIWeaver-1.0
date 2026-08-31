@@ -2760,30 +2760,32 @@ void WorkspaceController::rebuildLinkEndpoints()
         const QPointF paS = paW.isNull() ? QPointF() : eqToScreen(paW);
         const QPointF pbS = pbW.isNull() ? QPointF() : eqToScreen(pbW);
 #ifdef INIWEAVER_DIAG
-        // [LINK-SRC] 端点来源对账：branch 说明这条连线的起点用的是哪个锚点。
-        // 分量（IIF）连线期望 branch=2（分量圆点世界缓存）；若退化到 3/4/7
-        // 说明 sessionCenterEq 没命中 —— 与 [COMP-W] 写入的 sess 对不上。
+        // [LINK-SRC] 端点来源对账：只打「真实偏移」—— 有缓存（lastCenter 非 0）但
+        // 世界投影偏离实际圆点（d>1），预算 300。忽略无缓存/未渲染模块的 branch=7 兜底，
+        // 否则预算被加载初期的兜底占满、看不到用户操作后的状态。
         {
             static thread_local int budget = 0;
-            if (budget < 80) {
+            const qreal d = (paW.isNull() || (sv.LastCenter.x == 0.0f && sv.LastCenter.y == 0.0f))
+                          ? -1.0
+                          : std::max(std::abs(paS.x() - static_cast<qreal>(sv.LastCenter.x)),
+                                     std::abs(paS.y() - static_cast<qreal>(sv.LastCenter.y)));
+            if (budget < 300 && d > 1.0) {
                 ++budget;
-                // lastCenter = 旧架构使用的屏幕锚点（sv.LastCenter），与本次
-                // 世界坐标投影 paS 直接对比：两者应当重合；若世界投影偏离而
-                // lastCenter 正确，说明世界缓存陈旧（回写没跟上）或锚点错（topAncestor 变了）。
                 const ImVec2 lc = sv.LastCenter;
+                const QPointF topAnc = topAncestorEqPos(static_cast<qulonglong>(link.SrcModuleID));
                 qDebug() << "[LINK-SRC] sess=" << static_cast<qulonglong>(link.SourceID)
                          << "sec=" << static_cast<qulonglong>(link.SrcModuleID)
                          << "key=" << (link.FromKey == EmptyPoolStr ? QStringLiteral("<empty>")
                                                                     : QString::fromUtf8(PoolStr(link.FromKey)))
                          << "mult=" << static_cast<int>(link.SrcMult)
                          << "branch=" << srcBranch
-                         << "world=(" << paW.x() << "," << paW.y() << ")"
                          << "screen=(" << paS.x() << "," << paS.y() << ")"
                          << "lastCenter=(" << lc.x << "," << lc.y << ")"
-                         << "d=" << (paW.isNull() ? -1.0
-                                    : std::max(std::abs(paS.x() - static_cast<qreal>(lc.x)),
-                                               std::abs(paS.y() - static_cast<qreal>(lc.y))))
+                         << "d=" << d
                          << "sessHit=" << (sessionCenterEq(link.SourceID).isNull() ? 0 : 1)
+                         << "topAnc=(" << topAnc.x() << "," << topAnc.y() << ")"
+                         << "ratio=" << IBR_FullView::Ratio
+                         << "eqCenter=(" << IBR_FullView::EqCenter.x << "," << IBR_FullView::EqCenter.y << ")"
                          << "collapsed=" << srcCollapsed << "lineVis=" << srcLineVisible;
             }
         }
@@ -2842,6 +2844,15 @@ void WorkspaceController::rebuildLinkEndpoints()
                 // 阈值 1.0px：足以发现单位换算错误（漏乘/多乘 ratio 是几十~几百 px 级偏差）
                 if (dPa > 1.0 || dPb > 1.0) {
                     ++g_epwDiagBudget;
+                    // 关键判断字段：
+                    //   - srcIncludedBy：源模块的 IncludedByModule，非 -1 即编组成员（重点怀疑对象）
+                    //   - topAnc：源模块顶层祖先 EqPos（世界缓存锚定）
+                    //   - ratio/eqCenter：当前视口（判断是否缩放/平移后缓存未更新）
+                    const ModuleID_t srcIncludedBy =
+                        IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData()
+                            ? IBR_Inst_Project.GetSectionFromID(link.SrcModuleID).GetSectionData()->IncludedByModule
+                            : static_cast<ModuleID_t>(-1);
+                    const QPointF topAnc = topAncestorEqPos(static_cast<qulonglong>(link.SrcModuleID));
                     qDebug() << "[EPW-DIAG] world/screen cache mismatch"
                              << "src=" << static_cast<qulonglong>(link.SrcModuleID)
                              << "sess=" << static_cast<qulonglong>(link.SourceID)
@@ -2852,7 +2863,11 @@ void WorkspaceController::rebuildLinkEndpoints()
                              << "pbProj=(" << pbS.x() << "," << pbS.y() << ")"
                              << "srcCollapsed=" << srcCollapsed << "srcLineVisible=" << srcLineVisible
                              << "svCollapsed=" << sv.Collapsed << "dstLineVisible=" << dstLineVisible
-                             << "srcCulled=" << srcCulled << "dstCulled=" << dstCulled;
+                             << "srcCulled=" << srcCulled << "dstCulled=" << dstCulled
+                             << "srcIncludedBy=" << static_cast<qulonglong>(srcIncludedBy)
+                             << "topAnc=(" << topAnc.x() << "," << topAnc.y() << ")"
+                             << "ratio=" << IBR_FullView::Ratio
+                             << "eqCenter=(" << IBR_FullView::EqCenter.x << "," << IBR_FullView::EqCenter.y << ")";
                 }
             }
         }
@@ -3218,6 +3233,16 @@ QPointF WorkspaceController::sectionAcceptPointEq(qulonglong sectionId) const
 {
     auto it = m_sectionAcceptPointEq.constFind(sectionId);
     return it != m_sectionAcceptPointEq.constEnd() ? it.value() : QPointF();
+}
+
+QPointF WorkspaceController::projectSessionCenter(qulonglong sectionId, qulonglong sessionId) const
+{
+    // 诊断用：世界缓存存的是「相对顶层祖先的偏移」，投影回当前屏幕。
+    // 若与回写时的实际 mapToItem 位置不一致，说明 rel 存错（基准 bug）
+    // 或回写后 topAncestorEqPos 变了没重新回写（缓存陈旧）。
+    const QPointF rel = sessionCenterEq(sessionId);
+    if (rel.isNull()) return QPointF(qQNaN(), qQNaN());
+    return eqToScreen(rel + topAncestorEqPos(sectionId));
 }
 
 void WorkspaceController::flushLinkEndpointsRebuild()

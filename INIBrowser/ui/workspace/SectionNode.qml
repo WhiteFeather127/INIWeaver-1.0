@@ -33,7 +33,15 @@ Item {
     readonly property bool isDragging: (sectionData.dragging || false)
         || (sectionData.sectionId === workspaceController.draggingSectionId)
         || (workspaceController.massDragging && isSelected)
-    readonly property bool isEditing: sectionData.isEditing || false
+    // 是否当前编辑节点（CurSection.ID == 本模块）。**不用 sectionData.isEditing 快照**：
+    // 快照只在 refreshSections 时更新，而 CurSection.ID 在选中/取消选中/连线（触发刷新）
+    // 时变化却不刷新快照 → isEditing 陈旧残留（描边变浅青、覆盖层被 !isEditing 挡住、
+    // 取消选中后青色描边不消失）。改为依赖 selectedRevision 动态重算 + focusedSectionId
+    // 实时读 CurSection.ID，与 isSelected 同机制。
+    readonly property bool isEditing: {
+        workspaceController.selectedRevision
+        return workspaceController.focusedSectionId === sectionData.sectionId
+    }
     readonly property bool isCollapsed: sectionData.collapsed || false
     readonly property bool isVirtualBlock: sectionData.isVirtualBlock || false
     readonly property bool isIncluded: sectionData.isIncluded || false
@@ -287,11 +295,12 @@ Item {
         z: 1
         // Ignore 节点颜色变暗（对应 IBR_WorkSpace.cpp:1677-1699 DarkMode 加 0.3 亮度）
         color: isIgnored ? "#1a1a1a" : "#2d2d2d"
-        // 边框：编辑/拖拽用青色，单选选中用蓝色，多选选中不加框（用覆盖层）
-        border.color: isEditing ? "#4fc3f7"
-                               : (isDragging ? "#4fc3f7"
-                                   : (isSelected && !isMassSelectState ? "#007acc" : "#3c3c3c"))
-        border.width: (isEditing || isDragging || (isSelected && !isMassSelectState)) ? 2 : 1
+        // 边框：单选选中用深蓝，拖拽用青色，多选不加框（用覆盖层），非选中不画描边。
+        // 不把 isEditing（编辑态）作为描边颜色来源——单选选中即编辑态，用户要求选中就是深蓝；
+        // 且非选中不残留任何描边（取消选中后无边框）。
+        border.color: isDragging ? "#4fc3f7"
+                               : (isSelected && !isMassSelectState ? "#007acc" : "transparent")
+        border.width: (isDragging || (isSelected && !isMassSelectState)) ? 2 : 0
         radius: 3
 
         // 多选覆盖层（对应 ImGui IBR_Components.cpp:994 CommitRectFilled(ForegroundCoverColor)）

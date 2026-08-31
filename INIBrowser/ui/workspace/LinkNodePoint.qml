@@ -46,6 +46,48 @@ Item {
     // IIF 分量节点布局完成门控：Flow 重排期间跳过中间坐标写回（对齐 LineRow.layoutDone），
     // onCompleted 延迟到事件循环末尾置 true 并回写一次最终坐标，之后再随 onX/onY 实时回写。
     property bool iifReady: false
+    // 最近一次回写返回的 sessionId（[COMP-LIVE] 定时对账用：无论回写是否触发，
+    // 每 200ms 对比「实际 mapToItem 位置」vs「世界缓存投影」，抓"缓存陈旧"的圆点）
+    property var _lastSess: 0
+    Timer {
+        id: compLiveTimer
+        interval: 200
+        repeat: true
+        // 去掉 _lastSess 条件：从未回写（_lastSess=0）的分量也要查，打 NO-WRITE 标记
+        running: workspaceController.diagLogEnabled() && root.iifNode && root.iifReady
+        onTriggered: root.compLiveCheck()
+    }
+    function compLiveCheck() {
+        if (!root.iifNode || !root.iifReady) return
+        if (!root._lastSess) {
+            // 从未成功回写：这是"连线位置不对"的高度嫌疑对象（缓存永远缺失）
+            var nk = String(root.sectionData.sectionId) + ":" + root.keyName + ":" + root.compIdx
+            if (!workspaceView.compNoWriteSeen[nk]) {
+                workspaceView.compNoWriteSeen[nk] = true
+                workspaceView.compLiveCount += 1
+                if (workspaceView.compLiveCount <= 500)
+                    console.log("[COMP-LIVE] NO-WRITE sec=" + (root.sectionData.sectionId || 0)
+                        + " comp=" + root.compIdx + " key=" + root.keyName
+                        + " actual=(" + root.mapToItem(workspaceView, root.width / 2, root.height / 2).x.toFixed(1) + ","
+                        + root.mapToItem(workspaceView, root.width / 2, root.height / 2).y.toFixed(1) + ")"
+                        + " ratio=" + workspaceController.ratio.toFixed(3)
+                        + " ec=(" + workspaceController.eqCenter.x.toFixed(1) + "," + workspaceController.eqCenter.y.toFixed(1) + ")")
+            }
+            return
+        }
+        var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
+        var proj = workspaceController.projectSessionCenter(root.sectionData.sectionId, root._lastSess)
+        var dd = Math.max(Math.abs(proj.x - pos.x), Math.abs(proj.y - pos.y))
+        workspaceView.compLiveCount += 1
+        if (workspaceView.compLiveCount <= 500 && dd > 1)
+            console.log("[COMP-LIVE] TIMER sec=" + (root.sectionData.sectionId || 0)
+                + " comp=" + root.compIdx + " key=" + root.keyName
+                + " actual=(" + pos.x.toFixed(1) + "," + pos.y.toFixed(1) + ")"
+                + " proj=(" + proj.x.toFixed(1) + "," + proj.y.toFixed(1) + ")"
+                + " d=" + dd.toFixed(1)
+                + " ratio=" + workspaceController.ratio.toFixed(3)
+                + " ec=(" + workspaceController.eqCenter.x.toFixed(1) + "," + workspaceController.eqCenter.y.toFixed(1) + ")")
+    }
     // 选中/链接态诊断：flow 节点 isEmpty/links 变化（帮助定位"选中时值变0"）
     onIsEmptyChanged: if (root.iifNode && workspaceController.diagLogEnabled())
         console.log("[IIF-SEL] node isEmpty=" + isEmpty + " links=" + links.length + " comp=" + compIdx)
@@ -364,6 +406,11 @@ Item {
         if (_perf) workspaceController.perfBegin("QML.LinkNodePoint.pushCompCenter")
         if (!root.iifNode || !root.iifReady) { if (_perf) workspaceController.perfEnd(); return }
         if (!root.lineModel || root.compIdx < 0) { if (_perf) workspaceController.perfEnd(); return }
+        // 【修复】隐藏实例不回写。同一链接分量在"混合类型键"（链接+其他类型分量同键）
+        // 下会存在可见与隐藏两个 LinkNodePoint 实例；隐藏实例（重排残留/条件副本）的
+        // mapToItem 位置是无效的隐藏位置，若也回写会覆盖可见实例的正确世界缓存
+        // → 连线端点 pa 偏到隐藏位置（"第一个连线分量位置不对"根因）。
+        if (!root.visible) { if (_perf) workspaceController.perfEnd(); return }
         // 【已删除】画布平移/缩放叠加跳过门控与 force 参数（同 LineRow.doUpdateLinkNodeCenter）
         var pos = root.mapToItem(workspaceView, root.width / 2, root.height / 2)
         // 对齐 LineRow.doUpdateLinkNodeCenter：仅拖拽中减去 dragOffset（存储原位置，
@@ -376,7 +423,35 @@ Item {
         var dy = isDragging ? workspaceController.dragOffset.y : 0
         // 按 keyName 稳定定位：rowIndex 在 rebuildEntries 重建后可能错位，
         // setLinkNodeCenterAt(row) 会算错 sessionId → 连线端点漂移
-        root.lineModel.setLinkNodeCenterAtKey(root.keyName, root.lineMult, root.compIdx, pos.x - dx, pos.y - dy)
+        var sess = root.lineModel.setLinkNodeCenterAtKey(root.keyName, root.lineMult, root.compIdx, pos.x - dx, pos.y - dy)
+        if (sess) root._lastSess = sess
+        if (_perf) {
+            // [COMP-POS] 每次回写记录圆点实际 mapToItem 位置（不限 d），限量。
+            // 排查"混合类型分量"位置：若 pos 恒定/随 ratio 不变/宽高为 0 → 布局问题。
+            workspaceView.compLiveCount += 1
+            if (workspaceView.compLiveCount <= 200)
+                console.log("[COMP-POS] sec=" + (root.sectionData.sectionId || 0)
+                    + " comp=" + root.compIdx + " key=" + root.keyName
+                    + " sess=" + sess
+                    + " pos=(" + (pos.x - dx).toFixed(1) + "," + (pos.y - dy).toFixed(1) + ")"
+                    + " w=" + root.width.toFixed(1) + " h=" + root.height.toFixed(1)
+                    + " vis=" + root.visible
+                    + " ratio=" + workspaceController.ratio.toFixed(3))
+            // [COMP-LIVE] 实时对账：圆点「实际 mapToItem 位置」vs「世界缓存投影」。
+            if (sess) {
+                var proj = workspaceController.projectSessionCenter(root.sectionData.sectionId, sess)
+                var dd = Math.max(Math.abs(proj.x - (pos.x - dx)), Math.abs(proj.y - (pos.y - dy)))
+                workspaceView.compLiveCount += 1
+                if (workspaceView.compLiveCount <= 300 && dd > 1)
+                    console.log("[COMP-LIVE] sec=" + (root.sectionData.sectionId || 0)
+                        + " comp=" + root.compIdx + " key=" + root.keyName
+                        + " actual=(" + (pos.x - dx).toFixed(1) + "," + (pos.y - dy).toFixed(1) + ")"
+                        + " proj=(" + proj.x.toFixed(1) + "," + proj.y.toFixed(1) + ")"
+                        + " d=" + dd.toFixed(1)
+                        + " ratio=" + workspaceController.ratio.toFixed(3)
+                        + " ec=(" + workspaceController.eqCenter.x.toFixed(1) + "," + workspaceController.eqCenter.y.toFixed(1) + ")")
+            }
+        }
         if (_perf) workspaceController.perfEnd()
     }
 

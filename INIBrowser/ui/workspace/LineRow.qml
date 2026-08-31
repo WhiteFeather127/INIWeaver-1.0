@@ -53,6 +53,31 @@ Item {
     // 是否为 accept 目标键（InputType 带 AcceptType）：行左侧画方形接收点，可被作为具体键拖线连入
     property bool isAcceptor: false
     property color acceptorColor: "#ffffb4"
+    // 最近一次回写返回的 sessionId（[COMP-LIVE] 定时对账用，行级圆点）
+    property var _lastSess: 0
+    Timer {
+        id: rowLiveTimer
+        interval: 200
+        repeat: true
+        running: workspaceController.diagLogEnabled() && root.layoutDone && root._lastSess
+        onTriggered: root.rowLiveCheck()
+    }
+    function rowLiveCheck() {
+        if (!root._lastSess) return
+        var node = linkNode.visible ? linkNode : disabledNode
+        var pos = node.mapToItem(workspaceView, node.width / 2, node.height / 2)
+        var proj = workspaceController.projectSessionCenter(root.sectionData.sectionId, root._lastSess)
+        var dd = Math.max(Math.abs(proj.x - pos.x), Math.abs(proj.y - pos.y))
+        workspaceView.compLiveCount += 1
+        if (workspaceView.compLiveCount <= 500 && dd > 1)
+            console.log("[COMP-LIVE] TIMER ROW sec=" + (root.sectionData.sectionId || 0)
+                + " key=" + root.keyName + " mult=" + root.lineMult
+                + " actual=(" + pos.x.toFixed(1) + "," + pos.y.toFixed(1) + ")"
+                + " proj=(" + proj.x.toFixed(1) + "," + proj.y.toFixed(1) + ")"
+                + " d=" + dd.toFixed(1)
+                + " ratio=" + workspaceController.ratio.toFixed(3)
+                + " ec=(" + workspaceController.eqCenter.x.toFixed(1) + "," + workspaceController.eqCenter.y.toFixed(1) + ")")
+    }
     // IIF 多分量单行自然宽度（供 SectionNode 扩展模块宽度以容纳 IIF，0=非 IIF）
     property real iifNaturalWidth: 0
     // IIF 分量列表刷新计数：写回共享 ValueID 后递增，强制 Repeater 重读 iifComponents，
@@ -1194,7 +1219,7 @@ Item {
                                         function ensureTop() {
                                             var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                             if (it) comboList.contentY = it.y
-                                            else Qt.callLater(comboList.ensureTop)
+                                            else Qt.callLater(function() { comboList.ensureTop() })
                                         }
                                         onContentHeightChanged: comboList.ensureTop()
                                         delegate: Rectangle {
@@ -1713,7 +1738,22 @@ Item {
         var dx = root.isDragging ? workspaceController.dragOffset.x : 0
         var dy = root.isDragging ? workspaceController.dragOffset.y : 0
         if (workspaceController.diagLogEnabled()) console.log("[LINK-DIAG] LineRow doUpdate sid=" + (root.sectionData.sectionId || 0) + " row=" + root.rowIndex + " key=" + root.keyName + " cx=" + (cx-dx) + " cy=" + (cy-dy) + " isDragging=" + root.isDragging)
-        root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
+        var sess = root.lineModel.setLinkNodeCenter(root.rowIndex, cx - dx, cy - dy)
+        if (sess) root._lastSess = sess
+        // [COMP-LIVE] 行级圆点实时对账（语义同 LinkNodePoint.pushCompCenter）
+        if (workspaceController.diagLogEnabled() && sess) {
+            var proj = workspaceController.projectSessionCenter(root.sectionData.sectionId, sess)
+            var dd = Math.max(Math.abs(proj.x - (cx - dx)), Math.abs(proj.y - (cy - dy)))
+            workspaceView.compLiveCount += 1
+            if (workspaceView.compLiveCount <= 300 && dd > 1)
+                console.log("[COMP-LIVE] ROW sec=" + (root.sectionData.sectionId || 0)
+                    + " key=" + root.keyName + " mult=" + root.lineMult
+                    + " actual=(" + (cx - dx).toFixed(1) + "," + (cy - dy).toFixed(1) + ")"
+                    + " proj=(" + proj.x.toFixed(1) + "," + proj.y.toFixed(1) + ")"
+                    + " d=" + dd.toFixed(1)
+                    + " ratio=" + workspaceController.ratio.toFixed(3)
+                    + " ec=(" + workspaceController.eqCenter.x.toFixed(1) + "," + workspaceController.eqCenter.y.toFixed(1) + ")")
+        }
         // 阶段 3：同一 RadioButton 位置也作为行级接受点回写（对应 ImGui AcceptCenter）
         // 该坐标作为连线终点 pb 的行精确值
         // 按 keyName+mult 直接回写：rowIndex 在 m_entries 重建后可能错位，

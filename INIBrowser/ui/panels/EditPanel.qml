@@ -1026,7 +1026,7 @@ Item {
                                                                     function ensureTop() {
                                                                         var it = comboList.itemAtIndex(comboCtrl.currentIndex)
                                                                         if (it) comboList.contentY = it.y
-                                                                        else Qt.callLater(comboList.ensureTop)
+                                                                        else Qt.callLater(function() { comboList.ensureTop() })
                                                                     }
                                                                     onContentHeightChanged: comboList.ensureTop()
                                                                     delegate: Rectangle {
